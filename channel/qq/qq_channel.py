@@ -66,6 +66,15 @@ HEARTBEAT_ACK_TIMEOUT_FACTOR = 3
 
 @singleton
 class QQChannel(ChatChannel):
+    # `Channel` defaults to refusing voice *and* images, and every channel that
+    # can do better overrides that: the ones that send images use `[]`, and the
+    # ones that still cannot send voice narrow it to `[VOICE]`. This one never
+    # overrode it, so `ChatChannel._decorate_reply` rewrote every IMAGE reply
+    # into "不支持发送的消息类型: ReplyType.IMAGE" before `send` saw it -- while
+    # this class ships `_send_image` (URL and local file) and `_send_media`.
+    # IMAGE_URL is a separate member, so URL images were delivered and locally
+    # produced ones were refused. Only voice has no sender here.
+    NOT_SUPPORT_REPLYTYPE = [ReplyType.VOICE]
 
     def __init__(self):
         super().__init__()
