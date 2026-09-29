@@ -86,6 +86,18 @@ class OpenaiVoice(Voice):
                 'voice': conf().get("tts_voice_id") or "alloy"
             }
             response = requests.post(url, headers=headers, json=data, timeout=REQUEST_TIMEOUT)
+            if response.status_code != 200:
+                # Without this the JSON error envelope OpenAI returns on a
+                # 401/429/5xx was written verbatim into a file named *.mp3 and
+                # returned as a successful VOICE reply -- a voice bubble that
+                # silently refuses to play. voiceToText above, and the custom,
+                # mimo and linkai backends, all check the status first.
+                logger.error(
+                    f"[OPENAI] text_to_Voice failed: status={response.status_code}, "
+                    f"resp={response.text[:200]}"
+                )
+                reply = Reply(ReplyType.ERROR, "遇到了一点小问题，请稍后再问我吧")
+                return reply
             file_name = TmpDir().path() + datetime.datetime.now().strftime('%Y%m%d%H%M%S') + str(random.randint(0, 1000)) + ".mp3"
             logger.debug(f"[OPENAI] text_to_Voice file_name={file_name}, input={text}")
             with open(file_name, 'wb') as f:
