@@ -180,7 +180,16 @@ _GIT_READ_SUBCOMMANDS = frozenset({
 _GIT_WRITE_FLAGS = frozenset({
     "-d", "-D", "--delete", "-m", "-M", "--move", "-f", "--force", "--set-upstream",
     "--set-upstream-to", "--unset", "--unset-all", "--add", "--replace-all",
-    "--edit", "-e", "--prune", "--rename", "--create", "-c", "-C", "--amend",
+    "--edit", "-e", "--prune", "--rename", "--create", "--amend",
+})
+
+# `-c` / `-C` / `--copy` copy a branch under `git branch`, but only select
+# rename detection or a config value elsewhere, so they are checked per sub-command.
+_GIT_BRANCH_WRITE_FLAGS = frozenset({"-c", "-C", "--copy"})
+
+# git's own options that come before the sub-command and take a value.
+_GIT_GLOBAL_VALUE_OPTIONS = frozenset({
+    "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env",
 })
 
 # git sub-commands that only read in their "list" form.
@@ -539,7 +548,16 @@ def _check_bash_read_only(args: Dict[str, Any]) -> Decision:
     return ALLOW
 
 
+def _skip_git_global_options(args: Sequence[str]) -> Sequence[str]:
+    """Drop git's leading global options (`-C dir`, `-c k=v`, `--no-pager`, ...)."""
+    i = 0
+    while i < len(args) and args[i].startswith("-"):
+        i += 2 if args[i] in _GIT_GLOBAL_VALUE_OPTIONS else 1
+    return args[i:]
+
+
 def _check_git_read_only(args: Sequence[str]) -> Decision:
+    args = _skip_git_global_options(args)
     positional = [a for a in args if not a.startswith("-") and not _is_operator(a)]
     sub = positional[0].lower() if positional else ""
     if not sub:
@@ -555,7 +573,8 @@ def _check_git_read_only(args: Sequence[str]) -> Decision:
         if not any(a in _GIT_CONFIG_READ_FLAGS for a in args):
             return _deny("'git config' without --get/--list can write config.", READ_ONLY)
         return ALLOW
-    offending = [a for a in args if a in _GIT_WRITE_FLAGS]
+    write_flags = _GIT_WRITE_FLAGS | _GIT_BRANCH_WRITE_FLAGS if sub == "branch" else _GIT_WRITE_FLAGS
+    offending = [a for a in args if a in write_flags]
     if offending:
         return _deny(f"'git {sub} {offending[0]}' modifies the repository.", READ_ONLY)
     return ALLOW
