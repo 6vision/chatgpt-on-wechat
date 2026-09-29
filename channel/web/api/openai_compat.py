@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hmac
 import json
 import queue
 import threading
@@ -11,6 +10,7 @@ import uuid
 from typing import Callable, Iterator
 
 from common.log import logger
+from common.utils import constant_time_equals
 from config import conf
 
 
@@ -43,7 +43,7 @@ def _authenticate(authorization: str, external_api_token: str) -> None:
         not separator
         or scheme.lower() != "bearer"
         or not credential
-        or not hmac.compare_digest(credential.strip(), token)
+        or not constant_time_equals(credential.strip(), token)
     ):
         raise OpenAIAPIError(
             401, "Invalid authentication credentials.", "invalid_api_key"
