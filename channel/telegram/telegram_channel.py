@@ -447,6 +447,12 @@ class TelegramChannel(ChatChannel):
             # separator ("sub/dir/x.pdf") and stop being one path component;
             # reduce it first, like slack, discord and weixin do.
             original_name = safe_filename(original_name)
+            # The suffix is cut out of the same sender-controlled string, so it
+            # can hold a separator too and it reaches os.path.join below as a
+            # bare name. Run the extension body through the same reducer, and
+            # keep the dot only when something survives it.
+            ext = safe_filename((suffix or "").lstrip("."))
+            suffix = f".{ext}" if ext else ""
             base = original_name or f"{file_id}{suffix or ''}"
             # Prefix with file_id to avoid name collisions / weird chars
             safe_name = f"{file_id}_{base}" if original_name else base
