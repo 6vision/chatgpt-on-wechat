@@ -7,6 +7,11 @@ carry them (``{}``, or one key of the two) raised ``KeyError`` in ``__init__``.
 disabling it and **persisting** ``enabled=false``, so the plugin then stayed off
 across restarts, even after the user put the file right again.
 
+The same outcome came from the other direction: ``load_config`` reading
+``plugin_config_path`` outside the ``if not plugin_conf`` block that assigns it,
+which took down every plugin that already had an entry in
+``plugins/config.json`` (see the last test).
+
 The tests point each plugin at a config under ``tmp_path`` rather than the one
 in the repo: ``__file__`` is what the plugin uses for its own directory, and
 ``Plugin.path`` is what ``load_config`` uses, so both are redirected.
@@ -107,6 +112,28 @@ def test_banwords_still_writes_the_default_when_the_file_is_missing(tmp_path, mo
 
     assert plugin.action == "ignore"
     assert json.loads(config_path.read_text(encoding="utf-8")) == {"action": "ignore"}
+
+
+def test_a_plugin_with_a_global_entry_starts_without_reading_its_own_dir(tmp_path, monkeypatch):
+    """A plugin already configured in ``plugins/config.json`` must still start.
+
+    ``plugin_config_path`` is only assigned inside ``if not plugin_conf``, so the
+    ``os.path.exists(plugin_config_path)`` check has to stay nested in that
+    block. Pulled out of it, the check runs on a name that was never assigned
+    whenever ``pconf()`` already returned a config -- the common case, since
+    every plugin that has ever been configured has an entry -- and
+    ``load_config`` raises ``UnboundLocalError``. ``activate_plugins`` answers
+    that by disabling the plugin.
+    """
+    module, banwords = _load("plugins.banwords.banwords", "./plugins/banwords", "BANWORDS")
+    config_path = _point_at(monkeypatch, module, banwords, tmp_path)
+    monkeypatch.setattr("plugins.plugin.pconf", lambda name: {"action": "replace"})
+
+    plugin = banwords()  # must not raise
+
+    assert plugin.action == "replace"
+    # The global entry wins: the plugin's own directory is never consulted.
+    assert not config_path.exists()
 
 
 def _reject_writes(monkeypatch):

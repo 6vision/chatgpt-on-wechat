@@ -183,7 +183,7 @@ def mcp_config_path(workspace: Optional[str] = None) -> str:
 
 def _read_mcp_file(path: str):
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, "r", encoding="utf-8-sig") as handle:
             data = json.load(handle)
     except json.JSONDecodeError as exc:
         raise McpConfigError(f"mcp.json is not valid JSON: {exc}") from exc
