@@ -1015,26 +1015,63 @@ class WecomBotChannel(ChatChannel):
         # Determine req_id for responding or use send_msg for scheduled push
         req_id = getattr(msg, "req_id", None) if msg else None
 
-        if reply.type == ReplyType.TEXT:
-            self._send_text(reply.content, receiver, is_group, req_id)
-        elif reply.type in (ReplyType.IMAGE_URL, ReplyType.IMAGE):
-            self._send_image(reply.content, receiver, is_group, req_id)
-        elif reply.type == ReplyType.FILE:
-            if hasattr(reply, "text_content") and reply.text_content:
-                self._send_text(reply.text_content, receiver, is_group, req_id)
-                time.sleep(0.3)
-            self._send_file(reply.content, receiver, is_group, req_id)
-        elif reply.type == ReplyType.VIDEO or reply.type == ReplyType.VIDEO_URL:
-            self._send_file(reply.content, receiver, is_group, req_id, media_type="video")
-        elif reply.type == ReplyType.VOICE:
-            self._send_voice(reply.content, receiver, is_group, req_id)
-        else:
-            logger.warning(f"[WecomBot] Unsupported reply type: {reply.type}, falling back to text")
-            self._send_text(str(reply.content), receiver, is_group, req_id)
+        try:
+            if reply.type == ReplyType.TEXT:
+                self._send_text(reply.content, receiver, is_group, req_id)
+            elif reply.type in (ReplyType.IMAGE_URL, ReplyType.IMAGE):
+                self._send_image(reply.content, receiver, is_group, req_id)
+            elif reply.type == ReplyType.FILE:
+                if hasattr(reply, "text_content") and reply.text_content:
+                    self._send_text(reply.text_content, receiver, is_group, req_id)
+                    time.sleep(0.3)
+                self._send_file(reply.content, receiver, is_group, req_id)
+            elif reply.type == ReplyType.VIDEO or reply.type == ReplyType.VIDEO_URL:
+                self._send_file(reply.content, receiver, is_group, req_id, media_type="video")
+            elif reply.type == ReplyType.VOICE:
+                self._send_voice(reply.content, receiver, is_group, req_id)
+            else:
+                logger.warning(f"[WecomBot] Unsupported reply type: {reply.type}, falling back to text")
+                self._send_text(str(reply.content), receiver, is_group, req_id)
+        finally:
+            # A media reply never reaches the _send_text teardown, so close the
+            # stream here as well: no state may outlive the turn, and the client
+            # spinner only resolves once a finish packet arrives.
+            self._close_stream(req_id)
 
     # ------------------------------------------------------------------
     # Respond message (via websocket)
     # ------------------------------------------------------------------
+
+    def _finish_stream(self, req_id: str, stream_id: str, content: str):
+        """Send the finish packet that closes an open reply stream."""
+        # Brief pause so the server finishes processing the last intermediate chunk
+        # before receiving the finish packet
+        time.sleep(0.15)
+
+        self._ws_send({
+            "cmd": "aibot_respond_msg",
+            "headers": {"req_id": req_id},
+            "body": {
+                "msgtype": "stream",
+                "stream": {
+                    "id": stream_id,
+                    "finish": True,
+                    "content": content,
+                },
+            },
+        })
+
+    def _close_stream(self, req_id: str = None):
+        """Free the stream state of a finished turn and close its stream.
+
+        A no-op when the text path already closed it, or when nothing was ever
+        streamed for this request.
+        """
+        if not req_id:
+            return
+        state = self._stream_states.pop(req_id, None)
+        if state:
+            self._finish_stream(req_id, state["stream_id"], state["committed"])
 
     def _send_text(self, content: str, receiver: str, is_group: bool, req_id: str = None):
         """Send text/markdown reply. Reuses stream state if available (streaming mode)."""
@@ -1047,22 +1084,7 @@ class WecomBotChannel(ChatChannel):
                 final_content = content
                 stream_id = uuid.uuid4().hex[:16]
 
-            # Brief pause so the server finishes processing the last intermediate chunk
-            # before receiving the finish packet
-            time.sleep(0.15)
-
-            self._ws_send({
-                "cmd": "aibot_respond_msg",
-                "headers": {"req_id": req_id},
-                "body": {
-                    "msgtype": "stream",
-                    "stream": {
-                        "id": stream_id,
-                        "finish": True,
-                        "content": final_content,
-                    },
-                },
-            })
+            self._finish_stream(req_id, stream_id, final_content)
         else:
             self._active_send_markdown(content, receiver, is_group)
 
