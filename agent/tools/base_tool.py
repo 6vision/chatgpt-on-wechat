@@ -1,7 +1,6 @@
 from enum import Enum
 from typing import Any, Optional
 from common.log import logger
-import copy
 
 
 class ToolStage(Enum):
@@ -161,10 +160,18 @@ class BaseTool:
         }
 
     def execute_tool(self, params: dict) -> ToolResult:
+        """Run the tool, turning an escaping exception into a failed result.
+
+        A tool that raises must not take the whole agent turn with it: the
+        caller reads `.status` off the return value, so returning None here
+        replaced the real error with an AttributeError on None and the model
+        was told "'NoneType' object has no attribute 'status'".
+        """
         try:
             return self.execute(params)
         except Exception as e:
-            logger.error(e)
+            logger.error(f"[{self.name}] execution failed: {e}", exc_info=True)
+            return ToolResult.fail(f"Error: {type(e).__name__}: {e}")
 
     def execute(self, params: dict) -> ToolResult:
         """Specific logic to be implemented by subclasses"""
