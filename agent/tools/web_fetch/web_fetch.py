@@ -302,20 +302,14 @@ class WebFetch(BaseTool):
                 "openpyxl library is required for .xlsx parsing. Install with: pip install openpyxl"
             )
 
-        wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+        from common.spreadsheet_text import spreadsheet_sheets
         result_parts = []
+        with spreadsheet_sheets(file_path, openpyxl.load_workbook) as sheets:
+            for name, sheet_rows in sheets:
+                rows = [" | ".join(cells) for cells in sheet_rows if any(cells)]
+                if rows:
+                    result_parts.append(f"--- Sheet: {name} ---\n" + "\n".join(rows))
 
-        for sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-            rows = []
-            for row in ws.iter_rows(values_only=True):
-                cells = [str(c) if c is not None else "" for c in row]
-                if any(cells):
-                    rows.append(" | ".join(cells))
-            if rows:
-                result_parts.append(f"--- Sheet: {sheet_name} ---\n" + "\n".join(rows))
-
-        wb.close()
         return "\n\n".join(result_parts)
 
     def _parse_ppt(self, file_path: str) -> str:
