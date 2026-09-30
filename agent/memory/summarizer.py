@@ -215,6 +215,8 @@ class MemoryFlushManager:
         
         self.last_flush_timestamp: Optional[datetime] = None
         self._trim_flushed_hashes: set = set()  # Content hashes of already-flushed messages
+        self._trim_inflight_hashes: set = set()  # Content hashes dispatched but not yet settled
+        self._flush_hashes_lock = threading.Lock()  # Guards both hash sets
         self._last_flushed_content_hash: str = ""  # Content hash at last flush, for daily dedup
         self._last_dream_input_hash: str = ""  # "{date}:{daily_hash}" of last dream, for dedup
         self._last_flush_thread: Optional[threading.Thread] = None
@@ -269,12 +271,18 @@ class MemoryFlushManager:
         Deduplication runs synchronously, then LLM summarization + file write
         run in a background thread so the main reply flow is never blocked.
 
+        Messages are only recorded as flushed once their summary has actually
+        landed, so a flush that fails leaves them eligible for a later attempt.
+        While a flush is in flight its content hashes are claimed, which keeps a
+        second flush of the same messages from summarising them twice.
+
         If *context_summary_callback* is provided, it is called with the
         [DAILY] portion of the LLM summary once available. The caller can use
         this to inject the summary into the live message list for context
         continuity — one LLM call serves both disk persistence and in-context
         injection.
         """
+        claimed: list = []
         try:
             # Strip scheduler-injected pairs before any further processing.
             # These messages already serve as short-term context inside the
@@ -287,13 +295,18 @@ class MemoryFlushManager:
 
             import hashlib
             deduped = []
-            for m in messages:
-                text = self._extract_text_from_content(m.get("content", ""))
-                if not text or not text.strip():
-                    continue
-                h = hashlib.md5(text.encode("utf-8")).hexdigest()
-                if h not in self._trim_flushed_hashes:
-                    self._trim_flushed_hashes.add(h)
+            with self._flush_hashes_lock:
+                for m in messages:
+                    text = self._extract_text_from_content(m.get("content", ""))
+                    if not text or not text.strip():
+                        continue
+                    h = hashlib.md5(text.encode("utf-8")).hexdigest()
+                    if h in self._trim_flushed_hashes or h in self._trim_inflight_hashes:
+                        continue
+                    # Claimed, not committed: the worker settles this hash once
+                    # it knows whether the summary was written.
+                    self._trim_inflight_hashes.add(h)
+                    claimed.append(h)
                     deduped.append(m)
             if not deduped:
                 return False
@@ -305,7 +318,7 @@ class MemoryFlushManager:
             thread = threading.Thread(
                 target=lambda: _ctx.run(
                     self._flush_worker,
-                    snapshot, user_id, reason, max_messages, context_summary_callback,
+                    snapshot, user_id, reason, max_messages, context_summary_callback, claimed,
                 ),
                 daemon=True,
             )
@@ -316,7 +329,24 @@ class MemoryFlushManager:
 
         except Exception as e:
             logger.warning(f"[MemoryFlush] Failed to dispatch flush (reason={reason}): {e}")
+            self._settle_flush_hashes(claimed, committed=False)
             return False
+
+    def _settle_flush_hashes(self, hashes: List[str], committed: bool):
+        """Commit the hashes of a finished flush, or release them for a retry.
+
+        A hash is only ever recorded as flushed once its summary reached the
+        daily file, or once the model answered that there was nothing worth
+        recording. A failed flush gives its hashes back instead, because the
+        caller has already dropped those messages from the working context and
+        no later run would otherwise be able to persist them.
+        """
+        if not hashes:
+            return
+        with self._flush_hashes_lock:
+            self._trim_inflight_hashes.difference_update(hashes)
+            if committed:
+                self._trim_flushed_hashes.update(hashes)
 
     def _flush_worker(
         self,
@@ -325,21 +355,36 @@ class MemoryFlushManager:
         reason: str,
         max_messages: int,
         context_summary_callback: Optional[Callable[[str], None]] = None,
+        claimed_hashes: Optional[List[str]] = None,
     ):
         """Background worker: summarize with LLM, write daily memory file."""
+        claimed_hashes = claimed_hashes or []
         try:
             raw_summary = self._summarize_messages(messages, max_messages)
+            if raw_summary is None:
+                # The LLM call failed and the fallback had nothing either, so
+                # this window is still unwritten and must stay retryable.
+                logger.warning(f"[MemoryFlush] Summary unavailable, flush kept retryable (reason={reason})")
+                self._settle_flush_hashes(claimed_hashes, committed=False)
+                return
             if _is_empty_sentinel(raw_summary):
                 logger.info(f"[MemoryFlush] No valuable content to flush (reason={reason})")
+                self._settle_flush_hashes(claimed_hashes, committed=True)
                 return
 
             # Strip legacy [DAILY]/[MEMORY] markers if model still outputs them
             daily_part = self._clean_summary_output(raw_summary)
             if not daily_part:
+                self._settle_flush_hashes(claimed_hashes, committed=True)
                 return
 
             # --- Write daily memory ---
-            self.write_daily_summary(daily_part, user_id=user_id, reason=reason)
+            if not self.write_daily_summary(daily_part, user_id=user_id, reason=reason):
+                self._settle_flush_hashes(claimed_hashes, committed=False)
+                return
+
+            # The write landed, so this content must never be summarised twice.
+            self._settle_flush_hashes(claimed_hashes, committed=True)
 
             # --- Inject context summary into live messages (if callback provided) ---
             if context_summary_callback:
@@ -352,6 +397,7 @@ class MemoryFlushManager:
 
         except Exception as e:
             logger.warning(f"[MemoryFlush] Async flush failed (reason={reason}): {e}")
+            self._settle_flush_hashes(claimed_hashes, committed=False)
 
     def write_daily_summary(
         self,
@@ -651,10 +697,13 @@ class MemoryFlushManager:
 
     # ---- Internal helpers ----
     
-    def _summarize_messages(self, messages: List[Dict], max_messages: int = 0) -> str:
+    def _summarize_messages(self, messages: List[Dict], max_messages: int = 0) -> Optional[str]:
         """
         Summarize conversation messages using LLM.
-        Returns empty string if LLM deems content not worth recording.
+        Returns empty string if LLM deems content not worth recording, and
+        ``None`` if the LLM call failed and the fallback had nothing to say
+        either -- that outcome is not an answer, so the caller must keep the
+        messages eligible for a retry.
         Rule-based fallback only used when LLM call raises an exception.
         """
         conversation_text = self._format_conversation_for_summary(messages, max_messages)
@@ -670,7 +719,7 @@ class MemoryFlushManager:
                 return ""
             except Exception as e:
                 logger.warning(f"[MemoryFlush] LLM summarization failed, using fallback: {e}")
-                return self._extract_summary_fallback(messages, max_messages)
+                return self._extract_summary_fallback(messages, max_messages) or None
         else:
             logger.info("[MemoryFlush] No LLM model available, using rule-based fallback")
             return self._extract_summary_fallback(messages, max_messages)
