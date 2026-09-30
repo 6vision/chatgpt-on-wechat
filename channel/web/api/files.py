@@ -168,7 +168,12 @@ class UploadsHandler:
             params = web.input(agent_id='')
             upload_dir = _get_upload_dir(_request_agent_id(params))
             full_path = os.path.normpath(os.path.join(upload_dir, file_name))
-            if not os.path.abspath(full_path).startswith(os.path.abspath(upload_dir)):
+            # Confine to upload_dir itself. Comparing with startswith() had no
+            # separator terminator, so a sibling whose name merely began with
+            # the same characters -- <workspace>/tmp_secrets next to
+            # <workspace>/tmp -- passed and was served verbatim.
+            upload_root = os.path.abspath(upload_dir)
+            if os.path.commonpath([os.path.abspath(full_path), upload_root]) != upload_root:
                 raise web.notfound()
             if not os.path.isfile(full_path):
                 raise web.notfound()
