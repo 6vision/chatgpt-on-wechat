@@ -11,6 +11,7 @@ import queue
 import shutil
 import subprocess
 import threading
+import time
 import urllib.request
 import urllib.error
 from typing import Optional
@@ -35,6 +36,16 @@ _STDIO_ENV_PASSTHROUGH = (
 )
 # Sensitive name patterns never forwarded, even under inherit_full_env.
 _STDIO_ENV_SENSITIVE = ("_KEY", "_SECRET", "_TOKEN", "_PASSWORD", "_PASSWD", "_CREDENTIAL")
+
+# Total time budget for reading the 'endpoint' event off a new SSE stream.
+# urlopen()'s timeout only bounds a single socket read and every arriving byte
+# resets it, so a server that holds the stream warm with keepalive comments
+# (": keepalive", which servers send every few seconds) would keep the
+# discovery loop alive forever. Because the loader walks its servers serially on
+# one background thread, that stalls every server queued behind it: they stay
+# "pending" and their tools are silently missing. Kept at the 10s this call
+# already used for connecting, since the endpoint event is due immediately.
+_SSE_DISCOVERY_TIMEOUT = 10
 
 
 # Optional callback invoked after an OAuth authorization completes, so the
@@ -433,8 +444,14 @@ class McpClient:
             headers={"Accept": "text/event-stream"},
         )
         endpoint = None
+        deadline = time.monotonic() + _SSE_DISCOVERY_TIMEOUT
         with urllib.request.urlopen(req, timeout=10) as resp:
             for raw_line in resp:
+                if time.monotonic() > deadline:
+                    raise TimeoutError(
+                        f"[MCP:{self.name}] No endpoint event within "
+                        f"{_SSE_DISCOVERY_TIMEOUT}s of opening the SSE stream"
+                    )
                 line = raw_line.decode("utf-8").rstrip("\n\r")
                 if line.startswith("data:"):
                     data = line[len("data:"):].strip()
