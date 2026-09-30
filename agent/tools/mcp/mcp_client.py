@@ -163,7 +163,8 @@ class McpClient:
         """
         try:
             resp = self._send_request("tools/list", {})
-            tools = resp.get("result", {}).get("tools", [])
+            self._raise_for_rpc_error(resp)
+            tools = (resp.get("result") or {}).get("tools", [])
             return [
                 {
                     "name": t.get("name", ""),
@@ -180,12 +181,34 @@ class McpClient:
         """Call a tool and return the result as a string."""
         try:
             resp = self._send_request("tools/call", {"name": name, "arguments": arguments})
-            content = resp.get("result", {}).get("content", [])
+            self._raise_for_rpc_error(resp)
+            content = (resp.get("result") or {}).get("content", [])
             parts = [item.get("text", "") for item in content if item.get("type") == "text"]
             return "\n".join(parts)
         except Exception as e:
             logger.warning(f"[MCP:{self.name}] call_tool({name}) failed: {e}")
             return f"Error: {e}"
+
+    def _raise_for_rpc_error(self, resp: dict) -> None:
+        """Raise when a response is a JSON-RPC error rather than a result.
+
+        A JSON-RPC error carries no ``result`` key, so reading
+        ``resp["result"]["tools"]`` from one yields an empty list and the
+        failure is reported to the model as "this server has no tools" or "this
+        tool returned nothing" — the server's own message is dropped. The
+        handshake already treats ``error`` as fatal; a tools/list and a
+        tools/call are no different.
+        """
+        error = (resp or {}).get("error")
+        if not error:
+            return
+        if isinstance(error, dict):
+            message = error.get("message") or str(error)
+            code = error.get("code")
+            detail = f"[{code}] {message}" if code is not None else message
+        else:
+            detail = str(error)
+        raise RuntimeError(f"MCP server error: {detail}")
 
     def shutdown(self):
         """Close the connection / terminate the child process."""
