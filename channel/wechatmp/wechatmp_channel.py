@@ -397,13 +397,28 @@ class WechatMPChannel(ChatChannel):
                 logger.info("[wechatmp] Do send video to {}".format(receiver))
         return
 
+    def _passive_reply_key(self, session_id, context):
+        # passive_reply files the openid into `running`/`cache_dict`, but the
+        # session_id handed to the worker callbacks is the queue key built by
+        # chat_channel.produce(), which is namespaced as "<agent_id>::<openid>"
+        # for every non-default Agent. Read the openid back off the context so
+        # both sides agree on the key; the queue key never matches on its own.
+        msg = context.get("msg")
+        from_user = getattr(msg, "from_user_id", None)
+        return from_user or session_id
+
     def _success_callback(self, session_id, context, **kwargs):  # 线程异常结束时的回调函数
         logger.debug("[wechatmp] Success to generate reply, msgId={}".format(context["msg"].msg_id))
         if self.passive_reply:
-            self.running.remove(session_id)
+            self.running.discard(self._passive_reply_key(session_id, context))
 
     def _fail_callback(self, session_id, exception, context, **kwargs):  # 线程异常结束时的回调函数
         logger.exception("[wechatmp] Fail to generate reply to user, msgId={}, exception={}".format(context["msg"].msg_id, exception))
         if self.passive_reply:
-            assert session_id not in self.cache_dict
-            self.running.remove(session_id)
+            key = self._passive_reply_key(session_id, context)
+            # A failed turn can still leave segments behind. Report it, but never
+            # let the check abort the cleanup below: a leaked `running` entry
+            # locks the user into the "still thinking" reply for good.
+            if key in self.cache_dict:
+                logger.warning("[wechatmp] Undrained reply cached for {}, dropping".format(key))
+            self.running.discard(key)
