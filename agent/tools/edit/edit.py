@@ -7,6 +7,7 @@ import os
 from typing import Dict, Any
 
 from agent.tools.base_tool import BaseTool, ToolResult
+from common.atomic_write import write_text_atomic
 from common.utils import expand_path
 from agent.tools.utils.credentials import DENIED_MESSAGE, is_credential_path
 from agent.tools.utils.diff import (
@@ -192,9 +193,10 @@ class Edit(BaseTool):
             if blocking:
                 return ToolResult.fail(f"Error: {blocking}")
 
-            # Write file
-            with open(absolute_path, 'w', encoding='utf-8') as f:
-                f.write(final_content)
+            # Write through a sibling file: a target truncated at open time is
+            # the user's file gone, with only "Error editing file" to show for
+            # it if anything fails partway through.
+            write_text_atomic(absolute_path, final_content)
             note_write(absolute_path)
             
             # Generate diff
