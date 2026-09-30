@@ -202,11 +202,18 @@ class WebFetch(BaseTool):
                         )
                     f.write(chunk)
 
+        # Every failure path below must release the partial file: a Timeout or
+        # ConnectionError raised while the body is being read lands here *after*
+        # local_path has been opened for writing, so the truncated download
+        # would otherwise stay in tmp/ for a later run to pick up.
         except requests.Timeout:
-            return ToolResult.fail(f"Error: Download timed out after {DEFAULT_TIMEOUT}s")
+            self._cleanup_file(local_path)
+            return ToolResult.fail(f"Error: Download from {parsed.netloc} timed out after {DEFAULT_TIMEOUT}s")
         except requests.ConnectionError:
-            return ToolResult.fail(f"Error: Failed to connect to {parsed.netloc}")
+            self._cleanup_file(local_path)
+            return ToolResult.fail(f"Error: Download from {parsed.netloc} failed: connection error")
         except requests.HTTPError as e:
+            self._cleanup_file(local_path)
             return ToolResult.fail(f"Error: HTTP {e.response.status_code} for URL: {url}")
         except ValueError as e:
             self._cleanup_file(local_path)
