@@ -17,6 +17,7 @@ from common.log import logger
 
 _STREAM_THROTTLE_S = 0.15
 _FENCE_RE = re.compile(r"```[\w+-]*\n.*?```", re.DOTALL)
+_FENCE_OPEN_RE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 # Only real HTML element names are stripped: generics such as List<String>,
 # Map<K, V> or placeholders like <file> are ordinary text in a reply.
@@ -42,6 +43,37 @@ _TASK_ITEM_RE = re.compile(r"^(\s*[-*+])\s+\[[ xX]\]\s+", re.MULTILINE)
 _BLANK_RE = re.compile(r"\n{3,}")
 
 
+def _hold_fenced_blocks(text: str, hold) -> str:
+    """Replace each fenced block that has a closing fence line with hold(block).
+
+    A block opens on a ``` or ~~~ line with any info string (a backtick fence's
+    info string cannot contain a backtick) and closes on a line holding only a
+    run of the same character that is at least as long, so ~~~ fences, info
+    strings such as ``c#`` and a ```` fence around a ``` example are all kept
+    whole. Unclosed fences are left for _FENCE_RE.
+    """
+    lines = text.split("\n")
+    out = []
+    i = 0
+    while i < len(lines):
+        match = _FENCE_OPEN_RE.match(lines[i])
+        if match and not (match.group(1)[0] == "`" and "`" in match.group(2)):
+            fence = match.group(1)
+            for j in range(i + 1, len(lines)):
+                closing = lines[j].strip()
+                if closing and set(closing) == {fence[0]} and len(closing) >= len(fence):
+                    out.append(hold("\n".join(lines[i:j + 1])))
+                    i = j + 1
+                    break
+            else:
+                out.append(lines[i])
+                i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
+
 def sanitize_dingtalk_markdown(text: str) -> str:
     """Keep a DingTalk-safe markdown subset; degrade HTML to plain markdown.
 
@@ -61,11 +93,15 @@ def sanitize_dingtalk_markdown(text: str) -> str:
 
     fences: list[str] = []
 
-    def _hold_fence(match: re.Match) -> str:
-        fences.append(match.group(0))
+    def _hold(block: str) -> str:
+        fences.append(block)
         return f"\x00FENCE{len(fences) - 1}\x00"
 
-    protected = _FENCE_RE.sub(_hold_fence, normalised)
+    def _hold_fence(match: re.Match) -> str:
+        return _hold(match.group(0))
+
+    protected = _hold_fenced_blocks(normalised, _hold)
+    protected = _FENCE_RE.sub(_hold_fence, protected)
     protected = _INLINE_CODE_RE.sub(_hold_fence, protected)
     protected = _HTML_COMMENT_RE.sub("", protected)
     protected = _BR_RE.sub("\n", protected)
