@@ -1612,13 +1612,24 @@ class CloudClient(LinkAIClient):
     def _query_history(self, payload: dict) -> dict:
         """Query paginated conversation history using ConversationStore."""
         session_id = payload.get("session_id", "")
-        page = int(payload.get("page", 1))
-        page_size = int(payload.get("page_size", 20))
 
         if not session_id:
             return {
                 "action": "query",
                 "payload": {"status": "error", "message": "session_id required"},
+            }
+
+        # The try/except below turns every other failure into a
+        # {"status": "error"} envelope, but these two conversions sat above it,
+        # so a non-numeric "page" from the console raised straight out of the
+        # handler instead of being reported like everything else.
+        try:
+            page = int(payload.get("page", 1))
+            page_size = int(payload.get("page_size", 20))
+        except (TypeError, ValueError):
+            return {
+                "action": "query",
+                "payload": {"status": "error", "message": "page and page_size must be integers"},
             }
 
         # Web channel stores sessions with a "session_" prefix
