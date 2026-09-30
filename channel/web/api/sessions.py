@@ -1003,7 +1003,7 @@ class HistoryHandler:
                         logger.debug(f"[WebChannel] history media rewrite skipped: {e}")
                 _add_subagent_displays(msg.get("steps"))
                 _add_delegate_displays(msg.get("steps"))
-                artifacts = _artifacts_from_steps(msg.get("steps"), session_id)
+                artifacts = _artifacts_from_steps(msg.get("steps"), session_id, agent_id)
                 if artifacts:
                     msg["artifacts"] = artifacts
             return json.dumps({"status": "success", **result}, ensure_ascii=False)
