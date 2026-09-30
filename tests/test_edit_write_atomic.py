@@ -141,3 +141,34 @@ def test_a_successful_write_still_writes_and_reports_the_byte_count(tmp_path):
     assert path.read_text(encoding="utf-8") == content
     assert result.result["bytes_written"] == len(content.encode("utf-8"))
     assert [p.name for p in tmp_path.iterdir()] == ["notes.md"]
+
+
+def test_a_successful_edit_keeps_the_bom_and_the_files_own_line_endings(tmp_path):
+    # The writer changed, so pin what the edit tool puts in front of the content
+    # it hands over: the BOM travels in the same string, and a text-mode write
+    # re-applies the platform's own ending. Built from os.linesep so the bytes
+    # come out identical on Windows and on POSIX - the test is about the BOM, not
+    # about newline translation.
+    ending = os.linesep
+    path = tmp_path / "win.md"
+    path.write_bytes(b"\xef\xbb\xbf" + (ending.join(["one", "two", "three"]) + ending).encode("utf-8"))
+
+    result = Edit({"cwd": str(tmp_path)}).execute({
+        "path": "win.md", "oldText": "two", "newText": "TWO",
+    })
+
+    assert result.status == "success", result.result
+    expected = b"\xef\xbb\xbf" + (ending.join(["one", "TWO", "three"]) + ending).encode("utf-8")
+    assert path.read_bytes() == expected
+
+
+def test_a_successful_write_still_creates_a_file_that_did_not_exist(tmp_path):
+    # No target to copy permissions from and nothing to rename over, so this is
+    # the one path where the atomic write has nothing to preserve.
+    result = Write({"cwd": str(tmp_path)}).execute({
+        "path": "sub/new.md", "content": "fresh\n",
+    })
+
+    assert result.status == "success", result.result
+    assert (tmp_path / "sub" / "new.md").read_text(encoding="utf-8") == "fresh\n"
+    assert [p.name for p in (tmp_path / "sub").iterdir()] == ["new.md"]
