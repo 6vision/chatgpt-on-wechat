@@ -157,14 +157,16 @@ def next_cron_occurrence(expression: str, after: datetime, zone=None) -> datetim
 
     after_utc = after.astimezone(UTC) if after.tzinfo is not None else after
     local_after = after_utc.astimezone(zone).replace(tzinfo=None)
-    local_next = croniter(expression, local_after).get_next(datetime)
-    instant = _localize_wall_time(local_next, zone).astimezone(UTC)
-    if instant <= after_utc:
-        # During a fall-back fold, croniter can return an occurrence in
-        # the first fold that maps to an instant already past.  Retry.
-        local_next = croniter(expression, local_after + timedelta(minutes=1)).get_next(datetime)
+    occurrences = croniter(expression, local_after)
+    while True:
+        local_next = occurrences.get_next(datetime)
         instant = _localize_wall_time(local_next, zone).astimezone(UTC)
-    return instant
+        if instant > after_utc:
+            return instant
+        # First-fold occurrences may already be past while the local clock
+        # is repeating. Advance the iterator rather than restarting it: a
+        # single retry can return the same daily occurrence or another past
+        # minute, leaving the task immediately due again.
 
 
 def display_local(value: str, zone=None) -> datetime:
