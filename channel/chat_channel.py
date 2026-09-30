@@ -2,8 +2,10 @@ import os
 import re
 import threading
 import time
-from asyncio import CancelledError
-from concurrent.futures import Future, ThreadPoolExecutor
+# This CancelledError is concurrent.futures', not asyncio's: worker.exception()
+# raises the former on a Future that a /cancel cancelled, and asyncio's has been
+# a BaseException since 3.8, so an except clause naming it cannot catch it.
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 
 from bridge.context import *
 from bridge.reply import *
