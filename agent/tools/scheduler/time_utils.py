@@ -57,14 +57,7 @@ def resolve_timezone(name=None):
 def task_timezone(task: dict):
     """Return the IANA zone declared by a task, or ``None`` for legacy mode.
 
-    A stored ``schedule`` is read as ``task.get("schedule", {})``, which only
-    substitutes the empty dict when the key is *absent*. A key that is present
-    but holds null (or a string, from a hand-edited tasks file or a client that
-    wrote the wrong JSON type) leaves None in its place, and the next ``.get``
-    raised ``AttributeError: 'NoneType' object has no attribute 'get'`` — once
-    per task per tick, from every scheduler code path that reads a schedule.
-    Treat any non-mapping schedule as "no zone declared", which is the same
-    legacy-naive behaviour as a task that never had a schedule.
+    A stored schedule that is not a mapping (null, a string) declares no zone.
     """
     schedule = task.get("schedule")
     if not isinstance(schedule, dict):

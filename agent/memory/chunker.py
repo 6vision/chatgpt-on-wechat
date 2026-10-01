@@ -93,9 +93,7 @@ class TextChunker:
                 ))
                 
                 # Start new chunk with overlap
-                # Retained lines need both their own separators and one more
-                # separator before the incoming line. Drop overlap when the
-                # new line already fills the entire budget.
+                # Leave room for the incoming line and its separator.
                 overlap_budget = min(overlap_chars, max_chars - line_chars - 1)
                 overlap_lines = self._get_overlap_lines(current_chunk, overlap_budget)
                 current_chunk = overlap_lines + [line]

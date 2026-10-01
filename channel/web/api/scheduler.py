@@ -289,10 +289,6 @@ class SchedulerUpdateHandler:
             
             # Update schedule
             if "schedule" in body:
-                # The create handler requires a mapping with a type; the update
-                # handler used to take body["schedule"] verbatim, so a null or a
-                # bare string was persisted and every later read of the schedule
-                # raised AttributeError on .get().
                 schedule_patch = body["schedule"]
                 if not isinstance(schedule_patch, dict) or not schedule_patch.get("type"):
                     return json.dumps({

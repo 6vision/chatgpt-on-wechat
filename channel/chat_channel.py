@@ -2,9 +2,6 @@ import os
 import re
 import threading
 import time
-# This CancelledError is concurrent.futures', not asyncio's: worker.exception()
-# raises the former on a Future that a /cancel cancelled, and asyncio's has been
-# a BaseException since 3.8, so an except clause naming it cannot catch it.
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 
 from bridge.context import *
@@ -712,19 +709,10 @@ class ChatChannel(Channel):
         )
         return removed, active
 
-    def _cancel_futures(self, futures):
-        """Cancel queued pool futures without holding ``self.lock``.
-
-        ``Future.cancel()`` runs the done-callbacks of a *PENDING* future on the
-        calling thread, and the callback ``consume()`` registered
-        (``_thread_pool_callback``) takes ``self.lock`` itself to release the
-        session semaphore. Cancelling while holding that non-reentrant lock made
-        the cancelling thread block forever while still holding it, wedging
-        ``produce()`` and ``consume()`` for *every* session on the channel. So
-        the futures are collected under the lock and cancelled here, after it is
-        released: the callback then takes ``self.lock`` at top level, exactly as
-        it does when a worker finishes normally.
-        """
+    @staticmethod
+    def _cancel_futures(futures):
+        # Call outside self.lock: cancelling a pending future runs its done
+        # callback right here, and that callback takes self.lock.
         for future in futures:
             future.cancel()
 

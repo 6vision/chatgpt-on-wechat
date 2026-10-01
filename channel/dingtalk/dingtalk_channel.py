@@ -1149,8 +1149,7 @@ class DingTalkChanel(ChatChannel, dingtalk_stream.ChatbotHandler):
 
             logger.info(f"[DingTalk] File send result: {response.text}")
 
-            # DingTalk rejects with HTTP 200 and a non-zero errcode in the
-            # body, so the status alone reports a dropped file as sent.
+            # DingTalk reports a rejection as HTTP 200 with a non-zero errcode.
             try:
                 result = response.json()
             except Exception:

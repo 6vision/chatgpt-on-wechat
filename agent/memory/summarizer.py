@@ -303,8 +303,6 @@ class MemoryFlushManager:
                     h = hashlib.md5(text.encode("utf-8")).hexdigest()
                     if h in self._trim_flushed_hashes or h in self._trim_inflight_hashes:
                         continue
-                    # Claimed, not committed: the worker settles this hash once
-                    # it knows whether the summary was written.
                     self._trim_inflight_hashes.add(h)
                     claimed.append(h)
                     deduped.append(m)
@@ -333,14 +331,7 @@ class MemoryFlushManager:
             return False
 
     def _settle_flush_hashes(self, hashes: List[str], committed: bool):
-        """Commit the hashes of a finished flush, or release them for a retry.
-
-        A hash is only ever recorded as flushed once its summary reached the
-        daily file, or once the model answered that there was nothing worth
-        recording. A failed flush gives its hashes back instead, because the
-        caller has already dropped those messages from the working context and
-        no later run would otherwise be able to persist them.
-        """
+        """Record a finished flush's hashes, or release them so a later flush retries."""
         if not hashes:
             return
         with self._flush_hashes_lock:
@@ -362,8 +353,6 @@ class MemoryFlushManager:
         try:
             raw_summary = self._summarize_messages(messages, max_messages)
             if raw_summary is None:
-                # The LLM call failed and the fallback had nothing either, so
-                # this window is still unwritten and must stay retryable.
                 logger.warning(f"[MemoryFlush] Summary unavailable, flush kept retryable (reason={reason})")
                 self._settle_flush_hashes(claimed_hashes, committed=False)
                 return
@@ -383,7 +372,6 @@ class MemoryFlushManager:
                 self._settle_flush_hashes(claimed_hashes, committed=False)
                 return
 
-            # The write landed, so this content must never be summarised twice.
             self._settle_flush_hashes(claimed_hashes, committed=True)
 
             # --- Inject context summary into live messages (if callback provided) ---
@@ -701,9 +689,7 @@ class MemoryFlushManager:
         """
         Summarize conversation messages using LLM.
         Returns empty string if LLM deems content not worth recording, and
-        ``None`` if the LLM call failed and the fallback had nothing to say
-        either -- that outcome is not an answer, so the caller must keep the
-        messages eligible for a retry.
+        ``None`` if the LLM call failed and the fallback had nothing either.
         Rule-based fallback only used when LLM call raises an exception.
         """
         conversation_text = self._format_conversation_for_summary(messages, max_messages)
