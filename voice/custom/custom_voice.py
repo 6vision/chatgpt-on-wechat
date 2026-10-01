@@ -122,10 +122,6 @@ class CustomVoice(Voice):
                 response.close()
                 return Reply(ReplyType.ERROR, "遇到了一点小问题，请稍后再问我吧")
             file_name = TmpDir().path() + datetime.datetime.now().strftime("%Y%m%d%H%M%S") + str(random.randint(0, 1000)) + ".mp3"
-            # `api_base` is provider config, so the body is streamed and counted:
-            # an endpoint that answers with an endless or multi-gigabyte stream
-            # used to be buffered whole by `response.content` and written out
-            # before anything could object.
             try:
                 save_response(response, file_name, MAX_FILE_BYTES)
             except MediaTooLargeError:

@@ -1,11 +1,4 @@
-"""Shared size-capped media downloads.
-
-``download_to_file`` / ``download_bytes`` own the request. ``save_response`` /
-``read_response`` apply the same accounting to a response the caller already
-holds -- a POST, or a GET that went through the redirect guard -- which is what
-the TTS backends and the vision image download use. Each of those callers gets
-one case here rather than a module of its own.
-"""
+"""Shared size-capped media downloads and the callers built on them."""
 
 import json
 from types import SimpleNamespace

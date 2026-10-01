@@ -53,9 +53,6 @@ def text_to_speech_aliyun(url, text, appkey, token):
     if response.status_code == 200 and response.headers['Content-Type'] == 'audio/mpeg':
         output_file = TmpDir().path() + "reply-" + str(int(time.time())) + "-" + str(hash(text) & 0x7FFFFFFF) + ".wav"
 
-        # The endpoint comes from config, so the body is streamed and counted:
-        # an endless or multi-gigabyte response used to be buffered whole by
-        # `response.content` and written out before anything could object.
         try:
             save_response(response, output_file, MAX_FILE_BYTES)
         except MediaTooLargeError:

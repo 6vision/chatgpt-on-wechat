@@ -6,10 +6,8 @@ is cut off at ``max_bytes`` instead of being buffered into memory first.
 alone never fires on a server that keeps trickling bytes.
 Every failure raises; callers decide how to degrade.
 
-``download_to_file`` / ``download_bytes`` own the request. Callers that opened
-the response themselves -- a POST, or a GET that had to go through a redirect
-guard -- use ``save_response`` / ``read_response`` instead: the same counting
-and the same temp-file rules, applied to a response they already hold.
+``save_response`` / ``read_response`` apply the same rules to a response the
+caller already opened (a POST, or a GET behind a redirect guard).
 """
 
 import os
@@ -57,8 +55,7 @@ def save_response(response, path, max_bytes=MAX_FILE_BYTES, max_seconds=None) ->
     The body goes to a temp file next to *path* and is moved into place only
     once it arrived completely within *max_bytes*, so a failed or oversized
     download never leaves a partial file behind or clobbers an existing one.
-    The response is closed on the way out (closing it a second time is a no-op),
-    so callers do not need a ``finally`` of their own.
+    The response is closed on the way out.
     """
     temp_path = None
     deadline = _deadline(max_seconds)
@@ -84,12 +81,8 @@ def save_response(response, path, max_bytes=MAX_FILE_BYTES, max_seconds=None) ->
 
 
 def read_response(response, max_bytes=MAX_FILE_BYTES, max_seconds=None) -> bytes:
-    """Return the body of an already-open *response*, refusing anything larger.
-
-    For callers that need the bytes in memory rather than a file -- sniffing a
-    container, base64-encoding an image. Closes the response, as
-    ``save_response`` does.
-    """
+    """Return the body of an already-open *response*, refusing anything larger
+    than *max_bytes*. Closes the response."""
     deadline = _deadline(max_seconds)
     try:
         return b"".join(_read_chunks(response, max_bytes, deadline))

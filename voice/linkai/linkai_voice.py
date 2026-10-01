@@ -92,10 +92,6 @@ class LinkAIVoice(Voice):
                 res.close()
                 return Reply(ReplyType.ERROR, "抱歉，语音合成失败")
             tmp_file_name = TmpDir().path() + datetime.datetime.now().strftime('%Y%m%d%H%M%S') + str(random.randint(0, 1000)) + ".mp3"
-            # `linkai_api_base` is operator config, so the body is streamed and
-            # counted: an endpoint that answers with an endless or multi-gigabyte
-            # stream used to be buffered whole by `res.content` and written out
-            # before anything could object.
             try:
                 save_response(res, tmp_file_name, MAX_FILE_BYTES)
             except MediaTooLargeError:

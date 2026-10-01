@@ -127,12 +127,7 @@ class ZhipuAIVoice(Voice):
                 response.close()
                 return Reply(ReplyType.ERROR, "语音合成失败，请稍后再试")
 
-            # `zhipu_ai_api_base` is operator config, so the body is streamed and
-            # counted, at the same cap the ASR path above applies to a single
-            # audio file: an endpoint that answers with an endless stream used to
-            # be buffered whole by `response.content`. The container has to be
-            # sniffed from the leading bytes, so the audio is held in memory
-            # either way -- the cap is what keeps that bounded.
+            # Held in memory because the container is sniffed from the leading bytes.
             try:
                 audio_bytes = read_response(response, MAX_FILE_BYTES)
             except MediaTooLargeError:

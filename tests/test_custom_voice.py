@@ -101,7 +101,6 @@ class TestCustomVoice(unittest.TestCase):
     def test_text_to_voice_writes_audio_file(self):
         response = MagicMock()
         response.status_code = 200
-        # The body is streamed into place now, so the stub answers iter_content.
         response.iter_content.return_value = [b"mp3-bytes"]
 
         voice = CustomVoice("custom:abc12345")

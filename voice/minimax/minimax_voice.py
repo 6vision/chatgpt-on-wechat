@@ -86,11 +86,7 @@ class MinimaxVoice(Voice):
                     except Exception as e:
                         logger.warning(f"[MINIMAX] skip bad audio hex chunk: {e}")
                         continue
-                    # The audio arrives as SSE frames rather than one body, so
-                    # `save_response` / `read_response` cannot be reused here.
-                    # The cap is still the shared one: `minimax_api_base` is
-                    # operator config, and an endpoint that keeps pushing frames
-                    # used to grow this buffer without limit.
+                    # SSE frames, not one body, so the shared helpers do not apply.
                     audio_size += len(chunk)
                     if audio_size > MAX_FILE_BYTES:
                         logger.error(

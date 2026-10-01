@@ -793,11 +793,6 @@ class Vision(BaseTool):
             content_type = resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
             if not content_type.startswith("image/"):
                 content_type = "image/jpeg"
-            # The URL is model-supplied, so the body is streamed and counted: an
-            # endless or multi-gigabyte response used to be buffered whole by
-            # `resp.content` and then base64-encoded into a single data URL -- a
-            # memory sink of its own (base64 adds another third), for a request
-            # the vision API can only answer with a payload error, or bill for.
             try:
                 image = read_response(resp, MAX_IMAGE_BYTES)
             except MediaTooLargeError as error:
