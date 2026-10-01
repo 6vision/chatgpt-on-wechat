@@ -8,7 +8,6 @@ inbound names. The WeCom customer-service channel parses its name out of the
 ``Content-Disposition`` header of the media download and used it as-is.
 """
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -26,13 +25,28 @@ HOSTILE = [
 ]
 
 
+class _FakeResponse:
+    """Payload plus the streaming API ``common.media_download`` needs."""
+
+    def __init__(self, headers):
+        self.status_code = 200
+        self.headers = headers
+        self.content = b"payload"
+
+    def iter_content(self, chunk_size=8192):
+        yield self.content
+
+    def close(self):
+        pass
+
+
 class _FakeMedia:
     def __init__(self, disposition):
         self._disposition = disposition
 
     def download(self, media_id):
         headers = {} if self._disposition is None else {"Content-Disposition": self._disposition}
-        return SimpleNamespace(status_code=200, headers=headers, content=b"payload")
+        return _FakeResponse(headers)
 
 
 class _FakeClient:

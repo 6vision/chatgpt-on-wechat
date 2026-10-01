@@ -35,6 +35,7 @@ def _fake_response(content=b"payload", content_type="image/png"):
     resp.content = content
     resp.headers = {"Content-Type": content_type}
     resp.raise_for_status = lambda: None
+    resp.iter_content = lambda chunk_size=None: iter([content])
     return resp
 
 
@@ -61,6 +62,17 @@ def test_a_sent_video_is_uploaded_from_the_agent_tmp_dir(agent_workspace):
 
     assert len(uploaded) == 1, "the video must reach the upload step"
     assert str(Path(uploaded[0]).parent) == str(state_dir.tmp_dir())
+
+
+def test_an_oversized_url_body_is_refused_and_leaves_no_file(agent_workspace, monkeypatch):
+    """An endless or oversized URL body must be refused, not buffered whole."""
+    monkeypatch.setattr(wxc, "MAX_FILE_BYTES", 1024, raising=False)
+    with patch.object(wxc.requests, "get", return_value=_fake_response(content=b"x" * 2048)):
+        local_path = CHANNEL_CLS._resolve_media_path("https://files.example.com/big.png")
+
+    assert local_path == "", "an oversized download must not resolve to a path"
+    leftovers = [p.name for p in state_dir.tmp_dir().iterdir() if p.name.startswith(".download_")]
+    assert leftovers == [], f"no partial file may be left behind, found {leftovers}"
 
 
 def test_the_channel_source_keeps_no_hardcoded_tmp_path():
