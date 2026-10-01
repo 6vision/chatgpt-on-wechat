@@ -710,30 +710,48 @@ class ChatChannel(Channel):
         )
         return removed, active
 
+    def _cancel_futures(self, futures):
+        """Cancel queued pool futures without holding ``self.lock``.
+
+        ``Future.cancel()`` runs the done-callbacks of a *PENDING* future on the
+        calling thread, and the callback ``consume()`` registered
+        (``_thread_pool_callback``) takes ``self.lock`` itself to release the
+        session semaphore. Cancelling while holding that non-reentrant lock made
+        the cancelling thread block forever while still holding it, wedging
+        ``produce()`` and ``consume()`` for *every* session on the channel. So
+        the futures are collected under the lock and cancelled here, after it is
+        released: the callback then takes ``self.lock`` at top level, exactly as
+        it does when a worker finishes normally.
+        """
+        for future in futures:
+            future.cancel()
+
     # 取消session_id对应的所有任务，只能取消排队的消息和已提交线程池但未执行的任务
     def cancel_session(self, session_id, agent_id: str = None):
         queue_key = self._queue_key(session_id, agent_id)
+        pending = []
         with self.lock:
             if queue_key in self.sessions:
                 # futures[queue_key] is only created in consume() when a task is
                 # dispatched, so it may be absent if cancel happens right after
                 # produce() but before the first dispatch. Default to [].
-                for future in self.futures.get(queue_key, []):
-                    future.cancel()
+                pending = list(self.futures.get(queue_key, []))
                 cnt = self.sessions[queue_key][0].qsize()
                 if cnt > 0:
                     logger.info("Cancel {} messages in session {}".format(cnt, session_id))
                 self.sessions[queue_key][0] = Dequeue()
+        self._cancel_futures(pending)
 
     def cancel_all_session(self):
+        pending = []
         with self.lock:
             for session_id in self.sessions:
-                for future in self.futures.get(session_id, []):
-                    future.cancel()
+                pending.extend(self.futures.get(session_id, []))
                 cnt = self.sessions[session_id][0].qsize()
                 if cnt > 0:
                     logger.info("Cancel {} messages in session {}".format(cnt, session_id))
                 self.sessions[session_id][0] = Dequeue()
+        self._cancel_futures(pending)
 
 
 def check_prefix(content, prefix_list):
