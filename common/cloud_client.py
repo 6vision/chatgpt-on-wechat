@@ -19,6 +19,7 @@ as a purely local application.
 
 from bridge.context import Context, ContextType
 from bridge.reply import Reply, ReplyType
+from common.atomic_write import write_json_atomic
 from common.log import logger
 from linkai import LinkAIClient, PushMsg
 from config import conf, pconf, plugin_config, available_setting, write_plugin_config, get_root, get_weixin_credentials_path
@@ -1711,8 +1712,7 @@ class CloudClient(LinkAIClient):
 
             file_config.update(dict(local_config))
 
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(file_config, f, indent=4, ensure_ascii=False)
+            write_json_atomic(config_path, file_config)
 
             logger.info("[CloudClient] Configuration saved to config.json successfully")
         except Exception as e:
