@@ -36,6 +36,11 @@ class TestDecayScope:
         # A diary dated far in the past must be discounted.
         assert _decay("memory/2025-01-01.md") < 1.0
 
+    def test_per_user_and_dream_diaries_decay(self):
+        assert _decay("memory/users/u-1/2025-01-01.md") < 1.0
+        assert _decay("memory/dreams/2025-01-01.md") < 1.0
+        assert _decay("memory/users/u-1/handoff-2025-01-01.md") == 1.0
+
     def test_today_diary_is_evergreen(self):
         import datetime
 

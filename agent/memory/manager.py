@@ -649,11 +649,14 @@ class MemoryManager:
         # paths produced on Windows checkouts.
         normalized = path.replace("\\", "/")
 
-        # Decay applies only to daily diary files: memory/YYYY-MM-DD.md.
+        # Decay applies only to daily diary files: memory/YYYY-MM-DD.md, the
+        # per-user memory/users/<id>/YYYY-MM-DD.md and memory/dreams/YYYY-MM-DD.md.
         # Dated knowledge pages (knowledge/analysis/foo-2026-09-02.md) are
         # event time anchors rather than perishable content, so they stay
         # evergreen and are never decayed.
-        match = re.search(r'^memory/(\d{4})-(\d{2})-(\d{2})\.md$', normalized)
+        match = re.search(
+            r'^memory/(?:users/[^/]+/|dreams/)?(\d{4})-(\d{2})-(\d{2})\.md$', normalized
+        )
         if not match:
             return 1.0  # evergreen: MEMORY.md, knowledge pages, handoffs...
         
