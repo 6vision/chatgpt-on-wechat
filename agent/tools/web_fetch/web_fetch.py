@@ -291,9 +291,10 @@ class WebFetch(BaseTool):
             raise ImportError(
                 "python-docx library is required for .docx parsing. Install with: pip install python-docx"
             )
+        from common.docx_text import iter_docx_body_text
         doc = Document(file_path)
-        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-        return "\n\n".join(paragraphs)
+        blocks = [text for text in iter_docx_body_text(doc) if text.strip()]
+        return "\n\n".join(blocks)
 
     def _parse_text(self, file_path: str) -> str:
         """Read plain text files (txt, md, csv, etc.)."""

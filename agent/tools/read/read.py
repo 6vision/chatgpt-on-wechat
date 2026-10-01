@@ -504,12 +504,9 @@ class Read(BaseTool):
                 from docx import Document
             except ImportError:
                 raise ImportError("Error: python-docx library not installed. Install with: pip install python-docx")
+            from common.docx_text import iter_docx_body_text
             doc = Document(absolute_path)
-            paragraphs = [p.text for p in doc.paragraphs]
-            for table in doc.tables:
-                for row in table.rows:
-                    paragraphs.append('\t'.join(cell.text for cell in row.cells))
-            return '\n'.join(paragraphs)
+            return '\n'.join(iter_docx_body_text(doc))
 
         if file_ext in ('.xlsx', '.xls'):
             try:
