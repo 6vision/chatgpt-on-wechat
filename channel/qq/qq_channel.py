@@ -12,7 +12,6 @@ import json
 import os
 import threading
 import time
-from collections import OrderedDict
 
 import requests
 import websocket
@@ -64,12 +63,9 @@ WS_PING_TIMEOUT = 10
 # reconnect path runs. Guards against a stall the transport ping alone can miss.
 HEARTBEAT_ACK_TIMEOUT_FACTOR = 3
 
-# How many inbound messages keep a msg_seq counter. The counter orders the
-# several replies a bot may send back for one message and is keyed by that
-# message's id, so an entry only has to outlive the reply it belongs to -- a
-# handful of messages at a time. Capped so a long-running process can't keep
-# one entry per message it has ever answered.
-_MAX_MSG_SEQ_TRACKED = 512
+# QQ accepts passive replies to a message for at most an hour, so a msg_seq
+# counter has nothing left to order after that.
+_MSG_SEQ_TTL_SECONDS = 60 * 60
 
 
 @singleton
@@ -106,7 +102,7 @@ class QQChannel(ChatChannel):
         self._last_api_error = ""
 
         self.received_msgs = ExpiredDict(60 * 60 * 7.1)
-        self._msg_seq_counter = OrderedDict()
+        self._msg_seq_counter = ExpiredDict(_MSG_SEQ_TTL_SECONDS)
 
         conf()["group_name_white_list"] = ["ALL_GROUP"]
         conf()["single_chat_prefix"] = [""]
@@ -606,11 +602,6 @@ class QQChannel(ChatChannel):
     def _get_next_msg_seq(self, msg_id: str) -> int:
         seq = self._msg_seq_counter.get(msg_id, 1)
         self._msg_seq_counter[msg_id] = seq + 1
-        # Re-assigning a key leaves it where it was, so move it explicitly: the
-        # entry in use must not be the next one evicted by a burst of traffic.
-        self._msg_seq_counter.move_to_end(msg_id)
-        while len(self._msg_seq_counter) > _MAX_MSG_SEQ_TRACKED:
-            self._msg_seq_counter.popitem(last=False)
         return seq
 
     def _build_msg_url_and_base_body(self, msg: QQMessage, event_type: str, msg_id: str):
