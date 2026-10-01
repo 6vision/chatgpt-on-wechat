@@ -15,7 +15,6 @@ from common.log import logger
 from common.utils import tail_lines
 from config import get_data_root
 
-# Lines replayed as the initial screen of the logs view.
 _TAIL_LINE_LIMIT = 200
 
 
@@ -33,7 +32,7 @@ class LogsHandler:
                 yield b"data: {\"type\": \"error\", \"message\": \"run.log not found\"}\n\n"
                 return
 
-            # Read last _TAIL_LINE_LIMIT lines for initial display
+            # Read last lines for initial display
             try:
                 chunk = ''.join(tail_lines(log_path, _TAIL_LINE_LIMIT))
                 payload = json.dumps({"type": "init", "content": chunk}, ensure_ascii=False)

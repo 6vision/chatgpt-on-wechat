@@ -445,8 +445,6 @@ def logs(follow, lines):
 
 def _print_last_lines(file_path: str, n: int = 50):
     """Print the last N lines of a file (cross-platform)."""
-    # Imported on use, not at module load: the CLI is installed as its own
-    # package and only puts the project root on sys.path when it needs it.
     _ensure_project_on_path()
     from common.utils import tail_lines
 
