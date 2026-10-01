@@ -35,6 +35,15 @@ BOT_TYPE = "3"
 SEND_RETRIES = 2
 SEND_RETRY_BACKOFF_BASE = 1.0
 
+# Transient transport errors worth retrying. A read timeout is not one of them:
+# the request may already have been delivered, so a retry could send it twice.
+RETRYABLE_ERRORS = (
+    requests.exceptions.ConnectTimeout,
+    requests.exceptions.SSLError,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.ChunkedEncodingError,
+)
+
 
 # The Weixin CDN only accepts legacy TLS1.2 + RSA cipher suites (e.g.
 # AES256-GCM-SHA384). OpenSSL 1.1.1's default SECLEVEL=2 rejects these
@@ -143,15 +152,10 @@ class WeixinApi:
                 resp = requests.post(url, json=body, headers=headers, timeout=timeout)
                 resp.raise_for_status()
                 return resp.json()
-            except requests.exceptions.Timeout:
-                logger.debug(f"[Weixin] API timeout: {endpoint}")
-                return {"ret": 0, "msgs": []}
-            except (requests.exceptions.SSLError,
-                    requests.exceptions.ConnectionError,
-                    requests.exceptions.ChunkedEncodingError) as e:
-                # Transient transport-level errors (e.g. SSLEOFError from the
-                # peer dropping the connection) are usually recoverable, so
-                # retry a few times with exponential backoff before giving up.
+            except requests.exceptions.ReadTimeout as e:
+                logger.error(f"[Weixin] API read timeout {endpoint}: {e}")
+                raise
+            except RETRYABLE_ERRORS as e:
                 if attempt < retries:
                     backoff = SEND_RETRY_BACKOFF_BASE * (2 ** attempt)
                     attempt += 1
@@ -169,9 +173,14 @@ class WeixinApi:
     # ── getUpdates (long-poll) ─────────────────────────────────────────
 
     def get_updates(self, get_updates_buf: str = "", timeout: int = DEFAULT_LONG_POLL_TIMEOUT) -> dict:
-        return self._post("ilink/bot/getupdates", {
-            "get_updates_buf": get_updates_buf,
-        }, timeout=timeout + 5)
+        try:
+            return self._post("ilink/bot/getupdates", {
+                "get_updates_buf": get_updates_buf,
+            }, timeout=timeout + 5)
+        except requests.exceptions.ReadTimeout:
+            # A long poll that times out just means no message arrived.
+            logger.debug("[Weixin] getUpdates read timeout: empty poll")
+            return {"ret": 0, "msgs": []}
 
     # ── sendMessage ────────────────────────────────────────────────────
 
