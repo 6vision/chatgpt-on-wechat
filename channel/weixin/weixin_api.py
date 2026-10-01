@@ -16,7 +16,6 @@ import base64
 import hashlib
 import os
 import random
-import struct
 import time
 import uuid
 
@@ -34,6 +33,19 @@ BOT_TYPE = "3"
 # Retry policy for outbound sendMessage calls on transient transport errors.
 SEND_RETRIES = 2
 SEND_RETRY_BACKOFF_BASE = 1.0
+
+# Transport failures that mean the request never reached the peer, so retrying
+# them cannot duplicate anything: the connection was never established, the TLS
+# handshake failed, or the peer dropped the connection mid-response.
+# A read timeout is deliberately *not* in this set -- the request did reach the
+# peer, so a retried sendMessage could be delivered twice. Callers that can live
+# with that (the long poll, which reads it as an empty poll) handle it locally.
+RETRYABLE_ERRORS = (
+    requests.exceptions.ConnectTimeout,
+    requests.exceptions.SSLError,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.ChunkedEncodingError,
+)
 
 
 # The Weixin CDN only accepts legacy TLS1.2 + RSA cipher suites (e.g.
@@ -143,15 +155,17 @@ class WeixinApi:
                 resp = requests.post(url, json=body, headers=headers, timeout=timeout)
                 resp.raise_for_status()
                 return resp.json()
-            except requests.exceptions.Timeout:
-                logger.debug(f"[Weixin] API timeout: {endpoint}")
-                return {"ret": 0, "msgs": []}
-            except (requests.exceptions.SSLError,
-                    requests.exceptions.ConnectionError,
-                    requests.exceptions.ChunkedEncodingError) as e:
-                # Transient transport-level errors (e.g. SSLEOFError from the
-                # peer dropping the connection) are usually recoverable, so
-                # retry a few times with exponential backoff before giving up.
+            except requests.exceptions.ReadTimeout as e:
+                # The request reached the peer but the response never arrived,
+                # so it may well have been delivered. Retrying would risk
+                # sending the same message twice, so raise right away instead of
+                # answering with a synthetic ret=0 that reads like a success.
+                logger.error(f"[Weixin] API read timeout {endpoint}: {e}")
+                raise
+            except RETRYABLE_ERRORS as e:
+                # Nothing was delivered yet (e.g. an SSLEOFError from the peer
+                # dropping the connection), so retry a few times with
+                # exponential backoff before giving up.
                 if attempt < retries:
                     backoff = SEND_RETRY_BACKOFF_BASE * (2 ** attempt)
                     attempt += 1
@@ -169,9 +183,17 @@ class WeixinApi:
     # ── getUpdates (long-poll) ─────────────────────────────────────────
 
     def get_updates(self, get_updates_buf: str = "", timeout: int = DEFAULT_LONG_POLL_TIMEOUT) -> dict:
-        return self._post("ilink/bot/getupdates", {
-            "get_updates_buf": get_updates_buf,
-        }, timeout=timeout + 5)
+        try:
+            return self._post("ilink/bot/getupdates", {
+                "get_updates_buf": get_updates_buf,
+            }, timeout=timeout + 5)
+        except requests.exceptions.ReadTimeout:
+            # getUpdates is a long poll: the server holds the request for up to
+            # DEFAULT_LONG_POLL_TIMEOUT seconds, so the client timing out simply
+            # means no message arrived in that window -- an empty poll, not a
+            # failure. Only real connection failures are raised (in _post).
+            logger.debug("[Weixin] getUpdates read timeout: empty poll")
+            return {"ret": 0, "msgs": []}
 
     # ── sendMessage ────────────────────────────────────────────────────
 
@@ -480,7 +502,7 @@ def download_media_from_cdn(cdn_base_url: str, encrypt_query_param: str,
             try:
                 key_bytes = bytes.fromhex(decoded.decode("ascii"))
             except (ValueError, UnicodeDecodeError):
-                raise ValueError(f"Invalid AES key: 32 bytes but not valid hex")
+                raise ValueError("Invalid AES key: 32 bytes but not valid hex")
         elif len(decoded) == 16:
             key_bytes = decoded
         else:
