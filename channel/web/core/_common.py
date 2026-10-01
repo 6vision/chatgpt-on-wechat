@@ -104,9 +104,6 @@ def _read_config_file_for_write() -> dict:
     """
     config_path = os.path.join(get_data_root(), "config.json")
     if os.path.exists(config_path):
-        # utf-8-sig tolerates a UTF-8 BOM (common when the file was edited with
-        # Windows Notepad / PowerShell). Plain utf-8 would raise "Unexpected
-        # UTF-8 BOM" here and fail every config write from the web console.
         with open(config_path, "r", encoding="utf-8-sig") as f:
             return json.load(f)
     return read_config_template()

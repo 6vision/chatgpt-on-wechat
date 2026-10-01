@@ -291,7 +291,7 @@ class WebFetch(BaseTool):
             raise ImportError(
                 "python-docx library is required for .docx parsing. Install with: pip install python-docx"
             )
-        from common.docx_text import iter_docx_body_text
+        from common.office_text import iter_docx_body_text
         doc = Document(file_path)
         blocks = [text for text in iter_docx_body_text(doc) if text.strip()]
         return "\n\n".join(blocks)
@@ -316,7 +316,7 @@ class WebFetch(BaseTool):
                 "openpyxl library is required for .xlsx parsing. Install with: pip install openpyxl"
             )
 
-        from common.spreadsheet_text import spreadsheet_sheets
+        from common.office_text import spreadsheet_sheets
         result_parts = []
         with spreadsheet_sheets(file_path, openpyxl.load_workbook) as sheets:
             for name, sheet_rows in sheets:

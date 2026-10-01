@@ -504,7 +504,7 @@ class Read(BaseTool):
                 from docx import Document
             except ImportError:
                 raise ImportError("Error: python-docx library not installed. Install with: pip install python-docx")
-            from common.docx_text import iter_docx_body_text
+            from common.office_text import iter_docx_body_text
             doc = Document(absolute_path)
             return '\n'.join(iter_docx_body_text(doc))
 
@@ -513,7 +513,7 @@ class Read(BaseTool):
                 from openpyxl import load_workbook
             except ImportError:
                 raise ImportError("Error: openpyxl library not installed. Install with: pip install openpyxl")
-            from common.spreadsheet_text import spreadsheet_sheets
+            from common.office_text import spreadsheet_sheets
             parts = []
             with spreadsheet_sheets(absolute_path, load_workbook) as sheets:
                 for name, rows in sheets:
