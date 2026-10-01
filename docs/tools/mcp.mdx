@@ -10,7 +10,7 @@ CowAgent supports the [Model Context Protocol (MCP)](https://modelcontextprotoco
 The **MCP Tools** section of the Capabilities page in the **web console** and **desktop app** can add, edit, disable, and remove MCP servers without editing `mcp.json` by hand.
 
 - **Form or JSON**: fill in the form, or paste a standard `mcpServers` config in JSON mode (several servers at once), for example `{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}}`.
-- **Connection test**: checks that each server is reachable and lists its tools. Saving runs the same check first; if it fails, fix the config or choose **Save anyway** (for servers that require authorization after saving).
+- **Test connection**: checks that each server is reachable and lists its tools. Saving runs the same check first; if it fails, fix the config or choose **Save anyway** (for servers that require authorization after saving).
 - **Storage**: written to the current Agent's `mcp.json`, in the same format as Claude Desktop / Cursor.
 - **Immediate effect**: changes apply from the next message, with no restart.
 
