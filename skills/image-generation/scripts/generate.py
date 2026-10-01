@@ -1227,6 +1227,15 @@ def main():
         print(json.dumps({"error": f"Invalid JSON: {e}"}))
         sys.exit(1)
 
+    # json.loads also succeeds on a bare list, string, number or null, and only
+    # JSONDecodeError is handled above. Those then reached args.get() below and
+    # died with an AttributeError traceback instead of the {"error": ...} line
+    # every other failure here returns, so the caller had nothing parseable to
+    # read. The skill invokes this script, so the envelope is the contract.
+    if not isinstance(args, dict):
+        print(json.dumps({"error": "Arguments must be a JSON object"}))
+        sys.exit(1)
+
     prompt = args.get("prompt")
     if not prompt:
         print(json.dumps({"error": "Missing required parameter: prompt"}))
