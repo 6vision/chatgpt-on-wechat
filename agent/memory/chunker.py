@@ -83,7 +83,8 @@ class TextChunker:
                 continue
             
             # Check if adding this line would exceed limit
-            if current_chars + line_chars > max_chars and current_chunk:
+            separator_chars = 1 if current_chunk else 0
+            if current_chars + separator_chars + line_chars > max_chars and current_chunk:
                 # Save current chunk
                 chunks.append(TextChunk(
                     text='\n'.join(current_chunk),
@@ -92,14 +93,18 @@ class TextChunker:
                 ))
                 
                 # Start new chunk with overlap
-                overlap_lines = self._get_overlap_lines(current_chunk, overlap_chars)
+                # Retained lines need both their own separators and one more
+                # separator before the incoming line. Drop overlap when the
+                # new line already fills the entire budget.
+                overlap_budget = min(overlap_chars, max_chars - line_chars - 1)
+                overlap_lines = self._get_overlap_lines(current_chunk, overlap_budget)
                 current_chunk = overlap_lines + [line]
-                current_chars = sum(len(l) for l in current_chunk)
+                current_chars = sum(len(l) for l in current_chunk) + len(current_chunk) - 1
                 start_line = i - len(overlap_lines)
             else:
                 # Add line to current chunk
                 current_chunk.append(line)
-                current_chars += line_chars
+                current_chars += separator_chars + line_chars
         
         # Save last chunk
         if current_chunk:
@@ -128,7 +133,7 @@ class TextChunker:
         chars = 0
         
         for line in reversed(lines):
-            line_chars = len(line)
+            line_chars = len(line) + (1 if overlap else 0)
             if chars + line_chars > target_chars:
                 break
             overlap.insert(0, line)
