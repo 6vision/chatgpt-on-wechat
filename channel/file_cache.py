@@ -29,8 +29,14 @@ class FileCache:
             file_type: 文件类型（image, video, file 等）
         """
         now = time.time()
+        # Reclaim whatever aged out before touching this batch. An entry is
+        # only revisited when its own session comes back, so an expiry enforced
+        # only inside ``get()`` never runs for a session that uploads a file and
+        # then goes quiet -- its batch stays in the process-wide cache for good.
+        self.cleanup_expired(now)
+
         entry = self.cache.get(session_id)
-        if entry is None or now - entry['timestamp'] > self.ttl:
+        if entry is None:
             entry = {
                 'files': [],
                 'timestamp': now
@@ -61,17 +67,14 @@ class FileCache:
         Returns:
             文件信息列表 [{'path': '...', 'type': 'image'}, ...]，如果没有或已过期返回空列表
         """
-        if session_id not in self.cache:
+        # A batch may have aged out while waiting for the question; drop it
+        # here rather than hand stale attachments to the next turn.
+        self.cleanup_expired()
+
+        item = self.cache.get(session_id)
+        if item is None:
             return []
-        
-        item = self.cache[session_id]
-        
-        # 检查是否过期
-        if time.time() - item['timestamp'] > self.ttl:
-            logger.info(f"[FileCache] Cache expired for session {session_id}, clearing...")
-            del self.cache[session_id]
-            return []
-        
+
         return item['files']
     
     def clear(self, session_id: str):
@@ -85,9 +88,9 @@ class FileCache:
             logger.info(f"[FileCache] Cleared cache for session {session_id}")
             del self.cache[session_id]
     
-    def cleanup_expired(self):
-        """清理所有过期的缓存"""
-        current_time = time.time()
+    def cleanup_expired(self, now: float = None):
+        """清理所有过期的缓存，包括那些再没人来问的批次。"""
+        current_time = time.time() if now is None else now
         expired_sessions = []
         
         for session_id, item in self.cache.items():

@@ -96,6 +96,35 @@ class TestFileCacheTtl(unittest.TestCase):
 
         self.assertEqual([f["path"] for f in files], ["/tmp/a.png"])
 
+    def test_a_later_write_reclaims_every_stale_batch(self):
+        """A batch nobody ever asked about must not sit in the cache forever.
+
+        ``add()`` only refreshed the timestamp of the batch it was handed, so an
+        entry whose session went quiet was never visited again -- and the only
+        global sweep, ``cleanup_expired()``, has no caller outside these tests.
+        Any write has to reclaim the batches that went stale beside it.
+        """
+        cache = FileCache(ttl=300)
+        clock = self._clock()
+        with patch("channel.file_cache.time.time", side_effect=lambda: clock["now"]):
+            for session_id in ("s1", "s2", "s3"):
+                cache.add(session_id, "/tmp/%s.png" % session_id, "image")
+                clock["now"] += 301  # this batch is stale by the time the next arrives
+
+            self.assertEqual(sorted(cache.cache), ["s3"])
+
+    def test_a_live_batch_survives_another_session_write(self):
+        """The sweep must not drop a batch that is still inside its window."""
+        cache = FileCache(ttl=300)
+        clock = self._clock()
+        with patch("channel.file_cache.time.time", side_effect=lambda: clock["now"]):
+            cache.add("s1", "/tmp/a.png", "image")
+            clock["now"] += 100
+            cache.add("s2", "/tmp/b.png", "image")
+
+            self.assertEqual(sorted(cache.cache), ["s1", "s2"])
+            self.assertEqual([f["path"] for f in cache.get("s1")], ["/tmp/a.png"])
+
     def test_cleanup_expired_uses_the_refreshed_timestamp(self):
         cache = FileCache(ttl=300)
         clock = self._clock()
