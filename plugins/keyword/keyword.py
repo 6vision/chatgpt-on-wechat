@@ -34,7 +34,7 @@ class Keyword(Plugin):
                     json.dump(conf, f, indent=4)
             else:
                 logger.debug(f"[keyword] loading config file: {config_path}")
-                with open(config_path, "r", encoding="utf-8") as f:
+                with open(config_path, "r", encoding="utf-8-sig") as f:
                     conf = json.load(f)
             # 加载关键词
             self.keyword = conf["keyword"]

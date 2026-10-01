@@ -58,7 +58,7 @@ class Banwords(Plugin):
             banwords_path = os.path.join(curdir, "banwords.txt")
             words = []
             if os.path.exists(banwords_path):
-                with open(banwords_path, "r", encoding="utf-8") as f:
+                with open(banwords_path, "r", encoding="utf-8-sig") as f:
                     for line in f:
                         word = line.strip()
                         if word:
