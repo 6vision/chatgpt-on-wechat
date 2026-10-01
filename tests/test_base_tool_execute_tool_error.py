@@ -1,14 +1,11 @@
 """Regression: BaseTool.execute_tool must return a failed ToolResult, never None,
 so the caller can read .status and the model sees the real cause."""
-import logging
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agent.tools.base_tool import BaseTool, ToolResult  # noqa: E402
-
-logging.disable(logging.CRITICAL)
 
 
 class BoomTool(BaseTool):
