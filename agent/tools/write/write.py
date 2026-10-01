@@ -5,9 +5,9 @@ Creates or overwrites files, automatically creates parent directories
 
 import os
 from typing import Dict, Any
-from pathlib import Path
 
 from agent.tools.base_tool import BaseTool, ToolResult
+from common.atomic_write import write_text_atomic
 from agent.tools.utils.credentials import is_credential_path
 from agent.tools.utils.diff import looks_like_line_numbered_block
 from agent.tools.utils.file_state import note_write, staleness_warning
@@ -87,9 +87,7 @@ class Write(BaseTool):
             if blocking:
                 return ToolResult.fail(f"Error: {blocking}")
 
-            # Write file
-            with open(absolute_path, 'w', encoding='utf-8') as f:
-                f.write(content)
+            write_text_atomic(absolute_path, content)
             note_write(absolute_path)
             
             # Get bytes written

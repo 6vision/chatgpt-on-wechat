@@ -7,6 +7,7 @@ import os
 from typing import Dict, Any
 
 from agent.tools.base_tool import BaseTool, ToolResult
+from common.atomic_write import write_text_atomic
 from common.utils import expand_path
 from agent.tools.utils.credentials import DENIED_MESSAGE, is_credential_path
 from agent.tools.utils.diff import (
@@ -196,12 +197,9 @@ class Edit(BaseTool):
             if blocking:
                 return ToolResult.fail(f"Error: {blocking}")
 
-            # Write file. newline='' writes final_content verbatim; the default
-            # text mode rewrites every '\n' as os.linesep, which on Windows
-            # turned the ending we just restored back into CRLF for the whole
-            # file.
-            with open(absolute_path, 'w', encoding='utf-8', newline='') as f:
-                f.write(final_content)
+            # newline='' writes final_content verbatim; text mode would turn
+            # every '\n' into os.linesep and undo the ending restored above.
+            write_text_atomic(absolute_path, final_content, newline='')
             note_write(absolute_path)
             
             # Generate diff
