@@ -115,16 +115,8 @@ def test_banwords_still_writes_the_default_when_the_file_is_missing(tmp_path, mo
 
 
 def test_a_plugin_with_a_global_entry_starts_without_reading_its_own_dir(tmp_path, monkeypatch):
-    """A plugin already configured in ``plugins/config.json`` must still start.
-
-    ``plugin_config_path`` is only assigned inside ``if not plugin_conf``, so the
-    ``os.path.exists(plugin_config_path)`` check has to stay nested in that
-    block. Pulled out of it, the check runs on a name that was never assigned
-    whenever ``pconf()`` already returned a config -- the common case, since
-    every plugin that has ever been configured has an entry -- and
-    ``load_config`` raises ``UnboundLocalError``. ``activate_plugins`` answers
-    that by disabling the plugin.
-    """
+    """A plugin already configured in ``plugins/config.json`` must still start
+    (the own-dir lookup must not run, or ``load_config`` hits an unbound name)."""
     module, banwords = _load("plugins.banwords.banwords", "./plugins/banwords", "BANWORDS")
     config_path = _point_at(monkeypatch, module, banwords, tmp_path)
     monkeypatch.setattr("plugins.plugin.pconf", lambda name: {"action": "replace"})
