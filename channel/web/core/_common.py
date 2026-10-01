@@ -32,6 +32,7 @@ from bridge.context import ContextType
 from channel.chat_message import ChatMessage
 from common.channel_registry import get_channel_manager
 from common.log import logger
+from common.utils import constant_time_equals
 from config import conf, get_data_root, read_config_template
 
 
@@ -70,7 +71,7 @@ def _desktop_token_matches() -> bool:
         return False
     env = getattr(web.ctx, "env", {}) or {}
     provided = env.get("HTTP_X_COW_DESKTOP_TOKEN", "")
-    return bool(provided) and hmac.compare_digest(provided, expected)
+    return bool(provided) and constant_time_equals(provided, expected)
 
 
 @dataclass
@@ -269,7 +270,7 @@ def _verify_auth_token(token):
         ts_hex.encode(),
         hashlib.sha256,
     ).hexdigest()
-    return hmac.compare_digest(sig, expected)
+    return constant_time_equals(sig, expected)
 
 
 def _get_bearer_token():

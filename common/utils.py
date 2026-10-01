@@ -1,3 +1,4 @@
+import hmac
 import io
 import os
 import re
@@ -121,6 +122,27 @@ def expand_path(path: str) -> str:
                 expanded = os.path.join(home, path[2:])
     
     return expanded
+
+
+def constant_time_equals(left: str, right: str) -> bool:
+    """Timing-safe string comparison that answers False instead of raising.
+
+    ``hmac.compare_digest`` refuses ``str`` operands containing non-ASCII
+    characters and raises ``TypeError: comparing strings with non-ASCII
+    characters is not supported`` on them. Every value compared with it comes
+    straight off a request -- a cookie, a header, a JSON field, a URL path
+    segment -- so a client sending "é" turned a rejected credential into a 500
+    instead of a 401, on endpoints that need no authentication to reach.
+
+    Comparing the UTF-8 encodings keeps the comparison constant-time and makes a
+    malformed value simply not match. ``surrogatepass`` keeps it total: JSON and
+    query strings can carry lone surrogates, and encoding those without it would
+    raise ``UnicodeEncodeError`` and reintroduce the same 500.
+    """
+    return hmac.compare_digest(
+        left.encode("utf-8", "surrogatepass"),
+        right.encode("utf-8", "surrogatepass"),
+    )
 
 
 def is_cloud_deployment() -> bool:
