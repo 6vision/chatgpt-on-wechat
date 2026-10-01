@@ -47,6 +47,42 @@ class TestFileCacheTtl(unittest.TestCase):
 
         self.assertEqual(files, [])
 
+    def test_new_file_after_expiry_starts_a_fresh_batch(self):
+        """A new upload must not revive attachments from an expired batch."""
+        cache = FileCache(ttl=300)
+        clock = self._clock()
+        with patch("channel.file_cache.time.time", side_effect=lambda: clock["now"]):
+            cache.add("s1", "/tmp/old.pdf", "file")
+            clock["now"] += 301
+            cache.add("s1", "/tmp/new.png", "image")
+            files = cache.get("s1")
+
+        self.assertEqual(files, [{"path": "/tmp/new.png", "type": "image"}])
+
+    def test_re_adding_after_expiry_does_not_revive_other_files(self):
+        cache = FileCache(ttl=300)
+        clock = self._clock()
+        with patch("channel.file_cache.time.time", side_effect=lambda: clock["now"]):
+            cache.add("s1", "/tmp/a.png", "image")
+            cache.add("s1", "/tmp/b.pdf", "file")
+            clock["now"] += 301
+            cache.add("s1", "/tmp/a.png", "image")
+            files = cache.get("s1")
+
+        self.assertEqual(files, [{"path": "/tmp/a.png", "type": "image"}])
+
+    def test_upload_at_ttl_boundary_preserves_the_batch(self):
+        """Match get() and cleanup_expired(): expiry is strictly after TTL."""
+        cache = FileCache(ttl=300)
+        clock = self._clock()
+        with patch("channel.file_cache.time.time", side_effect=lambda: clock["now"]):
+            cache.add("s1", "/tmp/a.png", "image")
+            clock["now"] += 300
+            cache.add("s1", "/tmp/b.png", "image")
+            files = cache.get("s1")
+
+        self.assertEqual([f["path"] for f in files], ["/tmp/a.png", "/tmp/b.png"])
+
     def test_re_adding_the_same_file_refreshes_the_window(self):
         """Re-sending a file is still activity on that batch."""
         cache = FileCache(ttl=300)
