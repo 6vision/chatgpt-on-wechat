@@ -1,28 +1,8 @@
 # encoding:utf-8
 """The /uploads/ handler must confine reads to the Agent's own tmp dir.
 
-UploadsHandler guarded its path with a bare prefix comparison::
-
-    full_path = os.path.normpath(os.path.join(upload_dir, file_name))
-    if not os.path.abspath(full_path).startswith(os.path.abspath(upload_dir)):
-        raise web.notfound()
-
-``str.startswith`` has no separator terminator, so any sibling directory whose
-name merely *begins with the same characters* passes the check. The upload dir
-is ``<workspace>/tmp``, which makes ``<workspace>/tmp_secrets`` a sibling: with
-``file_name="../tmp_secrets/id_rsa"`` normpath collapses to
-``<workspace>/tmp_secrets/id_rsa``, that string starts with ``<workspace>/tmp``,
-and the file is served verbatim. The same escape needs no ``..`` at all on
-Windows, where os.path.join discards the left side for a drive-qualified tail.
-
-It is not only Agent data next door that this reaches. The console binds
-127.0.0.1 with no password by default, and every <img src="/uploads/...">, TTS
-reply URL and voice bubble goes through this one handler, so anything on the box
--- including the agent's own web_fetch tool aimed at the console -- could read
-the file.
-
-The sibling-prefix escape is what these tests pin; the in-tree cases are the
-control that stops an over-broad fix from 404-ing every real upload.
+A bare startswith() check let a sibling sharing the prefix through
+(``../tmp_secrets/id_rsa`` next to ``tmp``); real uploads must keep working.
 """
 
 import os
@@ -125,6 +105,12 @@ class TestUploadsHandlerPathContainment(unittest.TestCase):
         """
         with self.assertRaises(_NotFound):
             self._get(self.escaped)
+
+    @unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
+    def test_a_symlink_out_of_the_upload_dir_is_not_followed(self):
+        os.symlink(self.escaped, os.path.join(self.upload_dir, "link.png"))
+        with self.assertRaises(_NotFound):
+            self._get("link.png")
 
     # -- the control: real uploads keep working --------------------------
 
