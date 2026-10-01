@@ -11,6 +11,7 @@ from aip import AipSpeech
 
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common.media_download import MAX_FILE_BYTES, download_to_file
 from common.tmp_dir import TmpDir
 from config import conf
 from voice.voice import Voice
@@ -151,11 +152,17 @@ class BaiduVoice(Voice):
         else:
             return Reply(ReplyType.ERROR, "长文本合成超时，请稍后重试")
 
-        # 下载并保存音频
-        audio_data = requests.get(audio_url, timeout=REQUEST_TIMEOUT).content
+        # 下载并保存音频。`audio_address` comes back from the task API, so the
+        # body is streamed and counted: an endless or multi-gigabyte response
+        # used to be buffered whole by `.content` and written out before
+        # anything could object. `download_to_file` also writes through a temp
+        # file, so an oversized or truncated download leaves nothing behind.
         fn = TmpDir().path() + f"reply-long-{int(time.time())}-{hash(text)&0x7FFFFFFF}.mp3"
-        with open(fn, "wb") as f:
-            f.write(audio_data)
+        try:
+            download_to_file(audio_url, fn, MAX_FILE_BYTES, timeout=REQUEST_TIMEOUT)
+        except Exception as e:
+            logger.error("[Baidu] 长文本合成音频下载失败: %s", e)
+            return Reply(ReplyType.ERROR, "长文本语音合成下载失败")
         logger.info("[Baidu] 长文本合成 success: %s", fn)
         return Reply(ReplyType.VOICE, fn)
 

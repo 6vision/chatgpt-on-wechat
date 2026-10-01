@@ -37,6 +37,9 @@ class Response:
         if self.failure is not None:
             raise self.failure
 
+    def close(self):
+        pass
+
 
 @pytest.fixture
 def serve(monkeypatch):

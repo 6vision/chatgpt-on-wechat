@@ -76,12 +76,26 @@ def restore_backup(workspace_dir: Path, backup_id: str) -> bool:
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         ws = Path(workspace_dir)
+        # Validate the entire snapshot before changing any workspace file.
+        # Otherwise a missing payload silently reports success, or a malformed
+        # later entry leaves an earlier file restored even though undo failed.
+        if not isinstance(manifest, list) or not manifest:
+            raise ValueError("backup manifest must contain file entries")
+        restores = []
         for entry in manifest:
+            if not isinstance(entry, dict) or not all(
+                isinstance(entry.get(key), str) and entry[key]
+                for key in ("bak", "rel")
+            ):
+                raise ValueError("invalid backup manifest entry")
             bak = target / entry["bak"]
             dst = ws / entry["rel"]
-            if bak.exists():
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(bak, dst)
+            if not bak.is_file():
+                raise FileNotFoundError(f"missing backup payload: {entry['bak']}")
+            restores.append((bak, dst))
+        for bak, dst in restores:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(bak, dst)
         logger.info(f"[Evolution] Restored backup {backup_id} ({len(manifest)} file(s))")
         return True
     except Exception as e:

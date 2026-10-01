@@ -71,6 +71,20 @@ _SKIP_DIR_NAMES = {
     "target", "vendor", ".tox", "coverage", ".idea",
 }
 
+def _ps_quote(value: str) -> str:
+    """Escape a value for a PowerShell single-quoted string literal (quotes
+    included).
+
+    A PowerShell single-quoted string ends at the FIRST unescaped quote, and
+    the only escape it has is a doubled one. A path or glob holding an
+    apostrophe (`O'Brien`, `John's Project`) therefore used to close the
+    literal early and made PowerShell reject the whole script with
+    "The string is missing the terminator: '." - the model then got a
+    successful search reporting zero matches for text that was there.
+    """
+    return "'" + value.replace("'", "''") + "'"
+
+
 def _pruned_dirs(root: str, max_depth: int = 2) -> List[str]:
     """Denylisted directory names actually present under ``root``.
 
@@ -435,7 +449,7 @@ class SearchFiles(BaseTool):
         ci = "-CaseSensitive" if not opts.ignore_case else ""
         glob_filter = ""
         if opts.file_glob and opts.file_glob != "*":
-            glob_filter = f"-Filter '{opts.file_glob}' "
+            glob_filter = f"-Filter {_ps_quote(opts.file_glob)} "
         prune = "" if opts.no_ignore else (
             f"| Where-Object {{ $_.FullName -notmatch '\\\\({'|'.join(_SKIP_DIR_NAMES)})\\\\' }} "
         )
@@ -445,7 +459,7 @@ class SearchFiles(BaseTool):
             # system code page, e.g. cp936, which we'd misread as UTF-8 -> mojibake).
             f"[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
             f"$ErrorActionPreference='SilentlyContinue';"
-            f"Get-ChildItem -LiteralPath '{opts.root}' -Recurse -File {glob_filter}"
+            f"Get-ChildItem -LiteralPath {_ps_quote(opts.root)} -Recurse -File {glob_filter}"
             f"{prune}"
             f"| Select-String -Pattern @'\n{opts.pattern}\n'@ {ci} "
             f"| ForEach-Object {{ \"$($_.Path)`t$($_.LineNumber):$($_.Line)\" }}"
@@ -460,6 +474,19 @@ class SearchFiles(BaseTool):
         except subprocess.TimeoutExpired:
             return _BackendResult([], True)
         rows = self._parse_powershell((proc.stdout or "").splitlines(), opts)
+        # A script PowerShell could not parse - or a root it could not
+        # enumerate - exits non-zero with empty stdout, which is byte-for-byte
+        # what "searched everything and found nothing" looks like. Reading the
+        # exit code is what keeps a failed search from being reported to the
+        # model as a successful empty one; execute() turns this into a python
+        # retry. Only when there is nothing to keep: a partly-failed run
+        # (dangling junction, unreadable subdir) leaves the exit code at 0
+        # and its rows are worth having.
+        if not rows and proc.returncode != 0:
+            detail = (proc.stderr or "").strip().splitlines()
+            raise RuntimeError(
+                f"powershell exited {proc.returncode}: {detail[0] if detail else 'no output'}"
+            )
         return _BackendResult(rows, False)
 
     def _parse_powershell(self, lines: List[str], opts: "_SearchOptions") -> List[dict]:

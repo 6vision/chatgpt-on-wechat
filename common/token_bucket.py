@@ -22,7 +22,9 @@ class TokenBucket:
             # A sub-1 tokens-per-minute config rounds to a rate of zero, so
             # there is nothing to generate. Stop here instead of dividing by 0
             # in the sleep below, which would kill this thread silently.
-            self.is_running = False
+            with self.cond:
+                self.is_running = False
+                self.cond.notify_all()
             return
         while self.is_running:
             with self.cond:
@@ -35,14 +37,20 @@ class TokenBucket:
         """获取令牌"""
         with self.cond:
             while self.tokens <= 0:
+                if not self.is_running:
+                    return False
                 flag = self.cond.wait(self.timeout)
                 if not flag:  # 超时
                     return False
+            if not self.is_running:
+                return False
             self.tokens -= 1
         return True
 
     def close(self):
-        self.is_running = False
+        with self.cond:
+            self.is_running = False
+            self.cond.notify_all()
         # The generator may be mid-sleep, so bound the wait. It is a daemon
         # thread, so a missed join can never keep the process alive.
         self._thread.join(timeout=1)

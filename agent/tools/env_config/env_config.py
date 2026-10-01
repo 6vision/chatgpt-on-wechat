@@ -173,7 +173,17 @@ class EnvConfig(BaseTool):
             if action == "set":
                 if not key or not value:
                     return ToolResult.fail("Error: 'key' and 'value' are required for 'set' action.")
-                
+
+                # .env is read line by line (here and by python-dotenv), so a line
+                # break would split one entry into several variables.
+                for name, text in (("key", key), ("value", value)):
+                    text = str(text)
+                    if "\n" in text or "\r" in text or (name == "key" and "=" in text):
+                        limit = "a line break or an '=' character" if name == "key" else "a line break"
+                        return ToolResult.fail(
+                            f"Error: '{name}' cannot contain {limit}; .env holds one entry per line."
+                        )
+
                 # Read current env vars
                 env_vars = self._read_env_file()
                 

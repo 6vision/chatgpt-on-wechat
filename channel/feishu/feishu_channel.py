@@ -12,7 +12,6 @@
 """
 
 import json
-import hmac
 import logging
 import os
 import ssl
@@ -898,6 +897,10 @@ class FeiShuChanel(ChatChannel):
             access_token = msg.access_token
         else:
             access_token = self.fetch_access_token()
+        if not access_token:
+            # 拿不到 token 就不要再发一个注定 401 的请求了。
+            logger.error("[FeiShu] no access token available, skip sending reply")
+            return
         headers = {
             "Authorization": "Bearer " + access_token,
             "Content-Type": "application/json",
@@ -1838,7 +1841,7 @@ class FeiShuChanel(ChatChannel):
             "app_secret": self.feishu_app_secret
         }
         data = bytes(json.dumps(req_body), encoding='utf8')
-        response = requests.post(url=url, data=data, headers=headers)
+        response = requests.post(url=url, data=data, headers=headers, timeout=(5, 10))
         if response.status_code == 200:
             res = response.json()
             if res.get("code") != 0:
@@ -1848,6 +1851,9 @@ class FeiShuChanel(ChatChannel):
                 return res.get("tenant_access_token")
         else:
             logger.error(f"[FeiShu] fetch token error, res={response}")
+            # 与上面的 code != 0 分支保持一致：失败也返回 str，不要让调用方
+            # 拿到 None 去拼 "Bearer " + token。
+            return ""
 
     def _upload_image_url(self, img_url, access_token):
         logger.debug(f"[FeiShu] start process image, img_url={img_url}")
@@ -2324,7 +2330,7 @@ class FeishuController:
             if not (
                 isinstance(callback_token, str)
                 and expected_token
-                and hmac.compare_digest(callback_token, expected_token)
+                and utils.constant_time_equals(callback_token, expected_token)
             ):
                 return self.FAILED_MSG
 

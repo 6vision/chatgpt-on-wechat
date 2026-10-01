@@ -1,3 +1,4 @@
+import hmac
 import io
 import os
 import re
@@ -121,6 +122,19 @@ def expand_path(path: str) -> str:
                 expanded = os.path.join(home, path[2:])
     
     return expanded
+
+
+def constant_time_equals(left: str, right: str) -> bool:
+    """Timing-safe string comparison that answers False instead of raising.
+
+    ``hmac.compare_digest`` raises on non-ASCII ``str``, so request-supplied
+    values are compared as UTF-8 bytes; ``surrogatepass`` also covers the lone
+    surrogates JSON and query strings can carry.
+    """
+    return hmac.compare_digest(
+        left.encode("utf-8", "surrogatepass"),
+        right.encode("utf-8", "surrogatepass"),
+    )
 
 
 def is_cloud_deployment() -> bool:

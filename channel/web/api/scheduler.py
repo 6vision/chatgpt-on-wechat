@@ -244,9 +244,16 @@ class SchedulerToggleHandler:
             store = _global_task_store()
             if store is None:
                 return json.dumps({"status": "error", "message": "Scheduler store unavailable"})
-            store.enable_task(task_id, enabled)
             task = store.get_task(task_id)
-            return json.dumps({"status": "success", "task": task}, ensure_ascii=False)
+            if not task:
+                return json.dumps(
+                    {"status": "error", "message": f"Task '{task_id}' not found"}
+                )
+            store.enable_task(task_id, enabled)
+            return json.dumps(
+                {"status": "success", "task": store.get_task(task_id)},
+                ensure_ascii=False,
+            )
         except Exception as e:
             logger.error(f"[WebChannel] Scheduler toggle error: {e}")
             return json.dumps({"status": "error", "message": str(e)})

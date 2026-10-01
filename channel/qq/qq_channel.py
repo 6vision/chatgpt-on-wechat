@@ -66,6 +66,7 @@ HEARTBEAT_ACK_TIMEOUT_FACTOR = 3
 
 @singleton
 class QQChannel(ChatChannel):
+    NOT_SUPPORT_REPLYTYPE = [ReplyType.VOICE]
 
     def __init__(self):
         super().__init__()
