@@ -338,3 +338,40 @@ def get_cloud_headers(api_key: str) -> dict:
         pass
     apply_client_source(headers)
     return apply_cloud_user(headers)
+
+
+# Block size used to walk a file backwards when only its tail is wanted.
+_TAIL_CHUNK_BYTES = 8192
+
+
+def tail_lines(path, limit):
+    """Return the last *limit* lines of *path*, without reading the whole file.
+
+    Log files such as ``run.log`` are appended to for as long as CowAgent runs
+    and are never rotated, so they only grow: ``readlines()`` loaded every line
+    ever written just to keep the last few, which is enough to send the process
+    into swap or get it OOM-killed. Read backwards in fixed-size blocks instead
+    and stop once the requested lines have been found.
+
+    Lines keep their trailing newline (the last one may have none), so callers
+    can print them as they are or ``"".join()`` them.
+    """
+    if limit <= 0:
+        return []
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        remaining = f.tell()
+        blocks = []
+        newlines = 0
+        while remaining > 0 and newlines <= limit:
+            read_size = min(_TAIL_CHUNK_BYTES, remaining)
+            remaining -= read_size
+            f.seek(remaining)
+            block = f.read(read_size)
+            newlines += block.count(b"\n")
+            blocks.append(block)
+        data = b"".join(reversed(blocks))
+    return [
+        line.decode("utf-8", errors="replace")
+        for line in data.splitlines(keepends=True)[-limit:]
+    ]

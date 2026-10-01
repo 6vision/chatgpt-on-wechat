@@ -8,7 +8,7 @@ from typing import Optional
 
 import click
 
-from cli.utils import get_project_root, load_config_json
+from cli.utils import _ensure_project_on_path, get_project_root, load_config_json
 
 _IS_WIN = sys.platform == "win32"
 
@@ -60,7 +60,6 @@ def _is_pid_alive(pid: int) -> bool:
 def _kill_pid(pid: int, force: bool = False):
     """Terminate a process by PID (cross-platform)."""
     if _IS_WIN:
-        flag = "/F" if force else ""
         cmd = ["taskkill"]
         if force:
             cmd.append("/F")
@@ -347,7 +346,7 @@ def update(ctx):
             "timeout /t 3 /nobreak >nul",
         ]
         if os.path.exists(req_file):
-            lines.append(f'echo Installing dependencies...')
+            lines.append('echo Installing dependencies...')
             lines.append(f'"{python}" -m pip install -r requirements.txt -q')
         lines += [
             "echo Reinstalling cow CLI...",
@@ -446,10 +445,13 @@ def logs(follow, lines):
 
 def _print_last_lines(file_path: str, n: int = 50):
     """Print the last N lines of a file (cross-platform)."""
+    # Imported on use, not at module load: the CLI is installed as its own
+    # package and only puts the project root on sys.path when it needs it.
+    _ensure_project_on_path()
+    from common.utils import tail_lines
+
     try:
-        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-            all_lines = f.readlines()
-        for line in all_lines[-n:]:
+        for line in tail_lines(file_path, n):
             click.echo(line, nl=False)
     except Exception as e:
         click.echo(f"Error reading log file: {e}", err=True)
