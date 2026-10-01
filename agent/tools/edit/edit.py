@@ -93,9 +93,13 @@ class Edit(BaseTool):
             return ToolResult.fail(f"Error: File is not readable/writable: {path}")
         
         try:
-            # Read file
-            with open(absolute_path, 'r', encoding='utf-8') as f:
-                raw_content = f.read()
+            # Read the file's bytes instead of opening it in text mode. A
+            # newline=None read translates every CRLF to LF before we ever see
+            # it, so the detect_line_ending() call below could only ever answer
+            # '\n' and restore_line_endings() was guaranteed to be a no-op.
+            # Decoding the bytes leaves the real ending intact for it to find.
+            with open(absolute_path, 'rb') as f:
+                raw_content = f.read().decode('utf-8')
             
             # Remove BOM (LLM won't include invisible BOM in oldText)
             bom, content = strip_bom(raw_content)
@@ -193,10 +197,9 @@ class Edit(BaseTool):
             if blocking:
                 return ToolResult.fail(f"Error: {blocking}")
 
-            # Write through a sibling file: a target truncated at open time is
-            # the user's file gone, with only "Error editing file" to show for
-            # it if anything fails partway through.
-            write_text_atomic(absolute_path, final_content)
+            # newline='' writes final_content verbatim; text mode would turn
+            # every '\n' into os.linesep and undo the ending restored above.
+            write_text_atomic(absolute_path, final_content, newline='')
             note_write(absolute_path)
             
             # Generate diff

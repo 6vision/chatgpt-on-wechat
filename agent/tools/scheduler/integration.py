@@ -1066,7 +1066,7 @@ def _execute_skill_call(
         skill_params = action.get("call_params") or action.get("skill_params", {})
         result_prefix = action.get("result_prefix", "")
         receiver = action.get("receiver")
-        is_group = action.get("isgroup", False)
+        is_group = action.get("is_group", False)
         channel_type = _primary_channel_type(action.get("channel_type"))
 
         if not skill_name:

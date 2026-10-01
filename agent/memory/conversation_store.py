@@ -2594,26 +2594,45 @@ def _merge_one_agent(conn: sqlite3.Connection, src_path: str, agent_id: str) -> 
         }
         with conn:
             if "sessions" in src_tables:
+                session_cols = {
+                    row[1] for row in conn.execute("PRAGMA src.table_info(sessions)")
+                }
+                # Secondary workspaces have not passed through _migrate():
+                # opening a store already resolves to the global file. Supply
+                # the same defaults for metadata added by skipped releases.
+                optional_session_cols = ", ".join(
+                    name if name in session_cols else default
+                    for name, default in (
+                        ("channel_type", "''"), ("title", "''"),
+                        ("context_start_seq", "0"),
+                    )
+                )
+                pinned = "pinned" if "pinned" in session_cols else "0"
                 conn.execute(
-                    """
+                    f"""
                     INSERT OR IGNORE INTO sessions
                         (agent_id, session_id, channel_type, title, context_start_seq,
                          created_at, last_active, msg_count, pinned)
-                    SELECT ?, session_id, channel_type, title, context_start_seq,
-                           created_at, last_active, msg_count, pinned
+                    SELECT ?, session_id, {optional_session_cols},
+                           created_at, last_active, msg_count, {pinned}
                     FROM src.sessions
                     """,
                     (agent_id,),
                 )
             if "messages" in src_tables:
+                message_cols = {
+                    row[1] for row in conn.execute("PRAGMA src.table_info(messages)")
+                }
+                extras = "COALESCE(extras, '')" if "extras" in message_cols else "''"
+                run_id = "COALESCE(run_id, '')" if "run_id" in message_cols else "''"
                 # id -> NULL so the global file re-issues AUTOINCREMENT ids and
                 # cross-file ids never collide; dedupe is on (agent_id, session_id, seq).
                 conn.execute(
-                    """
+                    f"""
                     INSERT OR IGNORE INTO messages
                         (agent_id, session_id, seq, role, content, created_at, extras, run_id)
                     SELECT ?, session_id, seq, role, content, created_at,
-                           COALESCE(extras, ''), COALESCE(run_id, '')
+                           {extras}, {run_id}
                     FROM src.messages
                     """,
                     (agent_id,),

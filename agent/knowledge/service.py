@@ -619,7 +619,10 @@ class KnowledgeService:
         link_re = re.compile(r'\[([^\]]*)\]\(([^)#]+\.md)(?:#[^)]*)?\)')
 
         for md_file in knowledge_path.rglob("*.md"):
-            rel = str(md_file.relative_to(knowledge_path))
+            # as_posix() rather than str(): on Windows str() keeps the
+            # backslashes, and the console consumes these paths with "/"
+            # separators (category split, data-path match against the tree).
+            rel = md_file.relative_to(knowledge_path).as_posix()
             if rel in ("index.md", "log.md"):
                 continue
             parts = rel.split("/")
@@ -637,7 +640,7 @@ class KnowledgeService:
                     # they must be decoded to match a path on disk.
                     resolved = (md_file.parent / unquote(link_target)).resolve()
                     try:
-                        target_rel = str(resolved.relative_to(knowledge_path))
+                        target_rel = resolved.relative_to(knowledge_path).as_posix()
                     except ValueError:
                         continue
                     if target_rel != rel:

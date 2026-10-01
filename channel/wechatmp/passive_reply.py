@@ -3,7 +3,7 @@ import time
 
 import web
 from wechatpy import parse_message
-from wechatpy.replies import ImageReply, VoiceReply, create_reply
+from wechatpy.replies import ImageReply, VideoReply, VoiceReply, create_reply
 import textwrap
 from bridge.context import *
 from bridge.reply import *
@@ -81,7 +81,7 @@ class Query:
                                     请跟我说话吧。"""
                                 )
                         else:
-                            logger.error(f"[wechatmp] unknown error")
+                            logger.error("[wechatmp] unknown error")
                             reply_text = textwrap.dedent(
                                 """\
                                 未知错误，请稍后再试"""
@@ -214,6 +214,39 @@ class Query:
                     replyPost = ImageReply(message=msg)
                     replyPost.media_id = media_id
                     return encrypt_func(replyPost.render())
+
+                elif reply_type == "video":
+                    media_id = reply_content
+                    asyncio.run_coroutine_threadsafe(channel.delete_media(media_id), channel.delete_media_loop)
+                    logger.info(
+                        "[wechatmp] Request {} do send to {} {}: {} video media_id {}".format(
+                            request_cnt,
+                            from_user,
+                            message_id,
+                            content,
+                            media_id,
+                        )
+                    )
+                    replyPost = VideoReply(message=msg)
+                    replyPost.media_id = media_id
+                    return encrypt_func(replyPost.render())
+
+                else:
+                    # A segment no branch above can render was still uploaded to
+                    # the permanent material store, so it has to be released
+                    # here rather than left behind for good.
+                    logger.warning(
+                        "[wechatmp] Request {} cannot render cached reply type {} from {}, dropping it".format(
+                            request_cnt,
+                            reply_type,
+                            from_user,
+                        )
+                    )
+                    if reply_type != "text" and reply_content:
+                        asyncio.run_coroutine_threadsafe(
+                            channel.delete_media(reply_content), channel.delete_media_loop
+                        )
+                    return "success"
 
             elif msg.type == "event":
                 logger.info("[wechatmp] Event {} from {}".format(msg.event, msg.source))

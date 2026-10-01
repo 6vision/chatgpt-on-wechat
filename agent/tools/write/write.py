@@ -87,8 +87,6 @@ class Write(BaseTool):
             if blocking:
                 return ToolResult.fail(f"Error: {blocking}")
 
-            # Write through a sibling file, same reason as the edit tool: a
-            # failed in-place write leaves an emptied or half-written file.
             write_text_atomic(absolute_path, content)
             note_write(absolute_path)
             

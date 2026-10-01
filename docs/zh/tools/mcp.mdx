@@ -5,6 +5,21 @@ description: 通过 Model Context Protocol 接入外部工具生态
 
 CowAgent 支持 [Model Context Protocol (MCP)](https://modelcontextprotocol.io)，让 Agent 能够直接调用社区中数以万计的 MCP 工具。配置一次 `mcp.json`，工具就会以与内置工具完全相同的方式呈现给 LLM，可被自动选择和调用。
 
+## Web / 桌面控制台
+
+Web 控制台和桌面客户端「能力」页面的 **MCP 工具** 区域可以直接添加、编辑、停用和删除 MCP 服务，不必再手工改 `mcp.json`。
+
+- **表单或 JSON**：支持表单填写，或在 JSON 模式下粘贴标准 `mcpServers` 配置（可同时包含多个服务），例如 `{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}}`。
+- **连接测试**：检测服务是否可用并列出其工具。保存前会自动检测，未通过时可修改配置或选择「仍然保存」（适用于保存后才能授权的服务）。
+- **配置存储**：写入当前 Agent 的 `mcp.json`，格式与 Claude Desktop / Cursor 一致。
+- **即时生效**：修改在下一条消息生效，无需重启。
+
+stdio、SSE、streamable HTTP 都支持。停用的服务器会留在文件里，但不会被拉起。
+
+<Frame>
+  <img src="https://cdn.link-ai.tech/doc/20260930184045.png" alt="添加 MCP 工具" width="800" />
+</Frame>
+
 ## 配置文件
 
 CowAgent 读取 `~/cow/mcp.json`。文件不存在时不会启用任何 MCP 工具，也不会报错。
@@ -84,17 +99,6 @@ Docker 部署时，官方 `docker-compose.yml` 已经把宿主机 `./cow` 挂载
 - header 的值按字面量发送，`${API_KEY}` **不会**从环境变量展开
 - 密钥在 `mcp.json` 中是明文存储，注意不要提交到版本库
 - 配置了 `Authorization` 即视为静态认证，不会触发下方的 OAuth 流程，即使密钥是错的
-
-## Web / 桌面控制台
-
-Web 控制台和桌面客户端「能力」页面的 **MCP 工具** 区域可以直接添加、编辑、停用和删除 MCP 服务，不必再手工改 `mcp.json`。
-
-- **表单或 JSON**：可以逐项填写表单，也可以切换到 JSON 标签，直接粘贴 MCP 市场提供的配置，例如 `{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}}`，一次可以粘贴多个。
-- **测试连接** 会握手并列出每个服务提供的工具。点击 **保存** 时也会先做同样的校验；校验未通过时，可以修改配置，或选择 **仍然保存**（适用于保存后才能授权的服务）。
-- 保存会写入该 Agent 的 `mcp.json`，格式与 Claude / Cursor 的 `mcpServers` 一致。
-- CowAgent 会热加载该文件，**下一条消息**即可使用新工具，无需重启进程。
-
-stdio、SSE、streamable HTTP 都支持。停用的服务器会留在文件里，但不会被拉起。
 
 ## 让 Agent 帮你配置
 

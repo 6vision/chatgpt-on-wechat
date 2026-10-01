@@ -25,28 +25,29 @@ import uuid
 _IN_PLACE_ERRNOS = (errno.EBUSY, errno.EXDEV, errno.EACCES, errno.EPERM)
 
 
-def write_text_atomic(path, text: str, encoding: str = "utf-8") -> None:
-    _replace(path, lambda f: f.write(text), encoding)
+def write_text_atomic(path, text: str, encoding: str = "utf-8", newline=None) -> None:
+    """``newline`` is passed to ``open``; ``''`` writes ``text`` verbatim."""
+    _replace(path, lambda f: f.write(text), encoding, newline)
 
 
 def write_json_atomic(path, data, indent: int = 4, ensure_ascii: bool = False) -> None:
     _replace(path, lambda f: json.dump(data, f, indent=indent, ensure_ascii=ensure_ascii))
 
 
-def _replace(path, write, encoding: str = "utf-8") -> None:
+def _replace(path, write, encoding: str = "utf-8", newline=None) -> None:
     # Resolve symlinks so the link keeps pointing at the updated file instead
     # of being swapped for a regular one.
     target = os.path.realpath(os.fspath(path))
     directory, name = os.path.split(target)
     tmp_path = os.path.join(directory, f".{name}.{uuid.uuid4().hex[:12]}.tmp")
     try:
-        f = open(tmp_path, "w", encoding=encoding)
+        f = open(tmp_path, "w", encoding=encoding, newline=newline)
     except OSError as e:
         if not _can_write_in_place(e, target):
             raise
         buffer = io.StringIO()
         write(buffer)
-        _write_in_place(target, buffer.getvalue(), encoding, e)
+        _write_in_place(target, buffer.getvalue(), encoding, e, newline)
         return
     try:
         with f:
@@ -59,9 +60,10 @@ def _replace(path, write, encoding: str = "utf-8") -> None:
         except OSError as e:
             if not _can_write_in_place(e, target):
                 raise
-            with open(tmp_path, "r", encoding=encoding) as src:
+            # Copy what is already on disk, line endings included.
+            with open(tmp_path, "r", encoding=encoding, newline="") as src:
                 text = src.read()
-            _write_in_place(target, text, encoding, e)
+            _write_in_place(target, text, encoding, e, "")
             _remove_quietly(tmp_path)
     except BaseException:
         _remove_quietly(tmp_path)
@@ -74,11 +76,11 @@ def _can_write_in_place(error: OSError, target: str) -> bool:
     return isinstance(error, PermissionError) or error.errno in _IN_PLACE_ERRNOS
 
 
-def _write_in_place(target: str, text: str, encoding: str, cause: OSError) -> None:
+def _write_in_place(target: str, text: str, encoding: str, cause: OSError, newline=None) -> None:
     from common.log import logger
 
     logger.warning(f"[AtomicWrite] Cannot replace {target} ({cause}), writing in place")
-    with open(target, "w", encoding=encoding) as f:
+    with open(target, "w", encoding=encoding, newline=newline) as f:
         f.write(text)
         f.flush()
         os.fsync(f.fileno())
