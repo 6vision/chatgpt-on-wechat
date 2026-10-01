@@ -3,6 +3,7 @@ from wechatpy.enterprise import WeChatClient
 from bridge.context import ContextType
 from channel.chat_message import ChatMessage
 from common.log import logger
+from common.media_download import MAX_FILE_BYTES, MAX_IMAGE_BYTES, save_response
 from common.tmp_dir import TmpDir
 
 
@@ -24,8 +25,10 @@ class WechatComAppMessage(ChatMessage):
                 # 如果响应状态码是200，则将响应内容写入本地文件
                 response = client.media.download(msg.media_id)
                 if response.status_code == 200:
-                    with open(self.content, "wb") as f:
-                        f.write(response.content)
+                    try:
+                        save_response(response, self.content, MAX_FILE_BYTES)
+                    except Exception as e:
+                        logger.error(f"[wechatcom] Failed to download voice file: {e}")
                 else:
                     logger.info(f"[wechatcom] Failed to download voice file, {response.content}")
 
@@ -38,8 +41,10 @@ class WechatComAppMessage(ChatMessage):
                 # 如果响应状态码是200，则将响应内容写入本地文件
                 response = client.media.download(msg.media_id)
                 if response.status_code == 200:
-                    with open(self.content, "wb") as f:
-                        f.write(response.content)
+                    try:
+                        save_response(response, self.content, MAX_IMAGE_BYTES)
+                    except Exception as e:
+                        logger.error(f"[wechatcom] Failed to download image file: {e}")
                 else:
                     logger.info(f"[wechatcom] Failed to download image file, {response.content}")
 

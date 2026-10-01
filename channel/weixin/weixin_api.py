@@ -16,13 +16,13 @@ import base64
 import hashlib
 import os
 import random
-import struct
 import time
 import uuid
 
 import requests
 
 from common.log import logger
+from common.media_download import MAX_FILE_BYTES, read_response
 
 DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com"
 CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c"
@@ -463,8 +463,9 @@ def download_media_from_cdn(cdn_base_url: str, encrypt_query_param: str,
     """
     from urllib.parse import quote
     url = f"{cdn_base_url}/download?encrypted_query_param={quote(encrypt_query_param)}"
-    resp = _get_cdn_session().get(url, timeout=60)
+    resp = _get_cdn_session().get(url, timeout=60, stream=True)
     resp.raise_for_status()
+    body = read_response(resp, MAX_FILE_BYTES)
 
     # Determine key format:
     # 1) 32-char hex string → 16 raw bytes
@@ -480,13 +481,13 @@ def download_media_from_cdn(cdn_base_url: str, encrypt_query_param: str,
             try:
                 key_bytes = bytes.fromhex(decoded.decode("ascii"))
             except (ValueError, UnicodeDecodeError):
-                raise ValueError(f"Invalid AES key: 32 bytes but not valid hex")
+                raise ValueError("Invalid AES key: 32 bytes but not valid hex")
         elif len(decoded) == 16:
             key_bytes = decoded
         else:
             raise ValueError(f"Invalid AES key length after base64 decode: {len(decoded)}")
 
-    decrypted = _aes_ecb_decrypt(resp.content, key_bytes)
+    decrypted = _aes_ecb_decrypt(body, key_bytes)
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     with open(save_path, "wb") as f:

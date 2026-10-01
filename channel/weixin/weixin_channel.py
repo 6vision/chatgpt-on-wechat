@@ -26,6 +26,7 @@ from channel.weixin.weixin_message import WeixinMessage
 from common import state_dir
 from common.expired_dict import ExpiredDict
 from common.log import logger
+from common.media_download import MAX_FILE_BYTES, save_response
 from common.singleton import singleton
 from common.utils import is_cloud_deployment
 from config import conf, get_weixin_credentials_path
@@ -972,7 +973,7 @@ class WeixinChannel(ChatChannel):
 
         if local_path.startswith(("http://", "https://")):
             try:
-                resp = requests.get(local_path, timeout=60)
+                resp = requests.get(local_path, timeout=60, stream=True)
                 resp.raise_for_status()
                 ct = resp.headers.get("Content-Type", "")
                 ext = ".bin"
@@ -990,8 +991,7 @@ class WeixinChannel(ChatChannel):
                     ext = ".pdf"
 
                 tmp_path = _media_tmp_path("wx_media", ext)
-                with open(tmp_path, "wb") as f:
-                    f.write(resp.content)
+                save_response(resp, tmp_path, MAX_FILE_BYTES)
                 return tmp_path
             except Exception as e:
                 logger.error(f"[Weixin] Failed to download media: {e}")

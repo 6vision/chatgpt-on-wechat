@@ -5,6 +5,9 @@ is cut off at ``max_bytes`` instead of being buffered into memory first.
 ``max_seconds`` optionally caps the whole transfer, since the socket timeout
 alone never fires on a server that keeps trickling bytes.
 Every failure raises; callers decide how to degrade.
+
+``save_response`` / ``read_response`` apply the same rules to a response the
+caller already opened (a POST, or a GET behind a redirect guard).
 """
 
 import os
@@ -34,14 +37,28 @@ def download_to_file(url, path, max_bytes=MAX_FILE_BYTES, timeout=_DEFAULT_TIMEO
                      **kwargs) -> DownloadResult:
     """Stream ``url`` into ``path``.
 
-    The body goes to a temp file next to ``path`` and is moved into place only
-    once it arrived completely within ``max_bytes``, so a failed or oversized
-    download never leaves a partial file behind or clobbers an existing one.
     Extra ``kwargs`` (headers, params, ...) are passed to ``requests.get``.
+    """
+    response = _open(url, max_bytes, timeout, kwargs)
+    return save_response(response, path, max_bytes, max_seconds)
+
+
+def download_bytes(url, max_bytes=MAX_FILE_BYTES, timeout=_DEFAULT_TIMEOUT, max_seconds=None, **kwargs) -> bytes:
+    """Return the body of ``url``, refusing anything larger than ``max_bytes``."""
+    response = _open(url, max_bytes, timeout, kwargs)
+    return read_response(response, max_bytes, max_seconds)
+
+
+def save_response(response, path, max_bytes=MAX_FILE_BYTES, max_seconds=None) -> DownloadResult:
+    """Stream an already-open *response* into *path*.
+
+    The body goes to a temp file next to *path* and is moved into place only
+    once it arrived completely within *max_bytes*, so a failed or oversized
+    download never leaves a partial file behind or clobbers an existing one.
+    The response is closed on the way out.
     """
     temp_path = None
     deadline = _deadline(max_seconds)
-    response = _open(url, max_bytes, timeout, kwargs)
     try:
         size = 0
         with tempfile.NamedTemporaryFile(
@@ -63,10 +80,10 @@ def download_to_file(url, path, max_bytes=MAX_FILE_BYTES, timeout=_DEFAULT_TIMEO
                 pass
 
 
-def download_bytes(url, max_bytes=MAX_FILE_BYTES, timeout=_DEFAULT_TIMEOUT, max_seconds=None, **kwargs) -> bytes:
-    """Return the body of ``url``, refusing anything larger than ``max_bytes``."""
+def read_response(response, max_bytes=MAX_FILE_BYTES, max_seconds=None) -> bytes:
+    """Return the body of an already-open *response*, refusing anything larger
+    than *max_bytes*. Closes the response."""
     deadline = _deadline(max_seconds)
-    response = _open(url, max_bytes, timeout, kwargs)
     try:
         return b"".join(_read_chunks(response, max_bytes, deadline))
     finally:
