@@ -914,14 +914,34 @@ class WecomBotChannel(ChatChannel):
                 content = (state["committed"] + state["current"]).strip()
                 image_urls = list(state.get("image_urls") or [])
                 has_images = bool(state.get("images"))
+                # Claim it up front: only one push may be attempted, even if a
+                # late poll arrives while the request is still in flight.
                 state["url_sent"] = True
 
-            self._send_via_response_url(stream_id, response_url, content, image_urls, has_images)
+            if not self._send_via_response_url(stream_id, response_url, content, image_urls, has_images):
+                # WeCom refused it, so nothing reached the user. Give the answer
+                # back to the poll path, which still holds it -- otherwise the
+                # next poll takes the "already pushed via response_url" branch,
+                # answers `finish` with empty content, and the reply is gone.
+                with self._callback_lock:
+                    state = self._callback_streams.get(stream_id)
+                    if state:
+                        state["url_sent"] = False
 
         threading.Thread(target=_run, daemon=True, name=f"wecom-respurl-{stream_id}").start()
 
-    def _send_via_response_url(self, stream_id, response_url, content, image_urls, has_images):
-        """Push a one-shot active markdown reply to response_url (valid 1h, single use)."""
+    def _send_via_response_url(
+        self, stream_id, response_url, content, image_urls, has_images
+    ) -> bool:
+        """Push a one-shot active markdown reply to response_url (valid 1h, single use).
+
+        WeCom answers these callbacks with HTTP 200 whether or not it accepted
+        the content, so the body's ``errcode`` is the only signal -- the same
+        envelope the long-connection replies in this file already read (`:514`,
+        `:546`, `:1381`, `:1404`, `:1415`).
+
+        Returns True only when WeCom took the reply.
+        """
         md = content or ""
         if image_urls:
             md += ("\n\n" if md else "") + "\n".join(f"![]({u})" for u in image_urls)
@@ -932,12 +952,31 @@ class WecomBotChannel(ChatChannel):
         payload = {"msgtype": "markdown", "markdown": {"content": md}}
         try:
             resp = requests.post(response_url, json=payload, timeout=15)
-            logger.info(
-                f"[WecomBot] response_url active reply sent for {stream_id}: "
-                f"status={resp.status_code}, body={resp.text[:200]}"
-            )
         except Exception as e:
             logger.error(f"[WecomBot] response_url active reply failed for {stream_id}: {e}")
+            return False
+
+        try:
+            body = resp.json()
+        except Exception:
+            body = None
+        if not isinstance(body, dict):
+            logger.error(
+                f"[WecomBot] response_url active reply rejected for {stream_id}: "
+                f"status={resp.status_code}, body={getattr(resp, 'text', '')[:200]}"
+            )
+            return False
+
+        errcode = body.get("errcode", 0)
+        if resp.status_code != 200 or errcode != 0:
+            logger.error(
+                f"[WecomBot] response_url active reply rejected for {stream_id}: "
+                f"status={resp.status_code}, errcode={errcode}, errmsg={body.get('errmsg', '')}"
+            )
+            return False
+
+        logger.info(f"[WecomBot] response_url active reply sent for {stream_id}")
+        return True
 
     def _load_image_base64(self, img_path_or_url: str):
         """Load a local/remote image, ensure JPG/PNG within 10MB, return (base64, md5)."""
