@@ -14,6 +14,7 @@ import time
 from typing import Any, Callable, Optional
 
 from common.log import logger
+from common.markdown_fence import replace_fenced_blocks
 
 _STREAM_THROTTLE_S = 0.15
 _FENCE_RE = re.compile(r"```[\w+-]*\n.*?```", re.DOTALL)
@@ -61,11 +62,15 @@ def sanitize_dingtalk_markdown(text: str) -> str:
 
     fences: list[str] = []
 
-    def _hold_fence(match: re.Match) -> str:
-        fences.append(match.group(0))
+    def _hold(block: str) -> str:
+        fences.append(block)
         return f"\x00FENCE{len(fences) - 1}\x00"
 
-    protected = _FENCE_RE.sub(_hold_fence, normalised)
+    def _hold_fence(match: re.Match) -> str:
+        return _hold(match.group(0))
+
+    protected = replace_fenced_blocks(normalised, lambda _info, _code, block: _hold(block))
+    protected = _FENCE_RE.sub(_hold_fence, protected)
     protected = _INLINE_CODE_RE.sub(_hold_fence, protected)
     protected = _HTML_COMMENT_RE.sub("", protected)
     protected = _BR_RE.sub("\n", protected)
