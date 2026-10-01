@@ -67,8 +67,7 @@ class PyttsVoice(Voice):
                 while self.engine.isBusy() or not os.path.exists(wavFile):
                     if time.monotonic() >= deadline:
                         logger.error(
-                            "[Pytts] textToVoice timed out after {0}s waiting for {1}",
-                            _SYNTHESIS_TIMEOUT_S, wavFileName,
+                            f"[Pytts] textToVoice timed out after {_SYNTHESIS_TIMEOUT_S}s waiting for {wavFileName}"
                         )
                         return Reply(
                             ReplyType.ERROR, "抱歉，语音合成超时了，请稍后再试吧~"
