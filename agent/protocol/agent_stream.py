@@ -787,6 +787,13 @@ class AgentStreamExecutor:
         self._reset_model_fallback(nested_run=_nested_run)
 
         cancelled = False
+        # Set by the loop's "no tool calls, so we have an answer" exit below.
+        # `turn >= self.max_turns` on its own cannot tell that exit apart from a
+        # run that genuinely ran out of steps: a run that answers on its very
+        # last allowed turn leaves turn == max_turns too, and taking the
+        # step-limit branch from there spends a second LLM call to throw the
+        # answer away and replace it with an apology about the step limit.
+        finished_with_answer = False
         try:
             while turn < self.max_turns:
                 # Check at the very top of every turn so a cancel arriving
@@ -904,6 +911,7 @@ class AgentStreamExecutor:
                             "has_tool_calls": False,
                             "stop_reason": stop_reason
                         })
+                        finished_with_answer = True
                         break
 
                 # Log tool calls with arguments (truncate long values like base64)
@@ -1087,7 +1095,7 @@ class AgentStreamExecutor:
                     "stop_reason": stop_reason
                 })
 
-            if turn >= self.max_turns:
+            if turn >= self.max_turns and not finished_with_answer:
                 logger.warning(f"⚠️  Reached max decision step limit: {self.max_turns}")
                 self._drain_and_close_steering()
                 
