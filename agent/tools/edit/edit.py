@@ -92,9 +92,13 @@ class Edit(BaseTool):
             return ToolResult.fail(f"Error: File is not readable/writable: {path}")
         
         try:
-            # Read file
-            with open(absolute_path, 'r', encoding='utf-8') as f:
-                raw_content = f.read()
+            # Read the file's bytes instead of opening it in text mode. A
+            # newline=None read translates every CRLF to LF before we ever see
+            # it, so the detect_line_ending() call below could only ever answer
+            # '\n' and restore_line_endings() was guaranteed to be a no-op.
+            # Decoding the bytes leaves the real ending intact for it to find.
+            with open(absolute_path, 'rb') as f:
+                raw_content = f.read().decode('utf-8')
             
             # Remove BOM (LLM won't include invisible BOM in oldText)
             bom, content = strip_bom(raw_content)
@@ -192,8 +196,11 @@ class Edit(BaseTool):
             if blocking:
                 return ToolResult.fail(f"Error: {blocking}")
 
-            # Write file
-            with open(absolute_path, 'w', encoding='utf-8') as f:
+            # Write file. newline='' writes final_content verbatim; the default
+            # text mode rewrites every '\n' as os.linesep, which on Windows
+            # turned the ending we just restored back into CRLF for the whole
+            # file.
+            with open(absolute_path, 'w', encoding='utf-8', newline='') as f:
                 f.write(final_content)
             note_write(absolute_path)
             
@@ -223,7 +230,7 @@ class Edit(BaseTool):
             ):
                 try:
                     self.memory_manager.mark_dirty()
-                except Exception as e:
+                except Exception:
                     # Don't fail the edit if memory notification fails
                     pass
             

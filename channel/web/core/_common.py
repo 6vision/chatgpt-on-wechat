@@ -32,6 +32,7 @@ from bridge.context import ContextType
 from channel.chat_message import ChatMessage
 from common.channel_registry import get_channel_manager
 from common.log import logger
+from common.utils import constant_time_equals
 from config import conf, get_data_root, read_config_template
 
 
@@ -70,7 +71,7 @@ def _desktop_token_matches() -> bool:
         return False
     env = getattr(web.ctx, "env", {}) or {}
     provided = env.get("HTTP_X_COW_DESKTOP_TOKEN", "")
-    return bool(provided) and hmac.compare_digest(provided, expected)
+    return bool(provided) and constant_time_equals(provided, expected)
 
 
 @dataclass
@@ -103,9 +104,6 @@ def _read_config_file_for_write() -> dict:
     """
     config_path = os.path.join(get_data_root(), "config.json")
     if os.path.exists(config_path):
-        # utf-8-sig tolerates a UTF-8 BOM (common when the file was edited with
-        # Windows Notepad / PowerShell). Plain utf-8 would raise "Unexpected
-        # UTF-8 BOM" here and fail every config write from the web console.
         with open(config_path, "r", encoding="utf-8-sig") as f:
             return json.load(f)
     return read_config_template()
@@ -269,7 +267,7 @@ def _verify_auth_token(token):
         ts_hex.encode(),
         hashlib.sha256,
     ).hexdigest()
-    return hmac.compare_digest(sig, expected)
+    return constant_time_equals(sig, expected)
 
 
 def _get_bearer_token():

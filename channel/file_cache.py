@@ -28,11 +28,12 @@ class FileCache:
             file_path: 文件本地路径
             file_type: 文件类型（image, video, file 等）
         """
+        now = time.time()
         entry = self.cache.get(session_id)
-        if entry is None:
+        if entry is None or now - entry['timestamp'] > self.ttl:
             entry = {
                 'files': [],
-                'timestamp': time.time()
+                'timestamp': now
             }
             self.cache[session_id] = entry
         else:
@@ -42,7 +43,7 @@ class FileCache:
             # Refreshing only on creation made the TTL count from the first
             # file, so a burst spanning more than the TTL lost its tail —
             # including files that arrived seconds before the question.
-            entry['timestamp'] = time.time()
+            entry['timestamp'] = now
 
         # 添加文件（去重）
         file_info = {'path': file_path, 'type': file_type}

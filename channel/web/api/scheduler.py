@@ -244,9 +244,16 @@ class SchedulerToggleHandler:
             store = _global_task_store()
             if store is None:
                 return json.dumps({"status": "error", "message": "Scheduler store unavailable"})
-            store.enable_task(task_id, enabled)
             task = store.get_task(task_id)
-            return json.dumps({"status": "success", "task": task}, ensure_ascii=False)
+            if not task:
+                return json.dumps(
+                    {"status": "error", "message": f"Task '{task_id}' not found"}
+                )
+            store.enable_task(task_id, enabled)
+            return json.dumps(
+                {"status": "success", "task": store.get_task(task_id)},
+                ensure_ascii=False,
+            )
         except Exception as e:
             logger.error(f"[WebChannel] Scheduler toggle error: {e}")
             return json.dumps({"status": "error", "message": str(e)})
@@ -282,7 +289,17 @@ class SchedulerUpdateHandler:
             
             # Update schedule
             if "schedule" in body:
-                updates["schedule"] = body["schedule"]
+                # The create handler requires a mapping with a type; the update
+                # handler used to take body["schedule"] verbatim, so a null or a
+                # bare string was persisted and every later read of the schedule
+                # raised AttributeError on .get().
+                schedule_patch = body["schedule"]
+                if not isinstance(schedule_patch, dict) or not schedule_patch.get("type"):
+                    return json.dumps({
+                        "status": "error",
+                        "message": "schedule must be an object with a type"
+                    }, ensure_ascii=False)
+                updates["schedule"] = schedule_patch
                 # If schedule config changed, recalculate next_run_at
                 # Build merged temp task data for calculation (without modifying the original object)
                 merged = dict(original_task)

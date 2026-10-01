@@ -251,6 +251,10 @@ class PluginManager:
                 for event in instance.handlers:
                     if event not in self.listening_plugins:
                         self.listening_plugins[event] = []
+                    # 一个插件在一个事件里只应注册一次：重复注册会让 emit_event
+                    # 多次调用 handler（重新 enable 后回复被装饰两遍）。
+                    if name in self.listening_plugins[event]:
+                        self.listening_plugins[event].remove(name)
                     self.listening_plugins[event].append(name)
         self.refresh_order()
         return failed_plugins

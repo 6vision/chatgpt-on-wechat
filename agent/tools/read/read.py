@@ -504,25 +504,21 @@ class Read(BaseTool):
                 from docx import Document
             except ImportError:
                 raise ImportError("Error: python-docx library not installed. Install with: pip install python-docx")
+            from common.office_text import iter_docx_body_text
             doc = Document(absolute_path)
-            paragraphs = [p.text for p in doc.paragraphs]
-            for table in doc.tables:
-                for row in table.rows:
-                    paragraphs.append('\t'.join(cell.text for cell in row.cells))
-            return '\n'.join(paragraphs)
+            return '\n'.join(iter_docx_body_text(doc))
 
         if file_ext in ('.xlsx', '.xls'):
             try:
                 from openpyxl import load_workbook
             except ImportError:
                 raise ImportError("Error: openpyxl library not installed. Install with: pip install openpyxl")
-            wb = load_workbook(absolute_path, read_only=True, data_only=True)
+            from common.office_text import spreadsheet_sheets
             parts = []
-            for ws in wb.worksheets:
-                parts.append(f"--- Sheet: {ws.title} ---")
-                for row in ws.iter_rows(values_only=True):
-                    parts.append('\t'.join(str(c) if c is not None else '' for c in row))
-            wb.close()
+            with spreadsheet_sheets(absolute_path, load_workbook) as sheets:
+                for name, rows in sheets:
+                    parts.append(f"--- Sheet: {name} ---")
+                    parts.extend('\t'.join(row) for row in rows)
             return '\n'.join(parts)
 
         if file_ext in ('.pptx', '.ppt'):

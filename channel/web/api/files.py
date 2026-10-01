@@ -33,6 +33,7 @@ from channel.web.core._common import (
 )
 from channel.web.core.channel import WebChannel
 from common.log import logger
+from common.utils import constant_time_equals
 
 
 def _decode_dir_token(token: str) -> str:
@@ -46,7 +47,7 @@ def _decode_dir_token(token: str) -> str:
     except Exception:
         raise ValueError("Malformed preview token")
     expected = hmac.new(_get_preview_secret(), real.encode("utf-8"), hashlib.sha256).hexdigest()[:16]
-    if not hmac.compare_digest(sig, expected):
+    if not constant_time_equals(sig, expected):
         raise ValueError("Bad preview token signature")
     return real
 

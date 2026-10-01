@@ -92,9 +92,6 @@ class AgentAdminService:
             return team.resolve(self._settings)
         if not self.config_path.exists():
             return {}
-        # utf-8-sig tolerates a UTF-8 BOM (e.g. config.json edited with Windows
-        # Notepad / PowerShell). Plain utf-8 raises "Unexpected UTF-8 BOM" here,
-        # which surfaces as a failed /api/agents snapshot and an empty team page.
         with self.config_path.open("r", encoding="utf-8-sig") as handle:
             data = json.load(handle)
         if not isinstance(data, dict):

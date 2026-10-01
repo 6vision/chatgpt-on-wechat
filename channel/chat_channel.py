@@ -2,8 +2,10 @@ import os
 import re
 import threading
 import time
-from asyncio import CancelledError
-from concurrent.futures import Future, ThreadPoolExecutor
+# This CancelledError is concurrent.futures', not asyncio's: worker.exception()
+# raises the former on a Future that a /cancel cancelled, and asyncio's has been
+# a BaseException since 3.8, so an except clause naming it cannot catch it.
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 
 from bridge.context import *
 from bridge.reply import *
@@ -603,26 +605,57 @@ class ChatChannel(Channel):
             with self.lock:
                 session_ids = list(self.sessions.keys())
             for session_id in session_ids:
-                with self.lock:
-                    context_queue, semaphore = self.sessions[session_id]
-                if semaphore.acquire(blocking=False):  # 等线程处理完毕才能删除
-                    if not context_queue.empty():
-                        context = context_queue.get()
-                        logger.debug("[chat_channel] consume context: {}".format(context))
-                        future: Future = handler_pool.submit(self._handle, context)
-                        future.add_done_callback(self._thread_pool_callback(session_id, context=context))
-                        with self.lock:
-                            if session_id not in self.futures:
-                                self.futures[session_id] = []
-                            self.futures[session_id].append(future)
-                    elif semaphore._initial_value == semaphore._value + 1:  # 除了当前，没有任务再申请到信号量，说明所有任务都处理完毕
-                        with self.lock:
-                            self.futures[session_id] = [t for t in self.futures[session_id] if not t.done()]
-                            assert len(self.futures[session_id]) == 0, "thread pool error"
-                            del self.sessions[session_id]
-                    else:
-                        semaphore.release()
+                # This is the only consumer this channel instance ever gets, so
+                # an exception raised while looking at one session must not
+                # escape: it would end the loop and stop message handling for
+                # good, leaving the queues filling up behind a bot that looks
+                # alive and stays silent. Log it and go on to the next session.
+                try:
+                    self._consume_session(session_id)
+                except Exception as e:
+                    logger.error(f"[chat_channel] consume session {session_id} failed: {e}")
             time.sleep(0.2)
+
+    def _consume_session(self, session_id):
+        """Dispatch one pending context of *session_id*, or retire the session."""
+        with self.lock:
+            context_queue, semaphore = self.sessions[session_id]
+        if not semaphore.acquire(blocking=False):  # 等线程处理完毕才能删除
+            return
+        if not context_queue.empty():
+            context = context_queue.get()
+            logger.debug("[chat_channel] consume context: {}".format(context))
+            try:
+                future: Future = handler_pool.submit(self._handle, context)
+            except Exception:
+                # The done callback is what releases the slot; without a future it never runs.
+                semaphore.release()
+                raise
+            future.add_done_callback(self._thread_pool_callback(session_id, context=context))
+            with self.lock:
+                if session_id not in self.futures:
+                    self.futures[session_id] = []
+                self.futures[session_id].append(future)
+        elif semaphore._initial_value == semaphore._value + 1:  # 除了当前，没有任务再申请到信号量，说明所有任务都处理完毕
+            with self.lock:
+                # futures[session_id] only exists once a context was submitted,
+                # so a session that never got one has no entry here.
+                pending = [t for t in self.futures.get(session_id, []) if not t.done()]
+                if pending:
+                    # Tasks are still running, so keep the session and let the
+                    # next tick look again instead of dropping their handles.
+                    self.futures[session_id] = pending
+                    logger.warning(
+                        f"[chat_channel] session {session_id} still has {len(pending)} "
+                        f"running task(s), keeping it queued"
+                    )
+                else:
+                    self.futures.pop(session_id, None)
+                    del self.sessions[session_id]
+            if pending:
+                semaphore.release()
+        else:
+            semaphore.release()
 
     def _queue_key(self, session_id: str, agent_id: str = None) -> str:
         """Return the key produce() filed this session's queue under.
@@ -679,30 +712,48 @@ class ChatChannel(Channel):
         )
         return removed, active
 
+    def _cancel_futures(self, futures):
+        """Cancel queued pool futures without holding ``self.lock``.
+
+        ``Future.cancel()`` runs the done-callbacks of a *PENDING* future on the
+        calling thread, and the callback ``consume()`` registered
+        (``_thread_pool_callback``) takes ``self.lock`` itself to release the
+        session semaphore. Cancelling while holding that non-reentrant lock made
+        the cancelling thread block forever while still holding it, wedging
+        ``produce()`` and ``consume()`` for *every* session on the channel. So
+        the futures are collected under the lock and cancelled here, after it is
+        released: the callback then takes ``self.lock`` at top level, exactly as
+        it does when a worker finishes normally.
+        """
+        for future in futures:
+            future.cancel()
+
     # 取消session_id对应的所有任务，只能取消排队的消息和已提交线程池但未执行的任务
     def cancel_session(self, session_id, agent_id: str = None):
         queue_key = self._queue_key(session_id, agent_id)
+        pending = []
         with self.lock:
             if queue_key in self.sessions:
                 # futures[queue_key] is only created in consume() when a task is
                 # dispatched, so it may be absent if cancel happens right after
                 # produce() but before the first dispatch. Default to [].
-                for future in self.futures.get(queue_key, []):
-                    future.cancel()
+                pending = list(self.futures.get(queue_key, []))
                 cnt = self.sessions[queue_key][0].qsize()
                 if cnt > 0:
                     logger.info("Cancel {} messages in session {}".format(cnt, session_id))
                 self.sessions[queue_key][0] = Dequeue()
+        self._cancel_futures(pending)
 
     def cancel_all_session(self):
+        pending = []
         with self.lock:
             for session_id in self.sessions:
-                for future in self.futures.get(session_id, []):
-                    future.cancel()
+                pending.extend(self.futures.get(session_id, []))
                 cnt = self.sessions[session_id][0].qsize()
                 if cnt > 0:
                     logger.info("Cancel {} messages in session {}".format(cnt, session_id))
                 self.sessions[session_id][0] = Dequeue()
+        self._cancel_futures(pending)
 
 
 def check_prefix(content, prefix_list):

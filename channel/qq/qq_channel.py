@@ -74,6 +74,7 @@ _MAX_MSG_SEQ_TRACKED = 512
 
 @singleton
 class QQChannel(ChatChannel):
+    NOT_SUPPORT_REPLYTYPE = [ReplyType.VOICE]
 
     def __init__(self):
         super().__init__()

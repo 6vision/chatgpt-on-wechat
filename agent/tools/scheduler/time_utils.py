@@ -7,7 +7,16 @@ naive local-time behaviour so existing stored tasks are not reinterpreted.
 """
 from croniter import croniter
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+
+# zoneinfo joined the standard library in Python 3.9. Without it, only named
+# IANA timezones are unavailable; legacy naive-local tasks keep working.
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    try:
+        from backports.zoneinfo import ZoneInfo
+    except ImportError:
+        ZoneInfo = None
 
 UTC = timezone.utc
 
@@ -38,12 +47,29 @@ def resolve_timezone(name=None):
         return datetime.now().astimezone().tzinfo
     if not isinstance(name, str) or not name.strip():
         raise ValueError("timezone must be a non-empty IANA name")
+    if ZoneInfo is None:
+        raise ValueError(
+            "IANA timezones require Python 3.9+ or the backports.zoneinfo package"
+        )
     return ZoneInfo(name.strip())
 
 
 def task_timezone(task: dict):
-    """Return the IANA zone declared by a task, or ``None`` for legacy mode."""
-    name = task.get("schedule", {}).get("timezone")
+    """Return the IANA zone declared by a task, or ``None`` for legacy mode.
+
+    A stored ``schedule`` is read as ``task.get("schedule", {})``, which only
+    substitutes the empty dict when the key is *absent*. A key that is present
+    but holds null (or a string, from a hand-edited tasks file or a client that
+    wrote the wrong JSON type) leaves None in its place, and the next ``.get``
+    raised ``AttributeError: 'NoneType' object has no attribute 'get'`` — once
+    per task per tick, from every scheduler code path that reads a schedule.
+    Treat any non-mapping schedule as "no zone declared", which is the same
+    legacy-naive behaviour as a task that never had a schedule.
+    """
+    schedule = task.get("schedule")
+    if not isinstance(schedule, dict):
+        return None
+    name = schedule.get("timezone")
     return resolve_timezone(name) if name else None
 
 
@@ -157,14 +183,16 @@ def next_cron_occurrence(expression: str, after: datetime, zone=None) -> datetim
 
     after_utc = after.astimezone(UTC) if after.tzinfo is not None else after
     local_after = after_utc.astimezone(zone).replace(tzinfo=None)
-    local_next = croniter(expression, local_after).get_next(datetime)
-    instant = _localize_wall_time(local_next, zone).astimezone(UTC)
-    if instant <= after_utc:
-        # During a fall-back fold, croniter can return an occurrence in
-        # the first fold that maps to an instant already past.  Retry.
-        local_next = croniter(expression, local_after + timedelta(minutes=1)).get_next(datetime)
+    occurrences = croniter(expression, local_after)
+    while True:
+        local_next = occurrences.get_next(datetime)
         instant = _localize_wall_time(local_next, zone).astimezone(UTC)
-    return instant
+        if instant > after_utc:
+            return instant
+        # First-fold occurrences may already be past while the local clock
+        # is repeating. Advance the iterator rather than restarting it: a
+        # single retry can return the same daily occurrence or another past
+        # minute, leaving the task immediately due again.
 
 
 def display_local(value: str, zone=None) -> datetime:

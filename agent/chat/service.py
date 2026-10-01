@@ -144,9 +144,13 @@ class ChatService:
             # Only the first chunk carries the run's query.
             if model_query != query and not writer.started:
                 messages = self._restore_verbatim_query(messages, model_query, query)
-            self._persist_messages(
+            persisted = self._persist_messages(
                 session_id, list(messages), channel_type, workspace_root=workspace_root,
             )
+            if persisted is False:
+                # StepWriter only marks a chunk written after this callback
+                # succeeds. Keep a refused batch pending for the next flush.
+                raise RuntimeError("conversation write failed; step remains pending")
 
         writer = StepWriter(write_run_messages)
 
@@ -815,21 +819,23 @@ class ChatService:
         channel_type: str = "",
         workspace_root: str = None,
     ):
+        """Best-effort write, reporting failure to the incremental writer."""
         try:
             from config import conf
             if not conf().get("conversation_persistence", True):
-                return
+                return True
         except Exception:
             pass
         try:
             from agent.memory import get_conversation_store
-            get_conversation_store(workspace_root).append_messages(
+            return get_conversation_store(workspace_root).append_messages(
                 session_id, new_messages, channel_type=channel_type
             )
         except Exception as e:
             logger.warning(
                 f"[ChatService] Failed to persist messages for session={session_id}: {e}"
             )
+            return False
 
 
 class _StreamState:

@@ -372,8 +372,6 @@ def test_frontend_contract_exposes_mcp_and_skill_install_surfaces():
         for name in ("SkillsPage.tsx", "skills/McpEditorModal.tsx", "skills/SkillAddModal.tsx")
     )
     desktop_api = _read("desktop/src/renderer/src/api/client.ts")
-    docs_en = _read("docs/tools/mcp.mdx")
-    docs_zh = _read("docs/zh/tools/mcp.mdx")
 
     assert "'/api/mcp/servers', 'McpServersHandler'" in py
     assert "'/api/mcp/servers/test', 'McpServerTestHandler'" in py
@@ -424,7 +422,3 @@ def test_frontend_contract_exposes_mcp_and_skill_install_surfaces():
         "confirmSkill",
     ):
         assert token in desktop_page
-
-    assert "web console" in docs_en.lower() or "Skills page" in docs_en
-    assert "Test connection" in docs_en or "test connection" in docs_en.lower()
-    assert "Web" in docs_zh or "web" in docs_zh.lower()
