@@ -13,6 +13,12 @@ from common.log import logger
 from common.tmp_dir import TmpDir
 from voice.voice import Voice
 
+# espeak drives its own coroutine and has been observed never to report itself
+# idle, so the hand-rolled wait below needs an upper bound. Without one a single
+# turn blocks the voice thread forever.
+_SYNTHESIS_TIMEOUT_S = 30.0
+_SYNTHESIS_POLL_S = 0.1
+
 
 class PyttsVoice(Voice):
     engine = pyttsx3.init()
@@ -52,12 +58,23 @@ class PyttsVoice(Voice):
 
                 # Before espeak fix this problem, we iterate the generator and control the waiting by ourself.
                 # But this is not the canonical way to use it, for example if the file already exists it also cannot wait.
+                # So bound the wait: a coroutine that never reports idle must not
+                # hold the voice thread forever. Checking os.path.exists is
+                # equivalent to the previous listdir membership test, without
+                # rescanning the whole directory on every poll.
+                deadline = time.monotonic() + _SYNTHESIS_TIMEOUT_S
                 self.engine.iterate()
-                while self.engine.isBusy() or wavFileName not in os.listdir(TmpDir().path()):
-                    time.sleep(0.1)
+                while self.engine.isBusy() or not os.path.exists(wavFile):
+                    if time.monotonic() >= deadline:
+                        logger.error(
+                            f"[Pytts] textToVoice timed out after {_SYNTHESIS_TIMEOUT_S}s waiting for {wavFileName}"
+                        )
+                        return Reply(
+                            ReplyType.ERROR, "抱歉，语音合成超时了，请稍后再试吧~"
+                        )
+                    time.sleep(_SYNTHESIS_POLL_S)
 
-            reply = Reply(ReplyType.VOICE, wavFile)
+            return Reply(ReplyType.VOICE, wavFile)
 
         except Exception as e:
-            reply = Reply(ReplyType.ERROR, str(e))
-        return reply
+            return Reply(ReplyType.ERROR, str(e))
