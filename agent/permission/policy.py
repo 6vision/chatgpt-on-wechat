@@ -195,6 +195,36 @@ _GIT_GLOBAL_VALUE_OPTIONS = frozenset({
 # git sub-commands that only read in their "list" form.
 _GIT_LIST_ONLY = {"stash": "list", "worktree": "list", "notes": "list"}
 
+# Sub-commands that CREATE a ref when handed a name, and only read when invoked
+# bare or with a listing flag. `git branch topic` and `git tag v1` both write,
+# and the write-flag list below cannot see it: the ref name is a bare operand,
+# not a flag, so the guard has to look at the operands the way _GIT_LIST_ONLY
+# does for stash/worktree/notes.
+_GIT_LIST_OR_CREATE = frozenset({"branch", "tag"})
+
+# Flags that make those sub-commands list instead. An operand alongside none of
+# these is a ref name, so the command creates and is refused -- read-only fails
+# closed, the same way an unknown command does. Long flags only where the two
+# sub-commands agree, because `-a` lists branches but ANNOTATES a tag.
+_GIT_LISTING_FLAGS = frozenset({
+    "-l", "--list", "-v", "--verbose", "-i", "--ignore-case",
+    "--contains", "--no-contains", "--merged", "--no-merged", "--points-at",
+    "--format", "--sort", "--color", "--column", "--no-column",
+})
+
+# Short flags that only list for one of the two.
+_GIT_EXTRA_LISTING_FLAGS = {
+    "branch": frozenset({"-a", "-r", "--all", "--remotes"}),
+}
+
+# `git remote` reads only when it names no verb that changes a remote. Bare, or
+# with a read-only verb such as `show`, it lists; `add`/`set-url`/`prune` and
+# friends write .git/config or delete refs.
+_GIT_REMOTE_WRITE_VERBS = frozenset({
+    "add", "rename", "remove", "rm", "set-head", "set-branches", "set-url",
+    "prune", "update", "set", "unset",
+})
+
 # `git config` only reads with one of these.
 _GIT_CONFIG_READ_FLAGS = frozenset({
     "--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l",
@@ -568,6 +598,38 @@ def _check_git_read_only(args: Sequence[str]) -> Decision:
         second = positional[1].lower() if len(positional) > 1 else ""
         if second != _GIT_LIST_ONLY[sub]:
             return _deny(f"only 'git {sub} {_GIT_LIST_ONLY[sub]}' is read-only.", READ_ONLY)
+        return ALLOW
+    # `git branch topic` / `git tag v1` create a ref. Listing them needs no
+    # operand, or an explicit listing flag (`git tag -l 'v*'`).
+    if sub in _GIT_LIST_OR_CREATE:
+        listing = _GIT_LISTING_FLAGS | _GIT_EXTRA_LISTING_FLAGS.get(sub, frozenset())
+        if len(positional) > 1 and not any(a in listing for a in args):
+            return _deny(
+                f"'git {sub} {positional[1]}' creates a {sub}, so it was refused. "
+                f"Listing is read-only: 'git {sub}', or 'git {sub} -l <pattern>'.",
+                READ_ONLY,
+            )
+        return ALLOW
+    # `git remote add/set-url/prune/...` change remotes; `git remote` and
+    # `git remote show ...` only read.
+    if sub == "remote":
+        for verb in positional[1:]:
+            if verb.lower() in _GIT_REMOTE_WRITE_VERBS:
+                return _deny(
+                    f"'git remote {verb}' changes the repository's remotes.",
+                    READ_ONLY,
+                )
+        return ALLOW
+    # `git symbolic-ref <ref>` reads HEAD; with a second argument it also SETS
+    # that ref, which is how a checkout silently repoints a branch. The
+    # subcommand is positional[0], so a second operand means len > 2.
+    if sub == "symbolic-ref":
+        if len(positional) > 2:
+            return _deny(
+                f"'git symbolic-ref {positional[1]} {positional[2]}' sets the "
+                "reference. Reading it is 'git symbolic-ref <ref>'.",
+                READ_ONLY,
+            )
         return ALLOW
     if sub == "config":
         if not any(a in _GIT_CONFIG_READ_FLAGS for a in args):
