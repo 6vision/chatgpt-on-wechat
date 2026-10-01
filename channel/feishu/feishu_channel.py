@@ -12,7 +12,6 @@
 """
 
 import json
-import hmac
 import logging
 import os
 import ssl
@@ -2331,7 +2330,7 @@ class FeishuController:
             if not (
                 isinstance(callback_token, str)
                 and expected_token
-                and hmac.compare_digest(callback_token, expected_token)
+                and utils.constant_time_equals(callback_token, expected_token)
             ):
                 return self.FAILED_MSG
 

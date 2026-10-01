@@ -87,11 +87,6 @@ class OpenaiVoice(Voice):
             }
             response = requests.post(url, headers=headers, json=data, timeout=REQUEST_TIMEOUT)
             if response.status_code != 200:
-                # Without this the JSON error envelope OpenAI returns on a
-                # 401/429/5xx was written verbatim into a file named *.mp3 and
-                # returned as a successful VOICE reply -- a voice bubble that
-                # silently refuses to play. voiceToText above, and the custom,
-                # mimo and linkai backends, all check the status first.
                 logger.error(
                     f"[OPENAI] text_to_Voice failed: status={response.status_code}, "
                     f"resp={response.text[:200]}"

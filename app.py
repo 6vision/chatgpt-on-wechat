@@ -317,13 +317,6 @@ class ChannelManager:
                 ch = self._channels.pop(name, None)
                 th = self._threads.pop(name, None)
                 to_stop.append((name, ch, th))
-                # Compare against the instance just removed. Reading the name
-                # back out of the registry could never match, because the
-                # entry has already been popped, so the primary reference was
-                # never actually cleared. start() only adopts a new primary
-                # `if _primary_channel is None`, so a stale one also stopped
-                # restart() from replacing it and left `mgr.channel` handing
-                # out a channel that had been stopped.
                 if ch is not None and self._primary_channel is ch:
                     self._primary_channel = None
 

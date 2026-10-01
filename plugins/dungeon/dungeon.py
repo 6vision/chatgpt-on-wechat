@@ -69,11 +69,6 @@ class Dungeon(Plugin):
             return
         bot = Bridge().get_bot("chat")
         content = e_context["context"].content[:]
-        # A blank message splits to [], and clist[0] below would raise
-        # IndexError out of the handler, where nothing upstream catches it --
-        # the turn then ends with no reply of any kind. No command matches a
-        # blank, so return and let it fall through to the default handling like
-        # any other unmatched message.
         if not content.strip():
             return
         clist = e_context["context"].content.split(maxsplit=1)

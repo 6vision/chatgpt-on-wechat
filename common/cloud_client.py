@@ -1619,10 +1619,6 @@ class CloudClient(LinkAIClient):
                 "payload": {"status": "error", "message": "session_id required"},
             }
 
-        # The try/except below turns every other failure into a
-        # {"status": "error"} envelope, but these two conversions sat above it,
-        # so a non-numeric "page" from the console raised straight out of the
-        # handler instead of being reported like everything else.
         try:
             page = int(payload.get("page", 1))
             page_size = int(payload.get("page_size", 20))
