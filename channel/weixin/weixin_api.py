@@ -34,12 +34,8 @@ BOT_TYPE = "3"
 SEND_RETRIES = 2
 SEND_RETRY_BACKOFF_BASE = 1.0
 
-# Transport failures that mean the request never reached the peer, so retrying
-# them cannot duplicate anything: the connection was never established, the TLS
-# handshake failed, or the peer dropped the connection mid-response.
-# A read timeout is deliberately *not* in this set -- the request did reach the
-# peer, so a retried sendMessage could be delivered twice. Callers that can live
-# with that (the long poll, which reads it as an empty poll) handle it locally.
+# Transient transport errors worth retrying. A read timeout is not one of them:
+# the request may already have been delivered, so a retry could send it twice.
 RETRYABLE_ERRORS = (
     requests.exceptions.ConnectTimeout,
     requests.exceptions.SSLError,
@@ -156,16 +152,9 @@ class WeixinApi:
                 resp.raise_for_status()
                 return resp.json()
             except requests.exceptions.ReadTimeout as e:
-                # The request reached the peer but the response never arrived,
-                # so it may well have been delivered. Retrying would risk
-                # sending the same message twice, so raise right away instead of
-                # answering with a synthetic ret=0 that reads like a success.
                 logger.error(f"[Weixin] API read timeout {endpoint}: {e}")
                 raise
             except RETRYABLE_ERRORS as e:
-                # Nothing was delivered yet (e.g. an SSLEOFError from the peer
-                # dropping the connection), so retry a few times with
-                # exponential backoff before giving up.
                 if attempt < retries:
                     backoff = SEND_RETRY_BACKOFF_BASE * (2 ** attempt)
                     attempt += 1
@@ -188,10 +177,7 @@ class WeixinApi:
                 "get_updates_buf": get_updates_buf,
             }, timeout=timeout + 5)
         except requests.exceptions.ReadTimeout:
-            # getUpdates is a long poll: the server holds the request for up to
-            # DEFAULT_LONG_POLL_TIMEOUT seconds, so the client timing out simply
-            # means no message arrived in that window -- an empty poll, not a
-            # failure. Only real connection failures are raised (in _post).
+            # A long poll that times out just means no message arrived.
             logger.debug("[Weixin] getUpdates read timeout: empty poll")
             return {"ret": 0, "msgs": []}
 

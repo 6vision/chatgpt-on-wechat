@@ -1,22 +1,7 @@
-"""A transport failure must never be reported as a delivered message.
+"""A timed-out Weixin request is raised, never reported as delivered.
 
-``_post`` used to answer *any* timeout with a synthetic ``{"ret": 0, "msgs": []}``.
-Every caller reads ``ret`` to decide whether anything went wrong, so a
-``sendMessage`` whose response never arrived looked like a successful delivery.
-
-The two kinds of timeout mean different things and are handled apart:
-
-* a ``ConnectTimeout`` -- like an ``SSLError`` or a ``ConnectionError`` -- means
-  the request never reached the peer, so nothing was delivered: it is safe to
-  retry, and the failure is raised once the retries run out;
-* a ``ReadTimeout`` means the request *did* reach the peer and only the response
-  was lost, so retrying a send could deliver the same message twice. It is
-  therefore raised right away, without a retry.
-
-``get_updates`` is the one caller that reads a timeout differently: it is a long
-poll, so a read timeout simply means no message arrived within the window. It
-stays an empty poll (logged at debug level, as before) instead of an error --
-retrying there is pointless because the next iteration *is* the retry.
+A connect failure is retried; a read timeout is raised at once (a retry could
+send twice), except in the long poll, where it is an empty poll.
 """
 
 import sys
