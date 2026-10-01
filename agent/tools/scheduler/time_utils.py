@@ -7,7 +7,16 @@ naive local-time behaviour so existing stored tasks are not reinterpreted.
 """
 from croniter import croniter
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+
+# zoneinfo joined the standard library in Python 3.9. Without it, only named
+# IANA timezones are unavailable; legacy naive-local tasks keep working.
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    try:
+        from backports.zoneinfo import ZoneInfo
+    except ImportError:
+        ZoneInfo = None
 
 UTC = timezone.utc
 
@@ -38,6 +47,10 @@ def resolve_timezone(name=None):
         return datetime.now().astimezone().tzinfo
     if not isinstance(name, str) or not name.strip():
         raise ValueError("timezone must be a non-empty IANA name")
+    if ZoneInfo is None:
+        raise ValueError(
+            "IANA timezones require Python 3.9+ or the backports.zoneinfo package"
+        )
     return ZoneInfo(name.strip())
 
 
