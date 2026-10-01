@@ -530,11 +530,13 @@ class SearchFiles(BaseTool):
             )
         except subprocess.TimeoutExpired:
             return [], True
-        # Parse stdout regardless of exit code: rg/grep exit 1 on "no matches"
-        # (empty stdout -> empty rows, which is correct). Diagnostic lines that a
-        # real error (exit >1) may print to stdout are dropped in _parse_lines.
-        stdout = proc.stdout or ""
-        rows = self._parse_lines(stdout.splitlines(), opts)
+        rows = self._parse_lines((proc.stdout or "").splitlines(), opts)
+        # Exit 1 is "no matches". Exit 2 with rows is a partial result (an
+        # unreadable file); without rows it is a real failure, e.g. ripgrep
+        # rejecting lookaround, and execute() falls back to Python.
+        if not rows and proc.returncode not in (0, 1):
+            diagnostic = (proc.stderr or "").strip()[:1000]
+            raise RuntimeError(f"search process exited {proc.returncode}: {diagnostic}")
         return rows, False
 
     def _parse_lines(self, lines: List[str], opts: "_SearchOptions") -> List[dict]:
