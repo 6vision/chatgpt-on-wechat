@@ -1,18 +1,5 @@
-"""A finished WeCom turn must close its reply stream, whatever the reply type.
-
-Every inbound message that carries a req_id gets a stream state from
-_make_stream_callback(), so the agent can push its answer as an
-``aibot_respond_msg`` stream packet with finish=false. Only the TEXT branch of
-send() ever popped that state and sent the finish=true packet that resolves the
-client spinner, so an IMAGE / FILE / VIDEO / VOICE reply left the state behind:
-_stream_states grew by one accumulated answer per media reply for the life of
-the process, and the user was left waiting on a spinner that never resolved
-while the streamed text was dropped.
-
-The media senders are stubbed out here -- what matters is that send() releases
-the state and emits exactly one finish packet on every terminal path, including
-when the media upload raises.
-"""
+"""A finished WeCom turn must free its stream state and close the stream,
+whatever the reply type, including when the media send raises."""
 import pytest
 
 from bridge.context import Context, ContextType
@@ -172,3 +159,15 @@ def test_a_file_reply_with_a_caption_closes_the_stream_only_once():
     finishes = _finishes(sent)
     assert len(finishes) == 1, f"the caption already closed the stream, got {sent}"
     assert finishes[0]["body"]["stream"]["content"] == STREAMED
+
+
+def test_a_media_reply_with_nothing_streamed_sends_no_empty_bubble():
+    channel = _channel()
+    _streamed(channel, content="")
+    sent = _collect(channel)
+    _stub_media_senders(channel)
+
+    channel.send(Reply(ReplyType.IMAGE, "media"), _context())
+
+    assert REQ_ID not in channel._stream_states
+    assert _finishes(sent) == []

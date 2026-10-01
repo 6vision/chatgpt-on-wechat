@@ -1033,9 +1033,7 @@ class WecomBotChannel(ChatChannel):
                 logger.warning(f"[WecomBot] Unsupported reply type: {reply.type}, falling back to text")
                 self._send_text(str(reply.content), receiver, is_group, req_id)
         finally:
-            # A media reply never reaches the _send_text teardown, so close the
-            # stream here as well: no state may outlive the turn, and the client
-            # spinner only resolves once a finish packet arrives.
+            # Media replies skip _send_text, which is what normally closes the stream.
             self._close_stream(req_id)
 
     # ------------------------------------------------------------------
@@ -1062,16 +1060,14 @@ class WecomBotChannel(ChatChannel):
         })
 
     def _close_stream(self, req_id: str = None):
-        """Free the stream state of a finished turn and close its stream.
-
-        A no-op when the text path already closed it, or when nothing was ever
-        streamed for this request.
-        """
+        """Free a turn's stream state, finishing the stream if anything was shown."""
         if not req_id:
             return
         state = self._stream_states.pop(req_id, None)
-        if state:
-            self._finish_stream(req_id, state["stream_id"], state["committed"])
+        # The state exists from the moment the message arrives; finishing a
+        # stream that never pushed anything would post an empty bubble.
+        if state and (state["committed"] or state["last_push_len"]):
+            self._finish_stream(req_id, state["stream_id"], state["committed"] or state["current"])
 
     def _send_text(self, content: str, receiver: str, is_group: bool, req_id: str = None):
         """Send text/markdown reply. Reuses stream state if available (streaming mode)."""
