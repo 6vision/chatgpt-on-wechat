@@ -63,6 +63,10 @@ WS_PING_TIMEOUT = 10
 # reconnect path runs. Guards against a stall the transport ping alone can miss.
 HEARTBEAT_ACK_TIMEOUT_FACTOR = 3
 
+# QQ accepts passive replies to a message for at most an hour, so a msg_seq
+# counter has nothing left to order after that.
+_MSG_SEQ_TTL_SECONDS = 60 * 60
+
 
 @singleton
 class QQChannel(ChatChannel):
@@ -98,7 +102,7 @@ class QQChannel(ChatChannel):
         self._last_api_error = ""
 
         self.received_msgs = ExpiredDict(60 * 60 * 7.1)
-        self._msg_seq_counter = {}
+        self._msg_seq_counter = ExpiredDict(_MSG_SEQ_TTL_SECONDS)
 
         conf()["group_name_white_list"] = ["ALL_GROUP"]
         conf()["single_chat_prefix"] = [""]
