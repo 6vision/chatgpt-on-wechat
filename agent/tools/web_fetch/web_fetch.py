@@ -213,10 +213,13 @@ class WebFetch(BaseTool):
                         f.write(chunk)
 
             except requests.Timeout:
-                return ToolResult.fail(f"Error: Download timed out after {DEFAULT_TIMEOUT}s")
+                self._cleanup_file(local_path)
+                return ToolResult.fail(f"Error: Download from {parsed.netloc} timed out after {DEFAULT_TIMEOUT}s")
             except requests.ConnectionError:
-                return ToolResult.fail(f"Error: Failed to connect to {parsed.netloc}")
+                self._cleanup_file(local_path)
+                return ToolResult.fail(f"Error: Download from {parsed.netloc} failed: connection error")
             except requests.HTTPError as e:
+                self._cleanup_file(local_path)
                 return ToolResult.fail(f"Error: HTTP {e.response.status_code} for URL: {url}")
             except ValueError as e:
                 self._cleanup_file(local_path)
