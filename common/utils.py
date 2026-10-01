@@ -338,3 +338,32 @@ def get_cloud_headers(api_key: str) -> dict:
         pass
     apply_client_source(headers)
     return apply_cloud_user(headers)
+
+
+_TAIL_CHUNK_BYTES = 8192
+
+
+def tail_lines(path, limit):
+    """Return the last *limit* lines of *path*, without reading the whole file.
+
+    Lines keep their trailing newline (the last one may have none).
+    """
+    if limit <= 0:
+        return []
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        remaining = f.tell()
+        blocks = []
+        newlines = 0
+        while remaining > 0 and newlines <= limit:
+            read_size = min(_TAIL_CHUNK_BYTES, remaining)
+            remaining -= read_size
+            f.seek(remaining)
+            block = f.read(read_size)
+            newlines += block.count(b"\n")
+            blocks.append(block)
+        data = b"".join(reversed(blocks))
+    return [
+        line.decode("utf-8", errors="replace")
+        for line in data.splitlines(keepends=True)[-limit:]
+    ]

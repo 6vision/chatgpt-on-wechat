@@ -24,6 +24,7 @@ from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
 from common.atomic_write import write_json_atomic
 from common.log import logger
+from common.utils import tail_lines
 from common.i18n import t as _t
 from config import conf
 from cli import __version__
@@ -608,9 +609,7 @@ class CowCliPlugin(Plugin):
             return _t("未找到日志文件", "No log file found")
 
         try:
-            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-                all_lines = f.readlines()
-            tail = all_lines[-num_lines:]
+            tail = tail_lines(log_file, num_lines)
             content = "".join(tail).strip()
             if not content:
                 return _t("日志为空", "Log is empty")

@@ -12,7 +12,10 @@ import web
 
 from channel.web.core._common import _require_auth
 from common.log import logger
+from common.utils import tail_lines
 from config import get_data_root
+
+_TAIL_LINE_LIMIT = 200
 
 
 class LogsHandler:
@@ -29,12 +32,9 @@ class LogsHandler:
                 yield b"data: {\"type\": \"error\", \"message\": \"run.log not found\"}\n\n"
                 return
 
-            # Read last 200 lines for initial display
+            # Read last lines for initial display
             try:
-                with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
-                    lines = f.readlines()
-                tail_lines = lines[-200:]
-                chunk = ''.join(tail_lines)
+                chunk = ''.join(tail_lines(log_path, _TAIL_LINE_LIMIT))
                 payload = json.dumps({"type": "init", "content": chunk}, ensure_ascii=False)
                 yield f"data: {payload}\n\n".encode('utf-8')
             except Exception as e:
