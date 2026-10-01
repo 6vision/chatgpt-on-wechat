@@ -20,6 +20,7 @@ import urllib.parse
 import uuid
 
 from common.log import logger
+from common.media_download import MAX_FILE_BYTES, MediaTooLargeError, save_response
 from common.tmp_dir import TmpDir
 
 
@@ -47,17 +48,24 @@ def text_to_speech_aliyun(url, text, appkey, token):
         "format": "wav"
     }
 
-    response = requests.post(url, headers=headers, data=json.dumps(data), timeout=(5, 60))
+    response = requests.post(url, headers=headers, data=json.dumps(data), timeout=(5, 60), stream=True)
 
     if response.status_code == 200 and response.headers['Content-Type'] == 'audio/mpeg':
         output_file = TmpDir().path() + "reply-" + str(int(time.time())) + "-" + str(hash(text) & 0x7FFFFFFF) + ".wav"
 
-        with open(output_file, 'wb') as file:
-            file.write(response.content)
+        # The endpoint comes from config, so the body is streamed and counted:
+        # an endless or multi-gigabyte response used to be buffered whole by
+        # `response.content` and written out before anything could object.
+        try:
+            save_response(response, output_file, MAX_FILE_BYTES)
+        except MediaTooLargeError:
+            logger.debug(f"音频文件超出大小限制: over {MAX_FILE_BYTES} bytes")
+            return None
         logger.debug(f"音频文件保存成功，文件名：{output_file}")
     else:
         logger.debug("响应状态码: {}".format(response.status_code))
         logger.debug("响应内容: {}".format(response.text))
+        response.close()
         output_file = None
 
     return output_file

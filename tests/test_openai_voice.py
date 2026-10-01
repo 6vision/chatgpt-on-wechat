@@ -87,17 +87,22 @@ class TestOpenaiVoice(unittest.TestCase):
     def test_text_to_voice_bounds_the_request(self):
         response = MagicMock()
         response.status_code = 200
-        response.content = b"mp3-bytes"
+        # The body is streamed into place now, so the stub answers iter_content.
+        response.iter_content.return_value = [b"mp3-bytes"]
 
         voice = OpenaiVoice()
-        with patch("voice.openai.openai_voice.conf", _conf(open_ai_api_key="sk-test")):
-            with patch("voice.openai.openai_voice.requests.post", return_value=response) as post:
-                with patch("voice.openai.openai_voice.TmpDir") as tmp_dir:
-                    tmp_dir.return_value.path.return_value = tempfile.gettempdir() + os.sep
-                    with patch("builtins.open", mock_open()):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("voice.openai.openai_voice.conf", _conf(open_ai_api_key="sk-test")):
+                with patch("voice.openai.openai_voice.requests.post", return_value=response) as post:
+                    with patch("voice.openai.openai_voice.TmpDir") as tmp_dir:
+                        tmp_dir.return_value.path.return_value = tmp + os.sep
                         reply = voice.textToVoice("hello")
 
-        self.assertEqual(reply.type, ReplyType.VOICE)
+            self.assertEqual(reply.type, ReplyType.VOICE)
+            self.assertEqual(os.path.dirname(reply.content), tmp)
+            with open(reply.content, "rb") as written:
+                self.assertEqual(written.read(), b"mp3-bytes")
+
         _assert_bounded(self, post.call_args.kwargs["timeout"])
 
     def test_voice_to_text_reports_the_status_when_the_body_is_not_json(self):

@@ -8,6 +8,7 @@ import requests
 
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common.media_download import MediaTooLargeError, read_response
 from common.tmp_dir import TmpDir
 from config import conf
 from voice import audio_convert
@@ -101,7 +102,7 @@ class ZhipuAIVoice(Voice):
                 "Content-Type": "application/json",
             }
             response = requests.post(
-                url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT
+                url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT, stream=True
             )
 
             if response.status_code != 200:
@@ -109,6 +110,7 @@ class ZhipuAIVoice(Voice):
                     f"[ZhipuAIVoice] textToVoice failed: status={response.status_code} "
                     f"body={response.text[:500]} model={model} voice={voice_id}"
                 )
+                response.close()
                 return Reply(ReplyType.ERROR, "语音合成失败，请稍后再试")
 
             # Some errors come back as JSON / SSE with HTTP 200.
@@ -122,9 +124,23 @@ class ZhipuAIVoice(Voice):
                     f"[ZhipuAIVoice] textToVoice unexpected text response "
                     f"(content_type={ct}): {err}"
                 )
+                response.close()
                 return Reply(ReplyType.ERROR, "语音合成失败，请稍后再试")
 
-            audio_bytes = response.content
+            # `zhipu_ai_api_base` is operator config, so the body is streamed and
+            # counted, at the same cap the ASR path above applies to a single
+            # audio file: an endpoint that answers with an endless stream used to
+            # be buffered whole by `response.content`. The container has to be
+            # sniffed from the leading bytes, so the audio is held in memory
+            # either way -- the cap is what keeps that bounded.
+            try:
+                audio_bytes = read_response(response, MAX_FILE_BYTES)
+            except MediaTooLargeError:
+                logger.error(
+                    f"[ZhipuAIVoice] textToVoice audio too large: "
+                    f"over {MAX_FILE_BYTES} bytes, model={model}"
+                )
+                return Reply(ReplyType.ERROR, "语音合成失败，请稍后再试")
             ext = self._sniff_audio_ext(audio_bytes) or "wav"
 
             file_name = (

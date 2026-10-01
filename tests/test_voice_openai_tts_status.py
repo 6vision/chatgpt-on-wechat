@@ -94,7 +94,8 @@ class TestOpenaiVoiceTtsStatusCheck(unittest.TestCase):
     def test_a_successful_synthesis_still_returns_a_voice_reply(self):
         response = MagicMock()
         response.status_code = 200
-        response.content = b"mp3-bytes"
+        # TTS bodies are streamed now, so the stub has to answer `iter_content`.
+        response.iter_content.return_value = [b"mp3-bytes"]
 
         with tempfile.TemporaryDirectory() as tmp:
             reply = self._synthesize(response, tmp)
