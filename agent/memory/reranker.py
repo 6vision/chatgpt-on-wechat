@@ -121,9 +121,9 @@ def create_reranker(provider: Optional[str], model: Optional[str] = None) -> Opt
     """Return the shared reranker for ``provider``, or None when disabled.
 
     An empty provider means rerank is off. An unknown provider is logged and
-    treated as off, so a typo never breaks memory search.
+    treated as off, so a typo never breaks memory search. So is a non-string value.
     """
-    name = (provider or "").strip().lower()
+    name = provider.strip().lower() if isinstance(provider, str) else ""
     if not name:
         return None
     factory = _PROVIDERS.get(name)
@@ -133,7 +133,7 @@ def create_reranker(provider: Optional[str], model: Optional[str] = None) -> Opt
             f"Available: {', '.join(sorted(_PROVIDERS))}"
         )
         return None
-    key = (name, (model or "").strip())
+    key = (name, model.strip() if isinstance(model, str) else "")
     with _instances_lock:
         reranker = _instances.get(key)
         if reranker is None:
