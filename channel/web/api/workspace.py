@@ -261,7 +261,7 @@ class WorkspaceWriteHandler:
             if not isinstance(content, str):
                 return json.dumps({"status": "error", "message": "content must be a string"})
 
-            agent_id = body.get("agent") or None
+            agent_id = body.get("agent_id") or body.get("agent") or None
             svc, rel = _editable_target(raw_path, body.get("session") or None, agent_id)
             try:
                 result = svc.write_text(rel, content, expected_mtime=body.get("expected_mtime"))

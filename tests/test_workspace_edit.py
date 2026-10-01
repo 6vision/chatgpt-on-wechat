@@ -307,6 +307,64 @@ def test_write_handler_falls_back_to_state_root_for_system_assets(tmp_path):
     assert memory_file.read_text(encoding="utf-8") == "new\n"
 
 
+def _roots_by_agent(tmp_path):
+    """One workspace per Agent, plus a `_root` resolver to hand out by id."""
+    roots = {"default": tmp_path / "default", "writer": tmp_path / "writer"}
+    files = {}
+    for agent_id, root in roots.items():
+        root.mkdir()
+        files[agent_id] = _write(root / "notes.md", "hello\n")
+
+    def _root(session_id=None, agent_id=None):
+        return str(roots.get(agent_id or "default", roots["default"]))
+
+    return files, _root
+
+
+def test_write_handler_saves_into_the_agent_the_client_names(tmp_path):
+    """Both console clients inject `agent_id`, never `agent`.
+
+    Resolving the target from `agent` alone left every save in the default
+    Agent's workspace, so an edit made for another Agent was written into the
+    wrong workspace.
+    """
+    from channel.web.api.workspace import WorkspaceWriteHandler
+
+    files, _root = _roots_by_agent(tmp_path)
+
+    with patch("channel.web.api.workspace._get_workspace_root", side_effect=_root), \
+         patch("common.state_dir.state_root_str", side_effect=_root):
+        response = _post(WorkspaceWriteHandler, {
+            "path": "notes.md",
+            "content": "goodbye\n",
+            "session": "s1",
+            "agent_id": "writer",
+        })
+
+    assert response["status"] == "success"
+    assert files["writer"].read_text(encoding="utf-8") == "goodbye\n"
+    assert files["default"].read_text(encoding="utf-8") == "hello\n"
+
+
+def test_write_handler_still_accepts_the_agent_key(tmp_path):
+    from channel.web.api.workspace import WorkspaceWriteHandler
+
+    files, _root = _roots_by_agent(tmp_path)
+
+    with patch("channel.web.api.workspace._get_workspace_root", side_effect=_root), \
+         patch("common.state_dir.state_root_str", side_effect=_root):
+        response = _post(WorkspaceWriteHandler, {
+            "path": "notes.md",
+            "content": "goodbye\n",
+            "session": "s1",
+            "agent": "writer",
+        })
+
+    assert response["status"] == "success"
+    assert files["writer"].read_text(encoding="utf-8") == "goodbye\n"
+    assert files["default"].read_text(encoding="utf-8") == "hello\n"
+
+
 # ----------------------------------------------------------------------
 # Frontend contract
 # ----------------------------------------------------------------------
