@@ -513,13 +513,12 @@ class Read(BaseTool):
                 from openpyxl import load_workbook
             except ImportError:
                 raise ImportError("Error: openpyxl library not installed. Install with: pip install openpyxl")
-            wb = load_workbook(absolute_path, read_only=True, data_only=True)
+            from common.spreadsheet_text import spreadsheet_sheets
             parts = []
-            for ws in wb.worksheets:
-                parts.append(f"--- Sheet: {ws.title} ---")
-                for row in ws.iter_rows(values_only=True):
-                    parts.append('\t'.join(str(c) if c is not None else '' for c in row))
-            wb.close()
+            with spreadsheet_sheets(absolute_path, load_workbook) as sheets:
+                for name, rows in sheets:
+                    parts.append(f"--- Sheet: {name} ---")
+                    parts.extend('\t'.join(row) for row in rows)
             return '\n'.join(parts)
 
         if file_ext in ('.pptx', '.ppt'):
