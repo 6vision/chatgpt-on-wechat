@@ -503,15 +503,13 @@ class SearchFiles(BaseTool):
             )
         except subprocess.TimeoutExpired:
             return [], True
-        # rg/grep use 1 for an ordinary no-match result; other failures must
-        # reach execute() so its Python fallback can honor the requested regex.
-        # In particular, ripgrep's default engine rejects lookaround even
-        # though the early Python regex validation accepts it.
-        if proc.returncode not in (0, 1):
+        rows = self._parse_lines((proc.stdout or "").splitlines(), opts)
+        # Exit 1 is "no matches". Exit 2 with rows is a partial result (an
+        # unreadable file); without rows it is a real failure, e.g. ripgrep
+        # rejecting lookaround, and execute() falls back to Python.
+        if not rows and proc.returncode not in (0, 1):
             diagnostic = (proc.stderr or "").strip()[:1000]
             raise RuntimeError(f"search process exited {proc.returncode}: {diagnostic}")
-        stdout = proc.stdout or ""
-        rows = self._parse_lines(stdout.splitlines(), opts)
         return rows, False
 
     def _parse_lines(self, lines: List[str], opts: "_SearchOptions") -> List[dict]:
