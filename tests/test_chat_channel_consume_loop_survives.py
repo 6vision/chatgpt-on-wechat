@@ -96,6 +96,22 @@ def test_failed_submit_does_not_kill_the_loop(monkeypatch):
         )
 
 
+def test_failed_submit_gives_the_session_slot_back():
+    channel = _channel()
+    pending = queue.Queue()
+    pending.put({"context": "payload"})
+    semaphore = threading.Semaphore(1)
+    channel.sessions["busy"] = [pending, semaphore]
+
+    with patch.object(chat_mod.handler_pool, "submit", side_effect=RuntimeError("pool is shutting down")):
+        try:
+            channel._consume_session("busy")
+        except RuntimeError:
+            pass
+
+    assert semaphore.acquire(blocking=False), "the session slot leaked after a failed submit"
+
+
 def test_a_healthy_session_is_still_dispatched():
     """The happy path is unchanged: a queued context reaches the executor."""
     channel = _channel()

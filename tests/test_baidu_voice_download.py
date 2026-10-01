@@ -1,5 +1,5 @@
 # encoding:utf-8
-"""Bounded-download guard for Baidu's long-text synthesis (probe P4).
+"""Bounded-download guard for Baidu's long-text synthesis.
 
 Once the polling loop reports success, ``_long_text_synthesis`` downloads
 ``audio_address`` -- a URL that comes back from the vendor's task API -- with

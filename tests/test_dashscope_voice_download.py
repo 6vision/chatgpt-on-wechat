@@ -1,5 +1,5 @@
 # encoding:utf-8
-"""Bounded-download guard for ``DashScopeVoice._download_audio`` (probe P4).
+"""Bounded-download guard for ``DashScopeVoice._download_audio``.
 
 Regression guard: before the size-capped downloader was wired in,
 ``_download_audio`` buffered ``resp.content`` with no upper bound, so a hostile

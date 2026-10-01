@@ -623,7 +623,12 @@ class ChatChannel(Channel):
         if not context_queue.empty():
             context = context_queue.get()
             logger.debug("[chat_channel] consume context: {}".format(context))
-            future: Future = handler_pool.submit(self._handle, context)
+            try:
+                future: Future = handler_pool.submit(self._handle, context)
+            except Exception:
+                # The done callback is what releases the slot; without a future it never runs.
+                semaphore.release()
+                raise
             future.add_done_callback(self._thread_pool_callback(session_id, context=context))
             with self.lock:
                 if session_id not in self.futures:

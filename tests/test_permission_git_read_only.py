@@ -91,6 +91,12 @@ ALREADY_REFUSED_GIT_COMMANDS = [
     "git stash pop",
     "git config user.name x",
     "git reset --hard",
+    # a listing flag must not shadow a write flag on the same call
+    "git branch -v -D topic",
+    "git branch --list -d topic",
+    "git branch -m -v new",
+    "git tag -l -d v1.0.0",
+    "git symbolic-ref -d HEAD",
 ]
 
 

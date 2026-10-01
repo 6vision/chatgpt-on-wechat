@@ -174,20 +174,14 @@ class EnvConfig(BaseTool):
                 if not key or not value:
                     return ToolResult.fail("Error: 'key' and 'value' are required for 'set' action.")
 
-                # One entry per line is what both readers assume: _read_env_file
-                # here, and python-dotenv everywhere else (agent_initializer, bash).
-                # An entry with a line break, or a key with the field separator, is
-                # accepted and read back as a truncated entry plus extra variables
-                # nobody asked for, so reject what the format cannot hold.
+                # .env is read line by line (here and by python-dotenv), so a line
+                # break would split one entry into several variables.
                 for name, text in (("key", key), ("value", value)):
                     text = str(text)
                     if "\n" in text or "\r" in text or (name == "key" and "=" in text):
                         limit = "a line break or an '=' character" if name == "key" else "a line break"
                         return ToolResult.fail(
-                            f"Error: '{name}' cannot contain {limit}. ~/.cow/.env holds one "
-                            "entry per line, so an entry like this is written broken and read "
-                            "back cut off at the line break, with its remaining lines turning "
-                            "into environment variables nobody set."
+                            f"Error: '{name}' cannot contain {limit}; .env holds one entry per line."
                         )
 
                 # Read current env vars

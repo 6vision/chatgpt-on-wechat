@@ -14,13 +14,8 @@ class WechatComAppClient(WeChatClient):
     def _refresh_once_if_needed(self) -> None:
         """Renew the access token when it is close to expiring.
 
-        This is the body of the single refresh thread started by
-        ``_active_refresh``. Nothing else renews the token, so an exception
-        escaping from here kills that thread for the rest of the process
-        lifetime: the token then stays expired (WeCom issues them for two
-        hours) and every later call fails until CowAgent is restarted, with
-        nothing in the log pointing at the real cause. A transient failure
-        while talking to the endpoint is therefore logged, not propagated.
+        Runs on the only refresh thread, so errors are logged rather than
+        raised: an escaping exception would end renewal for the process.
         """
         try:
             now = time.time()

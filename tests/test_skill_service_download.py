@@ -1,5 +1,5 @@
 # encoding:utf-8
-"""Bounded-download guard for ``SkillService._download_file`` (probe P4).
+"""Bounded-download guard for ``SkillService._download_file``.
 
 Regression guard: before the size-capped downloader was wired in,
 ``_download_file`` buffered ``resp.content`` with no upper bound, so a hostile
