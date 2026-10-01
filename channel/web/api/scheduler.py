@@ -289,7 +289,17 @@ class SchedulerUpdateHandler:
             
             # Update schedule
             if "schedule" in body:
-                updates["schedule"] = body["schedule"]
+                # The create handler requires a mapping with a type; the update
+                # handler used to take body["schedule"] verbatim, so a null or a
+                # bare string was persisted and every later read of the schedule
+                # raised AttributeError on .get().
+                schedule_patch = body["schedule"]
+                if not isinstance(schedule_patch, dict) or not schedule_patch.get("type"):
+                    return json.dumps({
+                        "status": "error",
+                        "message": "schedule must be an object with a type"
+                    }, ensure_ascii=False)
+                updates["schedule"] = schedule_patch
                 # If schedule config changed, recalculate next_run_at
                 # Build merged temp task data for calculation (without modifying the original object)
                 merged = dict(original_task)
