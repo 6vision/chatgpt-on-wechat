@@ -8,6 +8,7 @@ can restore it. File-level restore only — simple and reliable.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import time
 from datetime import datetime
@@ -24,6 +25,17 @@ _MAX_BACKUPS = 10
 
 def _backups_root(workspace_dir: Path) -> Path:
     return Path(workspace_dir) / "memory" / _BACKUP_DIRNAME
+
+
+def _is_within_workspace(workspace: Path, candidate: Path) -> bool:
+    """Whether ``candidate`` really lands inside ``workspace``."""
+    root = os.path.realpath(workspace)
+    try:
+        return os.path.commonpath([root, os.path.realpath(candidate)]) == root
+    except ValueError:
+        # A rooted or differently-driven Windows path has no common prefix with
+        # the workspace at all, so it is outside it by definition.
+        return False
 
 
 def create_backup(workspace_dir: Path, files: List[Path]) -> Optional[str]:
@@ -90,6 +102,17 @@ def restore_backup(workspace_dir: Path, backup_id: str) -> bool:
                 raise ValueError("invalid backup manifest entry")
             bak = target / entry["bak"]
             dst = ws / entry["rel"]
+            # "rel" is read back out of a manifest.json that lives inside the
+            # workspace, so whatever can write there chooses where undo writes.
+            # Resolve the join before trusting it: "../.cow/.env" or a rooted
+            # path names a real file outside the workspace, and copy2 below
+            # would overwrite it -- the API-key file the rest of the toolchain
+            # refuses to touch. Refuse here, in the same up-front pass that
+            # rejects an incomplete snapshot, so nothing is applied first.
+            if not _is_within_workspace(ws, dst):
+                raise ValueError(
+                    f"backup entry escapes the workspace: {entry['rel']}"
+                )
             if not bak.is_file():
                 raise FileNotFoundError(f"missing backup payload: {entry['bak']}")
             restores.append((bak, dst))
