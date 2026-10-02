@@ -1,4 +1,4 @@
-"""The artifact endpoints: /api/artifacts, /api/artifacts/add and /api/artifacts/delete.
+"""The artifact endpoints: /api/artifacts and its add, pin, rename and delete actions.
 
 The artifact view lists every user-facing file the Agents' conversations
 produced, newest first, across Agents. The index itself is written when the
@@ -74,6 +74,8 @@ def _payload(row: dict, profile, default_id: str) -> dict:
         "source": row["source"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+        "pinned_at": row.get("pinned_at") or 0,
+        "title": row.get("title") or "",
         "exists": exists,
         # /api/file is cached by the browser; the mtime keeps a regenerated
         # image from showing its old pixels.
@@ -172,6 +174,57 @@ class ArtifactAddHandler:
             return json.dumps({"status": "success", "item": item}, ensure_ascii=False)
         except Exception as e:
             logger.error(f"[WebChannel] Artifact add error: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+
+class ArtifactPinHandler:
+    """POST /api/artifacts/pin {id, agent_id, pinned}: keep one entry at the top
+    of the timeline, or let it fall back to its place in time."""
+
+    def POST(self):
+        _require_auth()
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        try:
+            data = json.loads(web.data() or b"{}")
+            artifact_id = int(data.get("id"))
+            from agent.memory import get_conversation_store
+            from agent.registry import get_agent_registry
+
+            profile = get_agent_registry().get(data.get("agent_id") or None, require_enabled=False)
+            pinned_at = get_conversation_store(profile.workspace).set_artifact_pinned(
+                artifact_id, bool(data.get("pinned")),
+            )
+            if pinned_at is None:
+                return json.dumps({"status": "error", "message": "artifact not found"})
+            return json.dumps({"status": "success", "pinned_at": pinned_at})
+        except Exception as e:
+            logger.error(f"[WebChannel] Artifact pin error: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+
+TITLE_MAX = 120
+
+
+class ArtifactRenameHandler:
+    """POST /api/artifacts/rename {id, agent_id, title}: name one entry in the
+    view. The file keeps its name on disk; an empty title restores it."""
+
+    def POST(self):
+        _require_auth()
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        try:
+            data = json.loads(web.data() or b"{}")
+            artifact_id = int(data.get("id"))
+            title = " ".join(str(data.get("title") or "").split())[:TITLE_MAX]
+            from agent.memory import get_conversation_store
+            from agent.registry import get_agent_registry
+
+            profile = get_agent_registry().get(data.get("agent_id") or None, require_enabled=False)
+            if not get_conversation_store(profile.workspace).set_artifact_title(artifact_id, title):
+                return json.dumps({"status": "error", "message": "artifact not found"})
+            return json.dumps({"status": "success", "title": title}, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WebChannel] Artifact rename error: {e}")
             return json.dumps({"status": "error", "message": str(e)})
 
 

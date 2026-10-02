@@ -14,7 +14,7 @@ scheduled tasks, logs).
 
 # Backend layout
 
-`web_channel.py` is the URL table and nothing else: 85 routes, `build_app()`,
+`web_channel.py` is the URL table and nothing else: 87 routes, `build_app()`,
 and the imports that put every handler in scope. web.py resolves the handler
 names in the table against a namespace dict, so every handler has to be
 importable there -- that is why the file imports names it never calls.
@@ -39,7 +39,7 @@ The code sits in two packages, mirroring the frontend's `core/` and `views/`:
 | `chat.py` | `/api/message`, `/api/poll`, `/api/cancel`, the SSE stream |
 | `files.py` | Uploads, `/api/file`, `/api/file/reveal` (local-only show in folder), `/uploads/*`, `/preview/*`, ASR and TTS |
 | `sessions.py` | `/api/sessions/*`, `/api/history`, per-session settings and context |
-| `artifacts.py` | `/api/artifacts`, `/api/artifacts/add`, `/api/artifacts/delete`: the cross-Agent index of files the conversations produced |
+| `artifacts.py` | `/api/artifacts`, `/api/artifacts/add`, `/api/artifacts/pin`, `/api/artifacts/rename`, `/api/artifacts/delete`: the cross-Agent index of files the conversations produced |
 | `agents.py` | `/api/agents/*`, core files, avatars |
 | `config.py` | `/api/config` |
 | `models.py` | `/api/models` |

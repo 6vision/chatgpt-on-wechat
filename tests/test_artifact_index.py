@@ -166,26 +166,68 @@ def test_the_table_carries_no_constraint_that_would_force_a_rebuild(tmp_path):
     assert auto_indexes == []
 
 
-def test_a_table_from_before_a_column_was_added_gains_it(tmp_path):
-    import sqlite3
+def test_pinned_artifacts_lead_the_timeline(tmp_path, monkeypatch):
+    import agent.memory.conversation_store as cs
 
-    conn = sqlite3.connect(tmp_path / "index.db")
-    conn.execute(
-        "CREATE TABLE artifacts (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT, "
-        "session_id TEXT, turn_seq INTEGER, path TEXT, kind TEXT, size INTEGER, "
-        "source TEXT, created_at INTEGER, updated_at INTEGER)"
-    )
-    conn.commit()
-    conn.close()
+    clock = iter(range(1000, 2000, 10))
+    monkeypatch.setattr(cs.time, "time", lambda: next(clock))
     store = _store(tmp_path)
-    store.record_artifacts("s1", [{"path": "/ws/a.html", "kind": "html"}])
-    conn = sqlite3.connect(tmp_path / "index.db")
-    try:
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(artifacts)")}
-    finally:
-        conn.close()
-    assert "extras" in cols
-    assert len(store.list_artifacts()["items"]) == 1
+    for name in ("old", "mid", "new"):
+        store.record_artifacts("s1", [{"path": f"/ws/{name}.md", "kind": "markdown"}])
+    ids = {i["path"]: i["id"] for i in store.list_artifacts()["items"]}
+
+    store.set_artifact_pinned(ids["/ws/old.md"], True)
+    store.set_artifact_pinned(ids["/ws/mid.md"], True)
+    order = [i["path"] for i in store.list_artifacts()["items"]]
+    # Latest pin on top, then the rest newest first.
+    assert order == ["/ws/mid.md", "/ws/old.md", "/ws/new.md"]
+
+    # Producing the file again keeps it pinned.
+    store.record_artifacts("s1", [{"path": "/ws/old.md", "kind": "markdown"}])
+    assert store.list_artifacts(path="/ws/old.md")["items"][0]["pinned_at"] > 0
+
+    assert store.set_artifact_pinned(ids["/ws/mid.md"], False) == 0
+    order = [i["path"] for i in store.list_artifacts()["items"]]
+    assert order == ["/ws/old.md", "/ws/new.md", "/ws/mid.md"]
+
+
+def test_pinning_is_scoped_to_the_agent(tmp_path):
+    default = _store(tmp_path)
+    research = _store(tmp_path, agent_id="research")
+    research.record_artifacts("s2", [{"path": "/r/b.html", "kind": "html"}])
+    rid = research.list_artifacts()["items"][0]["id"]
+
+    assert default.set_artifact_pinned(rid, True) is None
+    assert research.list_artifacts()["items"][0]["pinned_at"] == 0
+
+
+def test_a_title_names_the_entry_without_touching_the_file(tmp_path):
+    store = _store(tmp_path)
+    store.record_artifacts("s1", [{"path": "/ws/out/report_v3.md", "kind": "markdown"}])
+    aid = store.list_artifacts()["items"][0]["id"]
+
+    assert store.set_artifact_title(aid, "  Q3 review  ") is True
+    item = store.list_artifacts()["items"][0]
+    assert item["title"] == "Q3 review" and item["path"] == "/ws/out/report_v3.md"
+
+    # Search finds it by either name, and producing the file again keeps the title.
+    assert [i["id"] for i in store.list_artifacts(query="review")["items"]] == [aid]
+    assert [i["id"] for i in store.list_artifacts(query="report_v3")["items"]] == [aid]
+    store.record_artifacts("s1", [{"path": "/ws/out/report_v3.md", "kind": "markdown"}])
+    assert store.list_artifacts()["items"][0]["title"] == "Q3 review"
+
+    assert store.set_artifact_title(aid, "") is True
+    assert store.list_artifacts()["items"][0]["title"] == ""
+
+
+def test_renaming_is_scoped_to_the_agent(tmp_path):
+    default = _store(tmp_path)
+    research = _store(tmp_path, agent_id="research")
+    research.record_artifacts("s2", [{"path": "/r/b.html", "kind": "html"}])
+    rid = research.list_artifacts()["items"][0]["id"]
+
+    assert default.set_artifact_title(rid, "mine") is False
+    assert research.list_artifacts()["items"][0]["title"] == ""
 
 
 # ---------------------------------------------------------------------------

@@ -321,6 +321,18 @@
 .dark .art-tool { color: #cbd5e1; background: rgba(30, 30, 30, 0.88); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
 .dark .art-tool:hover { color: #fff; background: rgba(45, 45, 45, 0.95); }
 
+/* Pin: a tilted tack while it is an offer, upright and green once it holds */
+.art-tool-pin i { transform: rotate(45deg); transition: transform .18s ease, color .15s; }
+.art-tool-pin.is-active,
+.art-tool-pin.is-active:hover,
+.dark .art-tool-pin.is-active,
+.dark .art-tool-pin.is-active:hover { color: #35A85B; }
+.art-tool-pin.is-active i { transform: none; }
+
+.art-pinned .art-day-primary { display: inline-flex; align-items: center; gap: 7px; }
+.art-pinned-glyph { font-size: 10.5px; color: #4ABE6E; }
+.art-pinned + .art-day { margin-top: 16px; }
+
 .art-card-name {
     display: flex;
     align-items: center;
@@ -349,7 +361,7 @@
 .art-card-dot { width: 2px; height: 2px; border-radius: 50%; background: currentColor; flex-shrink: 0; opacity: .7; }
 .art-card-face { display: inline-flex; flex-shrink: 0; }
 .art-card-face .agent-avatar { border-radius: 50%; }
-.art-card-session { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.art-card-owner { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dark .art-card-meta { color: #64748b; }
 
 .art-sentinel {
@@ -511,6 +523,10 @@
 .dark .art-preview-head { border-bottom-color: rgba(255, 255, 255, 0.06); }
 .art-preview-titles { flex: 1; min-width: 0; }
 .art-preview-name {
+    /* Room on the left for the rename field's border, which sits outset so
+       the text lines up with the path below. */
+    margin-left: -8px;
+    padding-left: 8px;
     font-size: 14px;
     font-weight: 600;
     color: #1e293b;
@@ -528,6 +544,40 @@
     white-space: nowrap;
 }
 .dark .art-preview-name { color: #f1f5f9; }
+.art-name-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    margin: 0 0 0 -6px;
+    padding: 1px 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: text;
+}
+.art-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.art-name-btn i { flex-shrink: 0; font-size: 10.5px; color: #94a3b8; opacity: 0; transition: opacity .15s; }
+.art-name-btn:hover { background: #f1f5f9; }
+.art-name-btn:hover i,
+.art-name-btn:focus-visible i { opacity: 1; }
+.dark .art-name-btn:hover { background: rgba(255, 255, 255, 0.06); }
+.art-name-input {
+    box-sizing: border-box;
+    width: calc(100% + 6px);
+    margin: 0 0 0 -6px;
+    padding: 1px 6px;
+    border: 1px solid #4ABE6E;
+    border-radius: 6px;
+    outline: none;
+    background: #fff;
+    color: inherit;
+    font: inherit;
+}
+.dark .art-name-input { background: #111; }
 .dark .art-preview-path { color: #64748b; }
 .art-preview-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .art-preview-sep { width: 1px; height: 16px; margin: 0 4px; background: #e2e8f0; }

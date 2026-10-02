@@ -1,5 +1,7 @@
 /* Artifacts view: every file the conversations produced, newest first,
-   grouped by day. Selecting one previews it beside the timeline, and the
+   grouped by day, under a section of the ones the user pinned. Selecting one
+   previews it beside the timeline, where it can be renamed (the view's name
+   only; the file keeps its own), and the
    preview can lead back to the turn in the conversation that last wrote it.
 
    These are classic scripts sharing one global scope; see
@@ -15,6 +17,8 @@ const ART_TEXT_KINDS = new Set(['markdown', 'code', 'text', 'csv']);
 // costs more than the glimpse is worth.
 const ART_TEXT_THUMB_MAX = 512 * 1024;
 const ART_TEXT_THUMB_CHARS = 2400;
+// Matches TITLE_MAX in api/artifacts.py.
+const ART_TITLE_MAX = 120;
 
 let artItems = [];
 let artHasMore = false;
@@ -32,6 +36,8 @@ let artPageObserver = null;
 let artToastTimer = null;
 let artPreviewToken = 0;
 let artInited = false;
+// Ids with a pin request in flight, so a double click doesn't undo itself.
+const artPinBusy = new Set();
 
 function toggleArtifactsView() {
     navigateTo(currentView === 'artifacts' ? 'chat' : 'artifacts');
@@ -415,23 +421,40 @@ function _artNoMatchHTML() {
     </div>`;
 }
 
-/** Append cards to the timeline, continuing the last day's grid if it matches. */
+/** Pinned files share one section on top; the rest are grouped by day. */
+function _artSectionKey(item) {
+    return item.pinned_at ? 'pinned' : String(_artDayStart(item.updated_at));
+}
+
+function _artNewSection(key, item) {
+    const section = document.createElement('section');
+    section.className = 'art-day';
+    section.dataset.day = key;
+    if (key === 'pinned') {
+        section.classList.add('art-pinned');
+        section.innerHTML = `<div class="art-day-label">
+            <span class="art-day-primary"><i class="fas fa-thumbtack art-pinned-glyph"></i>${escapeHtml(t('artifacts_pinned_group'))}</span>
+        </div><div class="art-grid"></div>`;
+        return section;
+    }
+    const label = _artDayLabel(item.updated_at);
+    section.innerHTML = `<div class="art-day-label">
+        <span class="art-day-primary">${escapeHtml(label.primary)}</span>
+        ${label.secondary ? `<span class="art-day-secondary">${escapeHtml(label.secondary)}</span>` : ''}
+    </div><div class="art-grid"></div>`;
+    return section;
+}
+
+/** Append cards to the timeline, continuing the last section's grid if it matches. */
 function _artAppendCards(items) {
     const list = document.getElementById('art-list');
     if (!list || !items.length) return;
     let section = list.lastElementChild && list.lastElementChild.classList.contains('art-day')
         ? list.lastElementChild : null;
     items.forEach(item => {
-        const day = String(_artDayStart(item.updated_at));
-        if (!section || section.dataset.day !== day) {
-            const label = _artDayLabel(item.updated_at);
-            section = document.createElement('section');
-            section.className = 'art-day';
-            section.dataset.day = day;
-            section.innerHTML = `<div class="art-day-label">
-                <span class="art-day-primary">${escapeHtml(label.primary)}</span>
-                ${label.secondary ? `<span class="art-day-secondary">${escapeHtml(label.secondary)}</span>` : ''}
-            </div><div class="art-grid"></div>`;
+        const key = _artSectionKey(item);
+        if (!section || section.dataset.day !== key) {
+            section = _artNewSection(key, item);
             list.appendChild(section);
         }
         const grid = section.querySelector('.art-grid');
@@ -442,16 +465,87 @@ function _artAppendCards(items) {
     _artSyncThumbWidth();
 }
 
+/** The server's order: pinned first (latest pin on top), then newest first. */
+function _artSortItems() {
+    artItems.sort((a, b) => (b.pinned_at || 0) - (a.pinned_at || 0)
+        || b.updated_at - a.updated_at || b.id - a.id);
+}
+
+/**
+ * Move one card to where its item now sits in artItems, without redrawing the
+ * rest: every other thumbnail (pages especially) keeps what it has painted.
+ */
+function _artPlaceCard(item) {
+    const list = document.getElementById('art-list');
+    let card = list.querySelector(`.art-card[data-art-id="${CSS.escape(String(item.id))}"]`);
+    if (card) {
+        const old = card.closest('.art-day');
+        card.remove();
+        if (old && !old.querySelector('.art-card')) old.remove();
+    }
+    const index = artItems.indexOf(item);
+    if (index === -1) return;
+    if (card) {
+        _artSyncCardPin(card, item);
+    } else {
+        const holder = document.createElement('div');
+        holder.innerHTML = _artCardHTML(item);
+        card = holder.firstElementChild;
+        artThumbObserver.observe(card);
+    }
+    const key = _artSectionKey(item);
+    const later = artItems.slice(index + 1);
+    let section = list.querySelector(`:scope > .art-day[data-day="${key}"]`);
+    if (!section) {
+        section = _artNewSection(key, item);
+        const after = later.find(i => _artSectionKey(i) !== key);
+        list.insertBefore(section, after
+            ? list.querySelector(`:scope > .art-day[data-day="${_artSectionKey(after)}"]`) : null);
+    }
+    const grid = section.querySelector('.art-grid');
+    const next = later.find(i => _artSectionKey(i) === key);
+    grid.insertBefore(card, next
+        ? grid.querySelector(`.art-card[data-art-id="${CSS.escape(String(next.id))}"]`) : null);
+    if (artSelected && artSelected.id === item.id) card.classList.add('is-selected');
+    _artSyncThumbWidth();
+}
+
+function _artPinToolHTML(item) {
+    const tip = t(item.pinned_at ? 'artifacts_unpin' : 'artifacts_pin');
+    return `<button class="art-tool art-tool-pin${item.pinned_at ? ' is-active' : ''}" data-art-act="pin" data-tip-float data-tooltip="${escapeHtml(tip)}" data-tooltip-pos="bottom"><i class="fas fa-thumbtack"></i></button>`;
+}
+
+function _artSyncCardPin(card, item) {
+    const tool = card.querySelector('[data-art-act="pin"]');
+    if (tool) tool.outerHTML = _artPinToolHTML(item);
+    const time = card.querySelector('.art-card-time');
+    if (time) time.textContent = _artCardTime(item);
+}
+
+/** Under a day label the time is enough; in the pinned section the day is not implied. */
+function _artCardTime(item) {
+    if (!item.pinned_at || _artDayStart(item.updated_at) === _artDayStart(Date.now() / 1000)) {
+        return _artTime(item.updated_at);
+    }
+    return new Date(item.updated_at * 1000).toLocaleDateString(_artLocale(), { month: 'short', day: 'numeric' });
+}
+
+/** What the view calls the file: the name the user gave it, else its file name. */
+function _artName(item) {
+    return (item && (item.title || item.file_name)) || '';
+}
+
 function _artCardHTML(item) {
-    const name = item.file_name || '';
+    const name = _artName(item);
     const kind = item.kind || 'file';
-    const ext = _artExt(name);
-    const session = item.session_id
-        ? escapeHtml(item.session_title || t('artifacts_untitled'))
+    const ext = _artExt(item.file_name || '');
+    // Across Agents the card says whose it is; the conversation is one click away.
+    const agent = _artMultiAgent() && artScope === 'all' ? findAgent(item.agent_id) : null;
+    const owner = agent
+        ? `<span class="art-card-dot"></span><span class="art-card-face">${agentAvatarHTML(agent, 16)}</span><span class="art-card-owner">${escapeHtml(agent.name || agent.id)}</span>`
         : '';
-    const face = _artMultiAgent() && artScope === 'all'
-        ? `<span class="art-card-face">${agentAvatarHTML(findAgent(item.agent_id), 16)}</span>` : '';
     const tools = [
+        _artPinToolHTML(item),
         item.can_jump ? `<button class="art-tool" data-art-act="jump" data-tip-float data-tooltip="${escapeHtml(t('artifacts_jump'))}" data-tooltip-pos="bottom"><i class="fas fa-message"></i></button>` : '',
         item.exists ? `<button class="art-tool" data-art-act="download" data-tip-float data-tooltip="${escapeHtml(t('ws_download'))}" data-tooltip-pos="bottom"><i class="fas fa-download"></i></button>` : '',
     ].join('');
@@ -469,8 +563,7 @@ function _artCardHTML(item) {
             <i class="${wsIconClass(kind)}"></i><span>${escapeHtml(name)}</span>
         </div>
         <div class="art-card-meta">
-            <span class="art-card-time">${escapeHtml(_artTime(item.updated_at))}</span>
-            ${session ? `<span class="art-card-dot"></span>${face}<span class="art-card-session">${session}</span>` : ''}
+            <span class="art-card-time">${escapeHtml(_artCardTime(item))}</span>${owner}
         </div>
     </div>`;
 }
@@ -591,8 +684,48 @@ function artClosePreview() {
     requestAnimationFrame(_artSyncThumbWidth);
 }
 
+function _artRenderPreviewName(item) {
+    const box = document.getElementById('art-preview-name');
+    const name = escapeHtml(_artName(item));
+    box.innerHTML = item.id == null ? name
+        : `<button class="art-name-btn" onclick="artBeginRename()" aria-label="${escapeHtml(t('artifacts_rename'))}"><span class="art-name-text">${name}</span><i class="fas fa-pen"></i></button>`;
+}
+
+/** Edit the preview title in place: Enter or leaving the field saves, Esc cancels. */
+function artBeginRename() {
+    const item = artSelected;
+    const box = document.getElementById('art-preview-name');
+    if (!item || item.id == null || box.querySelector('input')) return;
+    const input = document.createElement('input');
+    input.className = 'art-name-input';
+    input.maxLength = ART_TITLE_MAX;
+    input.value = _artName(item);
+    input.placeholder = item.file_name || '';
+    input.setAttribute('aria-label', t('artifacts_rename'));
+    box.replaceChildren(input);
+    input.focus();
+    input.select();
+    let settled = false;
+    const finish = (save) => {
+        if (settled) return;
+        settled = true;
+        if (save) _artRename(item, input.value);
+        else if (artSelected && artSelected.id === item.id) _artRenderPreviewName(artSelected);
+    };
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.isComposing) {
+            e.preventDefault();
+            finish(true);
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            finish(false);
+        }
+    });
+    input.addEventListener('blur', () => finish(true));
+}
+
 function _artRenderPreviewChrome(item) {
-    document.getElementById('art-preview-name').textContent = item.file_name || '';
+    _artRenderPreviewName(item);
     const pathEl = document.getElementById('art-preview-path');
     pathEl.textContent = item.rel_path || '';
     pathEl.title = item.abs_path || '';
@@ -681,7 +814,9 @@ function artAddSelected() {
 
 function _artRunAction(action, item) {
     if (!item) return;
-    if (action === 'download') {
+    if (action === 'pin') {
+        _artTogglePin(item);
+    } else if (action === 'download') {
         if (item.exists && item.raw_url) wsTriggerDownload(item.raw_url, item.file_name);
     } else if (action === 'jump') {
         if (item.can_jump) artJumpToSource(item);
@@ -694,7 +829,7 @@ function _artConfirmRemove(item) {
     if (item.id == null) return;
     showConfirmDialog({
         title: t('artifacts_remove_title'),
-        message: t('artifacts_remove_confirm').replace('{name}', item.file_name || ''),
+        message: t('artifacts_remove_confirm').replace('{name}', _artName(item)),
         okText: t('artifacts_remove_ok'),
         cancelText: t('channels_cancel'),
         onConfirm: () => _artRemove(item),
@@ -728,6 +863,79 @@ function _artAdd(item) {
         })
         .catch(err => _artToast(err.message || t('artifacts_load_failed')))
         .finally(() => btn.classList.remove('ws-btn-busy'));
+}
+
+function _artTogglePin(item) {
+    if (item.id == null || artPinBusy.has(item.id)) return;
+    const pinned = !item.pinned_at;
+    artPinBusy.add(item.id);
+    fetch('/api/artifacts/pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.id, agent_id: item.agent_id, pinned: pinned }),
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status !== 'success') throw new Error(data.message || 'Request failed');
+            const listed = artItems.find(i => i.id === item.id);
+            [item, listed, artSelected].forEach(target => {
+                if (target && target.id === item.id) target.pinned_at = data.pinned_at || 0;
+            });
+            if (!listed) {
+                // Opened from a conversation without being in the loaded list:
+                // reload so it lands in the pinned section if the filters allow.
+                artPendingFocus = { abs_path: item.abs_path };
+                artReload();
+            } else {
+                _artSortItems();
+                // Unpinned past the last loaded card: its place is on a page
+                // that has not been fetched yet, which will bring it back.
+                if (!pinned && artHasMore && artItems[artItems.length - 1] === listed) artItems.pop();
+                _artPlaceCard(listed);
+            }
+            if (artSelected && artSelected.id === item.id) _artRenderPreviewChrome(artSelected);
+            _artToast(t(pinned ? 'artifacts_pinned' : 'artifacts_unpinned'));
+        })
+        .catch(err => _artToast(err.message || t('artifacts_load_failed')))
+        .finally(() => artPinBusy.delete(item.id));
+}
+
+/** Show `title` wherever this row appears: its list entry, card and the preview. */
+function _artApplyTitle(item, title) {
+    const listed = artItems.find(i => i.id === item.id);
+    [item, listed, artSelected].forEach(target => {
+        if (target && target.id === item.id) target.title = title;
+    });
+    const card = document.querySelector(`#art-list .art-card[data-art-id="${CSS.escape(String(item.id))}"]`);
+    const label = card && card.querySelector('.art-card-name span');
+    if (label) label.textContent = _artName(item);
+    if (artSelected && artSelected.id === item.id) _artRenderPreviewName(artSelected);
+}
+
+function _artRename(item, raw) {
+    // Same normalisation as the server, so an unchanged name sends nothing.
+    let title = String(raw || '').split(/\s+/).filter(Boolean).join(' ').slice(0, ART_TITLE_MAX);
+    if (title === (item.file_name || '')) title = '';
+    const before = item.title || '';
+    if (title === before) {
+        _artApplyTitle(item, before);
+        return;
+    }
+    _artApplyTitle(item, title);
+    fetch('/api/artifacts/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.id, agent_id: item.agent_id, title: title }),
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status !== 'success') throw new Error(data.message || 'Request failed');
+            _artApplyTitle(item, data.title || '');
+        })
+        .catch(err => {
+            _artApplyTitle(item, before);
+            _artToast(err.message || t('artifacts_rename_failed'));
+        });
 }
 
 function _artRemove(item) {

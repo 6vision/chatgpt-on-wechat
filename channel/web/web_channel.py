@@ -14,7 +14,8 @@ from channel.web.api.agents import (  # noqa: F401
     AgentAvatarHandler, AgentCoreFileHandler, AgentsHandler,
 )
 from channel.web.api.artifacts import (  # noqa: F401
-    ArtifactAddHandler, ArtifactDeleteHandler, ArtifactsHandler,
+    ArtifactAddHandler, ArtifactDeleteHandler, ArtifactPinHandler,
+    ArtifactRenameHandler, ArtifactsHandler,
 )
 from channel.web.api.auth import (  # noqa: F401
     AuthCheckHandler, AuthLoginHandler, AuthLogoutHandler,
@@ -101,6 +102,8 @@ URLS = (
     '/api/workspace/read', 'WorkspaceReadHandler',
     '/api/workspace/write', 'WorkspaceWriteHandler',
     '/api/artifacts/add', 'ArtifactAddHandler',
+    '/api/artifacts/pin', 'ArtifactPinHandler',
+    '/api/artifacts/rename', 'ArtifactRenameHandler',
     '/api/artifacts/delete', 'ArtifactDeleteHandler',
     '/api/artifacts', 'ArtifactsHandler',
     '/api/projects', 'ProjectsHandler',

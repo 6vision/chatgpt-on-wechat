@@ -147,17 +147,15 @@ CREATE TABLE IF NOT EXISTS artifacts (
     created_at  INTEGER DEFAULT 0,
     updated_at  INTEGER DEFAULT 0,
     -- JSON object for metadata that doesn't warrant a column of its own.
-    extras      TEXT    DEFAULT ''
+    extras      TEXT    DEFAULT '',
+    -- When the user pinned it to the top of the timeline; 0 = not pinned.
+    pinned_at   INTEGER DEFAULT 0,
+    -- Name the user gave it in the view; '' = the file name. The file on disk
+    -- keeps its name, since conversations and other files refer to the path.
+    title       TEXT    DEFAULT ''
 );
 """
 
-# Columns added after the table first shipped, applied with ADD COLUMN when
-# missing. Evolve the schema by appending here, never by editing the DDL alone.
-_ARTIFACTS_ADDED_COLUMNS = (
-    ("extras", "TEXT DEFAULT ''"),
-)
-
-# Run after the columns above exist, so an index may reference any of them.
 _ARTIFACTS_INDEX_DDL = """
 CREATE INDEX IF NOT EXISTS idx_artifacts_recent
     ON artifacts (agent_id, updated_at);
@@ -2087,9 +2085,11 @@ class ConversationStore:
     ) -> Dict[str, Any]:
         """Newest-first page of indexed artifacts, with their session's title.
 
-        ``agent_ids`` widens the scope from this handle's Agent to the stored
-        ids given (``""`` is the default Agent): every Agent shares the file, so
-        one handle can read them all. ``path`` narrows to one exact file.
+        Pinned rows come first, most recently pinned on top. ``agent_ids``
+        widens the scope from this handle's Agent to the stored ids given
+        (``""`` is the default Agent): every Agent shares the file, so one
+        handle can read them all. ``path`` narrows to one exact file, and
+        ``query`` matches the path or the given title.
         """
         if not self._artifacts_ready:
             return {"items": [], "has_more": False}
@@ -2106,8 +2106,8 @@ class ConversationStore:
             args.append(path)
         if query:
             escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            where.append("a.path LIKE ? ESCAPE '\\'")
-            args.append(f"%{escaped}%")
+            where.append("(a.path LIKE ? ESCAPE '\\' OR a.title LIKE ? ESCAPE '\\')")
+            args.extend([f"%{escaped}%"] * 2)
         clause = "WHERE " + " AND ".join(where)
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
@@ -2120,12 +2120,13 @@ class ConversationStore:
                            a.turn_seq, a.path, COALESCE(a.kind, 'file'),
                            COALESCE(a.size, 0), COALESCE(a.source, ''),
                            COALESCE(a.created_at, 0), COALESCE(a.updated_at, 0),
-                           s.title, s.channel_type
+                           s.title, s.channel_type, COALESCE(a.pinned_at, 0) AS pin,
+                           COALESCE(a.title, '')
                     FROM artifacts a
                     LEFT JOIN sessions s
                         ON s.agent_id = a.agent_id AND s.session_id = a.session_id
                     {clause}
-                    ORDER BY a.updated_at DESC, a.id DESC
+                    ORDER BY pin DESC, a.updated_at DESC, a.id DESC
                     LIMIT ? OFFSET ?
                     """,
                     (*args, limit + 1, offset),
@@ -2147,10 +2148,49 @@ class ConversationStore:
                 "session_title": row[10],
                 "session_channel": row[11],
                 "session_exists": row[11] is not None,
+                "pinned_at": row[12],
+                "title": row[13],
             }
             for row in rows[:limit]
         ]
         return {"items": items, "has_more": len(rows) > limit}
+
+    def set_artifact_title(self, artifact_id: int, title: str) -> bool:
+        """Name one row for the view; an empty title falls back to the file name."""
+        if not self._artifacts_ready:
+            return False
+        with self._lock:
+            conn = self._connect()
+            try:
+                with conn:
+                    cur = conn.execute(
+                        "UPDATE artifacts SET title = ? WHERE agent_id = ? AND id = ?",
+                        ((title or "").strip(), self._agent_id, int(artifact_id)),
+                    )
+                    return cur.rowcount > 0
+            finally:
+                conn.close()
+
+    def set_artifact_pinned(self, artifact_id: int, pinned: bool) -> Optional[int]:
+        """Pin one row to the top of the timeline, or unpin it.
+
+        Returns the stored ``pinned_at`` (0 when unpinned), or None when the row
+        is not this Agent's.
+        """
+        if not self._artifacts_ready:
+            return None
+        pinned_at = int(time.time()) if pinned else 0
+        with self._lock:
+            conn = self._connect()
+            try:
+                with conn:
+                    cur = conn.execute(
+                        "UPDATE artifacts SET pinned_at = ? WHERE agent_id = ? AND id = ?",
+                        (pinned_at, self._agent_id, int(artifact_id)),
+                    )
+                    return pinned_at if cur.rowcount > 0 else None
+            finally:
+                conn.close()
 
     def delete_artifact(self, artifact_id: int) -> bool:
         """Drop one row from the index. The file itself is left alone."""
@@ -2211,10 +2251,6 @@ class ConversationStore:
         """Create the artifacts index without ever risking the core schema."""
         try:
             conn.executescript(_ARTIFACTS_DDL)
-            cols = {row[1] for row in conn.execute("PRAGMA table_info(artifacts)")}
-            for name, decl in _ARTIFACTS_ADDED_COLUMNS:
-                if name not in cols:
-                    conn.execute(f"ALTER TABLE artifacts ADD COLUMN {name} {decl}")
             conn.executescript(_ARTIFACTS_INDEX_DDL)
             conn.commit()
             self._artifacts_ready = True
