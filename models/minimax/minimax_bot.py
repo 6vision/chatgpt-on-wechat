@@ -587,7 +587,7 @@ class MinimaxBot(Bot):
                     yield {
                         "error": True,
                         "message": error_msg,
-                        "status_code": int(http_code) if http_code.isdigit() else 500
+                        "status_code": int(http_code) if str(http_code).isdigit() else 500
                     }
                     return
 
