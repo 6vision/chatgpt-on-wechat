@@ -161,8 +161,19 @@ class MoonshotBot(Bot):
                     "content": response["choices"][0]["message"]["content"]
                 }
             else:
-                response = res.json()
-                error = response.get("error")
+                # The body of a refusal is not always JSON -- a gateway in front
+                # of the API answers with an HTML page -- and it does not always
+                # carry an `error` key (`response.get("error")` used to leave
+                # `None` for a FastAPI-style `{"detail": ...}`, and the `.get()`
+                # on it raised). Reading it must not raise: the `except` at the
+                # bottom of this method re-sends the request that was refused.
+                try:
+                    response = res.json()
+                except ValueError:
+                    response = {}
+                error = response.get("error") if isinstance(response, dict) else None
+                if not isinstance(error, dict):
+                    error = {"message": error or res.text[:300]}
                 logger.error(f"[MOONSHOT] chat failed, status_code={res.status_code}, "
                              f"msg={error.get('message')}, type={error.get('type')}")
 
