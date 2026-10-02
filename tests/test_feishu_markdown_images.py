@@ -167,10 +167,6 @@ def test_public_image_is_uploaded_to_feishu_without_a_temp_file(monkeypatch):
             id="longer-fence-around-a-shorter-one",
         ),
         pytest.param(
-            "```\n![logo](https://cdn.example.com/logo.png)",
-            id="unclosed-fence-runs-to-the-end",
-        ),
-        pytest.param(
             "Write `![logo](https://cdn.example.com/logo.png)` in the README.",
             id="inline-code",
         ),

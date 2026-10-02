@@ -9,6 +9,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 
+from common.markdown_fence import transform_outside_fences
 
 _BLOCK_MARKDOWN = re.compile(
     r"(?m)^\s{0,3}(?:#{1,6}\s|>\s|[-*+]\s|\d+[.)]\s|```|~~~)"
@@ -16,9 +17,6 @@ _BLOCK_MARKDOWN = re.compile(
 _INLINE_MARKDOWN = re.compile(r"(`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^]\n]+\]\([^)\n]+\))")
 _TABLE_SEPARATOR = re.compile(r"(?m)^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
 _MARKDOWN_IMAGE = re.compile(r"!\[([^\]\n]*)\]\(([^)\s]+)\)")
-# A fence opener: three or more backticks (whose info string has no backtick)
-# or tildes, indented by at most three spaces.
-_FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}(?=[^`]*$)|~{3,})")
 # An inline code span on one line: a backtick run closed by the next run of the
 # same length.
 _CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)")
@@ -62,12 +60,8 @@ def build_text_delivery(text: str) -> Tuple[str, str]:
 
 
 def _outside_code(text: str, transform: Callable[[str], str]) -> str:
-    """Apply *transform* to the parts of Markdown *text* that are not code.
-
-    Fenced code blocks and inline code spans pass through unchanged. A fence
-    closes only on a bare run of its own character at least as long as the
-    opener, and an unclosed fence runs to the end of the text.
-    """
+    """Apply *transform* to the parts of Markdown *text* outside code blocks
+    and inline code spans."""
 
     def prose(chunk: str) -> str:
         parts = []
@@ -79,26 +73,7 @@ def _outside_code(text: str, transform: Callable[[str], str]) -> str:
         parts.append(transform(chunk[last:]))
         return "".join(parts)
 
-    out = []
-    pending = []
-    fence = None
-    for line in text.splitlines(keepends=True):
-        if fence is None:
-            opener = _FENCE_OPEN.match(line)
-            if opener:
-                out.append(prose("".join(pending)))
-                pending = []
-                fence = opener.group(1)
-                out.append(line)
-            else:
-                pending.append(line)
-            continue
-        out.append(line)
-        closer = re.escape(fence[0]) + "{" + str(len(fence)) + ",}"
-        if re.fullmatch(r" {0,3}" + closer + r"[ \t]*", line.rstrip("\r\n")):
-            fence = None
-    out.append(prose("".join(pending)))
-    return "".join(out)
+    return transform_outside_fences(text, prose)
 
 
 def resolve_markdown_images(
