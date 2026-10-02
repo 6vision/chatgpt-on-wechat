@@ -58,6 +58,44 @@ def _explain_linkai_error(status_code, error_msg):
     return error_msg
 
 
+def _linkai_error_body(res) -> tuple:
+    """The message and kind out of a rejected LinkAI response.
+
+    A rejection does not arrive in one shape. LinkAI answers with its own
+    ``{"code", "message"}``; a misconfigured base gets FastAPI's bare
+    ``{"detail": "Not Found"}`` (see ``_explain_linkai_error``); and a proxy in
+    front of either answers with an HTML page that is not JSON at all. Only the
+    OpenAI shape ``{"error": {"message", "type"}}`` is what ``_chat`` and
+    ``reply_text`` used to assume, which turned every other one into an
+    ``AttributeError`` on ``None`` -- and that error was swallowed by their own
+    ``except``, so they retried the refusal instead of reporting it.
+
+    ``_handle_linkai_sync_response`` already read the body this way
+    (``.get("error", {})`` plus a ``res.text`` fallback). Read it here, once, so
+    the next caller that only wants to log a failure cannot write the
+    OpenAI-only version again.
+
+    Returns ``(message, kind)``; ``kind`` is whatever the body labelled the
+    failure with, and is "" when it labelled it with nothing.
+    """
+    text = getattr(res, "text", "") or ""
+    try:
+        data = res.json()
+    except Exception:
+        data = None
+    if isinstance(data, dict):
+        error = data.get("error")
+        if isinstance(error, dict):
+            message = error.get("message") or text or "Unknown error"
+            return str(message), str(error.get("type") or "")
+        if isinstance(error, str) and error:
+            return error, ""
+        for key in ("message", "detail", "msg"):
+            if data.get(key):
+                return str(data[key]), str(data.get("type") or data.get("code") or "")
+    return (text or "Unknown error"), ""
+
+
 class LinkAIBot(Bot, OpenAICompatibleBot):
     # authentication failed
     AUTH_FAILED_CODE = 401
@@ -209,10 +247,9 @@ class LinkAIBot(Bot, OpenAICompatibleBot):
                 return Reply(ReplyType.TEXT, reply_content)
 
             else:
-                response = res.json()
-                error = response.get("error")
+                error_msg, error_kind = _linkai_error_body(res)
                 logger.error(f"[LINKAI] chat failed, status_code={res.status_code}, "
-                             f"msg={error.get('message')}, type={error.get('type')}")
+                             f"msg={error_msg}, type={error_kind}")
 
                 if res.status_code >= 500:
                     # server error, need retry
@@ -338,10 +375,9 @@ class LinkAIBot(Bot, OpenAICompatibleBot):
                 }
 
             else:
-                response = res.json()
-                error = response.get("error")
+                error_msg, error_kind = _linkai_error_body(res)
                 logger.error(f"[LINKAI] chat failed, status_code={res.status_code}, "
-                             f"msg={error.get('message')}, type={error.get('type')}")
+                             f"msg={error_msg}, type={error_kind}")
 
                 if res.status_code >= 500:
                     # server error, need retry
@@ -676,11 +712,7 @@ def _handle_linkai_sync_response(self, base_url, headers, body):
             # LinkAI response is already in OpenAI-compatible format
             return response
         else:
-            try:
-                error_data = res.json()
-                error_msg = error_data.get("error", {}).get("message", res.text)
-            except Exception:
-                error_msg = res.text or "Unknown error"
+            error_msg, _kind = _linkai_error_body(res)
             error_msg = _explain_linkai_error(res.status_code, error_msg)
             raise Exception(f"LinkAI API error: {res.status_code} - {error_msg}")
             
