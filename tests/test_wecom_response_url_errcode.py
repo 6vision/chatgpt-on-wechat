@@ -1,21 +1,5 @@
-"""A refused response_url push must leave the answer deliverable by poll.
-
-WeCom answers these callbacks with HTTP 200 whether or not it accepted the
-content, so ``errcode`` in the body is the only signal -- and it is the envelope
-every long-connection reply in this channel already reads (`:514`, `:546`,
-`:1381`, `:1404`, `:1415`).
-
-`_schedule_response_url_fallback` is the last chance to hand over an answer
-that finished after the passive window closed. It claims the stream with
-`url_sent = True` *before* posting, so a push WeCom refused left the flag
-standing: the next poll then took the "Final answer already pushed via
-response_url" branch and answered `finish` with empty content. The accumulated
-answer went nowhere, the user saw nothing, and the only trace was an
-`logger.info` saying the reply had been sent.
-
-These tests pin the promise the flag's own comment makes: it means WeCom
-actually took the answer.
-"""
+"""A response_url push WeCom refused must leave the answer deliverable by poll,
+while a push whose outcome is unknown keeps it claimed."""
 
 import threading
 import time
@@ -143,6 +127,21 @@ def test_a_failed_status_reports_failure(monkeypatch):
 # ---------------------------------------------------------------------------
 # The consequence a poll sees.
 # ---------------------------------------------------------------------------
+
+def test_a_push_with_an_unknown_outcome_stays_claimed(monkeypatch):
+    """A timeout may hide a delivered push, so a poll must not send it again."""
+    channel = _channel()
+    state = _a_finished_stream(channel)
+
+    def timeout(*a, **kw):
+        raise wecom_bot_channel.requests.exceptions.ReadTimeout("read timed out")
+
+    monkeypatch.setattr(wecom_bot_channel.requests, "post", timeout)
+
+    _run_the_fallback(channel, monkeypatch)
+
+    assert state["url_sent"] is True
+
 
 def test_a_refused_push_lets_a_late_poll_hand_the_answer_over(monkeypatch):
     """`url_sent` is what the poll path reads to decide it has nothing left to

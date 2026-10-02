@@ -914,15 +914,10 @@ class WecomBotChannel(ChatChannel):
                 content = (state["committed"] + state["current"]).strip()
                 image_urls = list(state.get("image_urls") or [])
                 has_images = bool(state.get("images"))
-                # Claim it up front: only one push may be attempted, even if a
-                # late poll arrives while the request is still in flight.
                 state["url_sent"] = True
 
             if not self._send_via_response_url(stream_id, response_url, content, image_urls, has_images):
-                # WeCom refused it, so nothing reached the user. Give the answer
-                # back to the poll path, which still holds it -- otherwise the
-                # next poll takes the "already pushed via response_url" branch,
-                # answers `finish` with empty content, and the reply is gone.
+                # Refused, so hand the answer back to a late poll.
                 with self._callback_lock:
                     state = self._callback_streams.get(stream_id)
                     if state:
@@ -935,12 +930,7 @@ class WecomBotChannel(ChatChannel):
     ) -> bool:
         """Push a one-shot active markdown reply to response_url (valid 1h, single use).
 
-        WeCom answers these callbacks with HTTP 200 whether or not it accepted
-        the content, so the body's ``errcode`` is the only signal -- the same
-        envelope the long-connection replies in this file already read (`:514`,
-        `:546`, `:1381`, `:1404`, `:1415`).
-
-        Returns True only when WeCom took the reply.
+        Returns False only when WeCom answered and refused the reply.
         """
         md = content or ""
         if image_urls:
@@ -953,25 +943,20 @@ class WecomBotChannel(ChatChannel):
         try:
             resp = requests.post(response_url, json=payload, timeout=15)
         except Exception as e:
+            # It may still have arrived; keep the claim so a poll cannot repeat it.
             logger.error(f"[WecomBot] response_url active reply failed for {stream_id}: {e}")
-            return False
+            return True
 
+        # WeCom answers HTTP 200 even when it refuses; errcode is the real signal.
         try:
             body = resp.json()
         except Exception:
             body = None
-        if not isinstance(body, dict):
-            logger.error(
-                f"[WecomBot] response_url active reply rejected for {stream_id}: "
-                f"status={resp.status_code}, body={getattr(resp, 'text', '')[:200]}"
-            )
-            return False
-
-        errcode = body.get("errcode", 0)
+        errcode = body.get("errcode", 0) if isinstance(body, dict) else None
         if resp.status_code != 200 or errcode != 0:
             logger.error(
                 f"[WecomBot] response_url active reply rejected for {stream_id}: "
-                f"status={resp.status_code}, errcode={errcode}, errmsg={body.get('errmsg', '')}"
+                f"status={resp.status_code}, body={resp.text[:200]}"
             )
             return False
 
