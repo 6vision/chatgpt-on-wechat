@@ -1,4 +1,4 @@
-"""A sub agent must not reset the parent run's engaged fallback.
+"""A run resets the fallback for itself, never for the run it is nested in.
 
 The fallback is an ordered chain, and it is sticky for a whole run: once the
 primary model has failed a turn for good, the remaining steps stay on whichever
@@ -15,9 +15,15 @@ is running inside the same outage and starts on the dead primary itself — and
 with a chain it would also rewind the parent to link 1, throwing away the
 progress of every link already proven to be down.
 
-The reset has to be scoped to a *top-level* run: an outer scope that already set
-a run id means this run is nested and must leave the parent's routing alone.
+The opposite failure is just as bad: a top-level turn that skips the reset
+stays on the backup forever, ignoring the model the conversation is pinned to.
+An ambient run id cannot tell the two apart — the bridge opens a run, and sets
+its id, before every top-level turn — so these drive the real ``run_stream``
+the way the bridge and the sub agent runner enter it.
 """
+
+import contextvars
+import threading
 
 import pytest
 
@@ -47,115 +53,168 @@ def executor_cls():
     return AgentStreamExecutor
 
 
-def _reset_like_a_run(executor_cls, model, ambient_run_id=None):
-    """Run the real reset decision the way a run enters it.
+def _run(executor_cls, model, during=None):
+    """Drive the real run_stream for one answer; return the model each call saw.
 
-    run_stream mints a run id only when no outer scope set one, and the reset
-    follows the same scope. Driving the executor's real method under the same
-    identity_scope a sub agent spawn uses keeps this honest: it breaks if
-    either contract changes.
+    ``during`` runs inside the LLM call, i.e. while the run is live — where a
+    parent fails over or spawns a sub agent.
     """
+    seen = []
+    executor = executor_cls(agent=None, model=model, system_prompt="", tools=[])
+
+    def _call_llm_stream(**_kwargs):
+        seen.append(model.model)
+        if during is not None:
+            during()
+        return "ok", [], "end_turn"
+
+    executor._call_llm_stream = _call_llm_stream
+    executor.run_stream("hi")
+    return seen
+
+
+def _bridge_turn(executor_cls, model, during=None):
+    """A top-level turn the way AgentBridge enters it: run id already set."""
     from common.runtime_identity import identity_scope
-    from common.utils import (
-        set_agent_run_id,
-        clear_agent_run_id,
-        current_agent_run_id,
-    )
-    import uuid as _uuid
 
-    executor = executor_cls.__new__(executor_cls)
-    executor.model = model
+    with identity_scope(run_id="bridge-run"):
+        return _run(executor_cls, model, during)
 
-    def _body():
-        # Mirrors run_stream: capture "am I nested?" BEFORE minting a run id,
-        # then hand that to the reset.
-        nested = bool(current_agent_run_id())
-        token = None
-        if not nested:
-            token = set_agent_run_id(_uuid.uuid4().hex)
-        try:
-            executor._reset_model_fallback(nested_run=nested)
-        finally:
-            if token is not None:
-                clear_agent_run_id(token)
 
-    if ambient_run_id:
-        with identity_scope(run_id=ambient_run_id):
-            _body()
-    else:
-        _body()
+def _spawn_child(executor_cls, model):
+    """Run a sub agent the way the runner does: copied context, worker thread,
+    its own run id. Returns the model each of its calls saw."""
+    from common.runtime_identity import identity_scope
+
+    out = {}
+
+    def _child():
+        with identity_scope(run_id="child-run"):
+            out["seen"] = _run(executor_cls, model)
+
+    ctx = contextvars.copy_context()
+    worker = threading.Thread(target=ctx.run, args=(_child,))
+    worker.start()
+    worker.join()
+    return out["seen"]
+
+
+class TestTopLevelTurnStartsOnThePrimary:
+
+    def test_a_bridge_turn_resets_a_fallback_left_by_the_previous_turn(
+        self, monkeypatch, executor_cls
+    ):
+        """The regression: a pinned conversation kept answering on the backup."""
+        model = _model(monkeypatch, FALLBACK)
+        model.set_session_override("claudeAPI", "claude-opus-5-5")
+        assert model.use_fallback() is True
+        assert model.use_fallback() is True
+        assert model.model == "backup-model-2"
+
+        assert _bridge_turn(executor_cls, model) == ["claude-opus-5-5"]
+
+    def test_the_turn_log_names_the_model_it_starts_on(self, monkeypatch, executor_cls):
+        """Not the backup the previous turn ended on."""
+        import agent.protocol.agent_stream as agent_stream
+
+        model = _model(monkeypatch, FALLBACK)
+        model.set_session_override("claudeAPI", "claude-opus-5-5")
+        model.use_fallback()
+        lines = []
+        monkeypatch.setattr(
+            agent_stream.logger, "info", lambda msg, *a, **k: lines.append(str(msg))
+        )
+
+        _bridge_turn(executor_cls, model)
+
+        turn_line = next(line for line in lines if line.startswith("🤖 "))
+        assert turn_line.startswith("🤖 claude-opus-5-5 ")
+
+    def test_a_turn_without_an_ambient_run_id_resets_too(self, monkeypatch, executor_cls):
+        model = _model(monkeypatch, FALLBACK)
+        model.use_fallback()
+
+        assert _run(executor_cls, model) == ["primary-model"]
+
+    def test_the_next_turn_walks_the_chain_from_the_front(self, monkeypatch, executor_cls):
+        model = _model(monkeypatch, FALLBACK)
+        model.use_fallback()
+        model.use_fallback()
+        _bridge_turn(executor_cls, model)
+
+        assert model.fallback_available() is True
+        assert model.use_fallback() is True
+        assert model.model == "backup-model"
 
 
 class TestSubAgentDoesNotClearParentFallback:
 
-    def test_a_nested_run_keeps_the_parents_engaged_fallback(
+    def _parent_spawning_after(self, executor_cls, model, links):
+        """A parent turn that fails over ``links`` times, then spawns a child."""
+        state = {}
+
+        def _during():
+            for _ in range(links):
+                assert model.use_fallback() is True
+            state["parent_before"] = model.model
+            state["child"] = _spawn_child(executor_cls, model)
+            state["parent_after"] = model.model
+
+        _bridge_turn(executor_cls, model, during=_during)
+        return state
+
+    def test_a_sub_agent_keeps_the_parents_engaged_fallback(
         self, monkeypatch, executor_cls
     ):
-        """The regression: the child's reset knocked the parent off the backup."""
         model = _model(monkeypatch, FALLBACK)
-        assert model.use_fallback() is True
-        assert model.model == "backup-model"
 
-        # A sub agent spawning mid-run, with the parent's run id ambient.
-        _reset_like_a_run(executor_cls, model, ambient_run_id="parent-run-123")
+        state = self._parent_spawning_after(executor_cls, model, links=1)
 
-        assert model.model == "backup-model", (
+        assert state["child"] == ["backup-model"], (
+            "the sub agent started on the primary the parent just proved down"
+        )
+        assert state["parent_after"] == "backup-model", (
             "the sub agent cleared the fallback the parent is still relying on; "
             "the parent will re-probe the failed primary on its next step"
         )
 
-    def test_a_top_level_run_still_resets(self, monkeypatch, executor_cls):
-        """The fix must not break the normal case: a new run starts fresh."""
-        model = _model(monkeypatch, FALLBACK)
-        assert model.use_fallback() is True
-        assert model.model == "backup-model"
-
-        # No ambient run id: this run is the top of its own run.
-        _reset_like_a_run(executor_cls, model)
-
-        assert model.model == "primary-model"
-
-    def test_the_reset_still_lets_the_next_turn_walk_the_chain(self, monkeypatch, executor_cls):
-        """After a top-level reset the run starts from link 1 again."""
-        model = _model(monkeypatch, FALLBACK)
-        model.use_fallback()
-        _reset_like_a_run(executor_cls, model)
-
-        assert model.model == "primary-model"
-        assert model.fallback_available() is True
-        assert model.use_fallback() is True
-        assert model.model == "backup-model"
-
-    def test_a_nested_run_leaves_the_chain_position_alone(
-        self, monkeypatch, executor_cls
-    ):
-        """A nested run must not hand the parent extra links, nor rewind it."""
-        model = _model(monkeypatch, FALLBACK)
-        model.use_fallback()
-
-        _reset_like_a_run(executor_cls, model, ambient_run_id="parent-run-123")
-
-        # Still on the backup and still on link 1, so the parent's next failure
-        # advances to link 2 rather than repeating the one that just failed.
-        assert model.model == "backup-model"
-        assert model.fallback_available() is True
-
     def test_a_parent_that_walked_two_links_keeps_its_position(
         self, monkeypatch, executor_cls
     ):
-        """The regression a chain adds: the child must not rewind the parent to
-        link 1 after it already proved link 1 was down."""
+        """The child must not rewind the parent to link 1 after it already
+        proved link 1 was down."""
         model = _model(monkeypatch, FALLBACK)
-        assert model.use_fallback() is True   # link 1
-        assert model.use_fallback() is True   # link 2
-        assert model.model == "backup-model-2"
 
-        _reset_like_a_run(executor_cls, model, ambient_run_id="parent-run-123")
+        state = self._parent_spawning_after(executor_cls, model, links=2)
 
-        assert model.model == "backup-model-2"
-        # The point of the test: the child's run did NOT rewind the parent to
-        # link 1. (Two passes are available now, so more advances remain —
-        # position, not exhaustion, is what this pins down.)
+        assert state["parent_after"] == "backup-model-2"
         assert model.fallback_available() is True
         assert model.use_fallback() is True
         assert model.model == "backup-model"  # wrapped around: pass 2, link 1
+
+    def test_a_nested_run_on_its_own_model_still_resets_it(
+        self, monkeypatch, executor_cls
+    ):
+        """Only a shared model object is protected: a teammate answering on its
+        own model starts that model fresh, like any other turn."""
+        parent_model = _model(monkeypatch, FALLBACK)
+        other = AgentLLMModel.__new__(AgentLLMModel)
+        other.use_fallback()
+        state = {}
+
+        def _during():
+            state["other"] = _spawn_child(executor_cls, other)
+
+        _bridge_turn(executor_cls, parent_model, during=_during)
+
+        assert state["other"] == ["primary-model"]
+
+    def test_the_active_run_marker_is_released_after_the_run(
+        self, monkeypatch, executor_cls
+    ):
+        from agent.protocol.agent_stream import _ACTIVE_RUN_MODELS
+
+        model = _model(monkeypatch, FALLBACK)
+        _bridge_turn(executor_cls, model)
+
+        assert _ACTIVE_RUN_MODELS.get() == frozenset()

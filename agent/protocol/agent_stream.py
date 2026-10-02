@@ -44,6 +44,15 @@ MAX_STORED_REASONING_CHARS = 4 * 1024  # 4 KB
 # Marker inserted between head and tail when reasoning is truncated.
 _REASONING_TRUNCATE_MARKER = "\n\n... [reasoning truncated, {omitted} chars omitted] ...\n\n"
 
+# ids of the model objects driving a run_stream that is still in progress in
+# this context. A sub agent shares its parent's model object and inherits this
+# through copy_context, which is how it knows the fallback it sees belongs to a
+# live outer run. An ambient run id cannot tell the two apart: the bridge opens
+# a run (and sets its id) before every top-level turn as well.
+_ACTIVE_RUN_MODELS: contextvars.ContextVar = contextvars.ContextVar(
+    "agent_active_run_models", default=frozenset()
+)
+
 # --------------------------------------------------------------------------
 # Fatal-error classification.
 #
@@ -703,25 +712,6 @@ class AgentStreamExecutor:
         Returns:
             Final response text
         """
-        # Log user message with model info. Truncate very long messages (e.g.
-        # injected transcripts / large prompts) so logs stay readable.
-        thinking_enabled = self._is_thinking_enabled()
-        thinking_label = " | 💭 thinking" if thinking_enabled else ""
-        # When deep thinking is on, also surface the resolved reasoning effort
-        # (per-model aware) so the operator can confirm the effective intensity.
-        effort_label = ""
-        if thinking_enabled:
-            try:
-                effort = self.model._normalized_reasoning_effort()
-                if effort:
-                    effort_label = f" | effort={effort}"
-            except Exception:
-                effort_label = ""
-        _log_msg = user_message if len(user_message) <= 500 else (
-            user_message[:500] + f" …(+{len(user_message) - 500} chars)"
-        )
-        logger.info(f"🤖 {self.model.model}{thinking_label}{effort_label} | 👤 {_log_msg}")
-        
         # Add user message (Claude format - use content blocks for consistency)
         self.run_user_message = {
             "role": "user",
@@ -761,10 +751,8 @@ class AgentStreamExecutor:
         # outbound header-tagging path and RuntimeIdentity on the same id.
         import uuid as _uuid
         from common.utils import set_agent_run_id, clear_agent_run_id, current_agent_run_id
-        # Captured before minting: once this run sets its own id, nothing
-        # downstream can tell whether it was nested. A sub agent inherits the
-        # parent's run id through identity_scope, so an id already being
-        # present is exactly what "nested" means.
+        # An id already in scope came from the bridge (which opens a run for
+        # every turn), a sub agent spawn or a delegation; this run adopts it.
         _nested_run = bool(current_agent_run_id())
         _run_token = None
         if not _nested_run:
@@ -779,12 +767,36 @@ class AgentStreamExecutor:
         # one wasted primary call per step). The primary gets a fresh chance on
         # the next user message.
         #
-        # Must run *after* the run id above, not before: the reset is a no-op
-        # for a nested run (see _reset_model_fallback), and only the id tells
-        # the two apart. A nested run keeps the parent's fallback engaged — the
-        # sub agent is running inside the same outage and should inherit the
-        # backup rather than start over on the provider that just failed.
-        self._reset_model_fallback(nested_run=_nested_run)
+        # A run is nested for fallback purposes only when an outer run in this
+        # context is still driving the *same* model object — a sub agent built
+        # with model=parent.model. That run keeps the parent's fallback engaged:
+        # it is running inside the same outage and should inherit the backup
+        # rather than start over on the provider that just failed.
+        _active_models = _ACTIVE_RUN_MODELS.get()
+        _model_key = id(self.model)
+        _shares_outer_model = _model_key in _active_models
+        _active_token = _ACTIVE_RUN_MODELS.set(_active_models | {_model_key})
+        self._reset_model_fallback(nested_run=_shares_outer_model)
+
+        # Log user message with model info, after the reset so it names the
+        # model this run starts on. Truncate very long messages (e.g. injected
+        # transcripts / large prompts) so logs stay readable.
+        thinking_enabled = self._is_thinking_enabled()
+        thinking_label = " | 💭 thinking" if thinking_enabled else ""
+        # When deep thinking is on, also surface the resolved reasoning effort
+        # (per-model aware) so the operator can confirm the effective intensity.
+        effort_label = ""
+        if thinking_enabled:
+            try:
+                effort = self.model._normalized_reasoning_effort()
+                if effort:
+                    effort_label = f" | effort={effort}"
+            except Exception:
+                effort_label = ""
+        _log_msg = user_message if len(user_message) <= 500 else (
+            user_message[:500] + f" …(+{len(user_message) - 500} chars)"
+        )
+        logger.info(f"🤖 {self.model.model}{thinking_label}{effort_label} | 👤 {_log_msg}")
 
         cancelled = False
         # An answer on the last allowed turn also leaves turn == max_turns.
@@ -1151,6 +1163,7 @@ class AgentStreamExecutor:
             raise
 
         finally:
+            _ACTIVE_RUN_MODELS.reset(_active_token)
             if _run_token is not None:
                 clear_agent_run_id(_run_token)
             if self.steer_inbox is not None:
@@ -1323,19 +1336,15 @@ class AgentStreamExecutor:
     def _reset_model_fallback(self, nested_run: bool = False) -> None:
         """Drop any fallback routing so the next call uses the primary model.
 
-        ``nested_run`` marks a run that inherited its run id from an outer
-        scope — a sub agent spawn or a delegated task. Those must leave the
-        parent's routing alone: a sub agent is built with the parent's *same*
-        model object, so resetting here would clear the fallback the parent is
-        mid-way through relying on and send both of them back to the provider
-        that just failed.
+        ``nested_run`` marks a run whose model object is still driving a live
+        outer run — a sub agent is built with the parent's *same* model object.
+        Those must leave the parent's routing alone: resetting here would clear
+        the fallback the parent is mid-way through relying on and send both of
+        them back to the provider that just failed.
 
         Fallback is opt-in and this is a no-op on models that don't support it,
         so it is safe to call unconditionally at the top of a run.
         """
-        # The caller captures this *before* minting its own run id — once that
-        # id is set, nothing downstream can tell a nested run from a top-level
-        # one, so the distinction has to be passed in.
         if nested_run:
             return
 
