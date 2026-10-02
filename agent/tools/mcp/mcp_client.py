@@ -290,7 +290,17 @@ class McpClient:
             target=self._drain_stdout, daemon=True, name=f"mcp-stdout-{self.name}"
         ).start()
 
-        return self._handshake()
+        if not self._handshake():
+            # The child and both reader threads are live right now, and nothing
+            # downstream reaps them: start_all() only logs "failed to
+            # initialize - skipping" and drops this client, so every reload of
+            # a broken server would leave another orphaned subprocess behind.
+            # Go through the same shutdown() a normal teardown uses rather than
+            # a second teardown path, so the child, its threads and the read
+            # queue sentinel are handled once and in one place.
+            self.shutdown()
+            return False
+        return True
 
     def _resolve_executable(self, command: str, env: dict) -> str:
         """Resolve ``command`` to a full path using the subprocess PATH.
