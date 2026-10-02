@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 import pytest
@@ -5,6 +6,7 @@ import pytest
 from agent.admin import (
     AgentAdminError,
     AgentAdminService,
+    MAX_CORE_FILE_BYTES,
     StaleAgentFileError,
     StaleRosterError,
 )
@@ -282,6 +284,108 @@ def test_core_file_write_is_allowlisted_atomic_and_revision_guarded(admin):
         )
     with pytest.raises(AgentAdminError):
         service.read_core_file("research", "../config.json")
+
+
+def test_read_core_file_allows_exactly_the_size_limit(admin):
+    service, root, _ = admin
+    workspace = root / "research"
+    service.create_agent("research", "Research", str(workspace))
+    raw = b"x" * MAX_CORE_FILE_BYTES
+    (workspace / "AGENT.md").write_bytes(raw)
+
+    result = service.read_core_file("research", "AGENT.md")
+
+    assert result == {
+        "filename": "AGENT.md",
+        "content": raw.decode("utf-8"),
+        "revision": hashlib.sha256(raw).hexdigest(),
+        "exists": True,
+    }
+
+
+def test_read_core_file_rejects_content_over_the_size_limit(admin):
+    service, root, _ = admin
+    workspace = root / "research"
+    service.create_agent("research", "Research", str(workspace))
+    raw = b"x" * (MAX_CORE_FILE_BYTES + 1)
+    path = workspace / "AGENT.md"
+    path.write_bytes(raw)
+
+    with pytest.raises(AgentAdminError) as exc:
+        service.read_core_file("research", "AGENT.md")
+
+    assert str(exc.value) == "core file exceeds 1 MiB"
+    assert path.read_bytes() == raw
+
+
+def test_read_core_file_preserves_empty_file_success(admin):
+    service, root, _ = admin
+    workspace = root / "research"
+    service.create_agent("research", "Research", str(workspace))
+    (workspace / "AGENT.md").write_bytes(b"")
+
+    result = service.read_core_file("research", "AGENT.md")
+
+    assert result == {
+        "filename": "AGENT.md",
+        "content": "",
+        "revision": hashlib.sha256(b"").hexdigest(),
+        "exists": True,
+    }
+
+
+def test_read_core_file_preserves_utf8_content(admin):
+    service, root, _ = admin
+    workspace = root / "research"
+    service.create_agent("research", "Research", str(workspace))
+    content = "# 核心文件\n只读内容 🙂\n"
+    raw = content.encode("utf-8")
+    (workspace / "AGENT.md").write_bytes(raw)
+
+    result = service.read_core_file("research", "AGENT.md")
+
+    assert result["content"] == content
+    assert result["revision"] == hashlib.sha256(raw).hexdigest()
+    assert result["exists"] is True
+
+
+def test_read_core_file_preserves_binary_decode_error(admin):
+    service, root, _ = admin
+    workspace = root / "research"
+    service.create_agent("research", "Research", str(workspace))
+    (workspace / "AGENT.md").write_bytes(b"\xff\xfe")
+
+    with pytest.raises(UnicodeDecodeError):
+        service.read_core_file("research", "AGENT.md")
+
+
+def test_read_core_file_preserves_missing_file_success(admin):
+    service, root, _ = admin
+    workspace = root / "research"
+    service.create_agent("research", "Research", str(workspace))
+    (workspace / "AGENT.md").unlink()
+
+    result = service.read_core_file("research", "AGENT.md")
+
+    assert result == {
+        "filename": "AGENT.md",
+        "content": "",
+        "revision": hashlib.sha256(b"").hexdigest(),
+        "exists": False,
+    }
+
+
+def test_read_core_file_preserves_permission_errors(admin):
+    service, root, _ = admin
+    workspace = root / "research"
+    service.create_agent("research", "Research", str(workspace))
+    path = workspace / "AGENT.md"
+    path.chmod(0)
+    try:
+        with pytest.raises(PermissionError):
+            service.read_core_file("research", "AGENT.md")
+    finally:
+        path.chmod(0o600)
 
 
 def test_duplicate_or_nonempty_workspace_is_rejected_without_config_change(admin):

@@ -810,7 +810,13 @@ class AgentAdminService:
     def read_core_file(self, agent_id: str, filename: str) -> Dict:
         with self._lock:
             path = self._core_path(agent_id, filename)
-            raw = path.read_bytes() if path.exists() else b""
+            if path.exists():
+                with path.open("rb") as handle:
+                    raw = handle.read(MAX_CORE_FILE_BYTES + 1)
+                if len(raw) > MAX_CORE_FILE_BYTES:
+                    raise AgentAdminError("core file exceeds 1 MiB")
+            else:
+                raw = b""
             return {
                 "filename": filename,
                 "content": raw.decode("utf-8"),
