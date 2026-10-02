@@ -390,17 +390,20 @@ class McpClient:
             except Exception:
                 pass
 
-    def _readline_with_timeout(self, timeout: Optional[int] = None) -> str:
+    def _readline_with_timeout(self, timeout: Optional[float] = None) -> str:
         """Read one line from stdio stdout with a hard timeout (cross-platform).
 
-        Uses the per-server timeout from mcp.json config when no explicit
-        timeout is provided.
+        ``timeout`` may be the *remaining* share of a larger budget rather than
+        a whole number of seconds, so it is formatted for display rather than
+        interpolated raw. Defaults to the per-server timeout from mcp.json.
         """
         effective = timeout if timeout is not None else self._timeout
         try:
             line = self._read_queue.get(timeout=effective)
         except queue.Empty:
-            raise TimeoutError(f"[MCP:{self.name}] stdio read timed out after {effective}s")
+            raise TimeoutError(
+                f"[MCP:{self.name}] stdio read timed out after {effective:g}s"
+            )
         if not line:
             raise IOError(f"[MCP:{self.name}] stdio process closed unexpectedly")
         return line
@@ -412,8 +415,21 @@ class McpClient:
         self._proc.stdin.flush()
 
         expected_id = message.get("id")
+        # One budget for the whole exchange, not one per line read. Every line
+        # this loop skips -- notifications, stale ids, blanks -- satisfies
+        # queue.get() instantly, so a per-read timeout is reset by each of them
+        # and a server that keeps talking never lets the request time out at
+        # all. A monotonic deadline is what the SSE path already uses for the
+        # same reason (_sse_discover_endpoint).
+        deadline = time.monotonic() + self._timeout
         while True:
-            line = self._readline_with_timeout()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"[MCP:{self.name}] stdio read timed out after {self._timeout}s "
+                    f"waiting for a response to {message.get('method')!r}"
+                )
+            line = self._readline_with_timeout(remaining)
             if not line:
                 raise IOError(f"[MCP:{self.name}] stdio process closed unexpectedly")
             line = line.strip()
