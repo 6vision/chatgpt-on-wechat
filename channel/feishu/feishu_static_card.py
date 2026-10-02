@@ -9,6 +9,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 
+from common.markdown_fence import transform_outside_fences
 
 _BLOCK_MARKDOWN = re.compile(
     r"(?m)^\s{0,3}(?:#{1,6}\s|>\s|[-*+]\s|\d+[.)]\s|```|~~~)"
@@ -16,6 +17,9 @@ _BLOCK_MARKDOWN = re.compile(
 _INLINE_MARKDOWN = re.compile(r"(`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^]\n]+\]\([^)\n]+\))")
 _TABLE_SEPARATOR = re.compile(r"(?m)^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
 _MARKDOWN_IMAGE = re.compile(r"!\[([^\]\n]*)\]\(([^)\s]+)\)")
+# An inline code span on one line: a backtick run closed by the next run of the
+# same length.
+_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)")
 _REDIRECT_CODES = {301, 302, 303, 307, 308}
 _MAX_REDIRECTS = 3
 _MAX_REMOTE_IMAGE_BYTES = 10 * 1024 * 1024
@@ -55,12 +59,33 @@ def build_text_delivery(text: str) -> Tuple[str, str]:
     return "text", json.dumps({"text": text}, ensure_ascii=False)
 
 
+def _outside_code(text: str, transform: Callable[[str], str]) -> str:
+    """Apply *transform* to the parts of Markdown *text* outside code blocks
+    and inline code spans."""
+
+    def prose(chunk: str) -> str:
+        parts = []
+        last = 0
+        for span in _CODE_SPAN.finditer(chunk):
+            parts.append(transform(chunk[last:span.start()]))
+            parts.append(span.group(0))
+            last = span.end()
+        parts.append(transform(chunk[last:]))
+        return "".join(parts)
+
+    return transform_outside_fences(text, prose)
+
+
 def resolve_markdown_images(
     text: str,
     uploader: Callable[[str], Optional[str]],
     max_images: int = 5,
 ) -> str:
-    """Replace remote Markdown image URLs with Feishu image keys."""
+    """Replace remote Markdown image URLs with Feishu image keys.
+
+    Images written inside code blocks or inline code are examples, not images
+    to show, so they are left as written and never fetched.
+    """
     cache = {}
     uploaded = 0
 
@@ -88,7 +113,7 @@ def resolve_markdown_images(
             return "![{}]({})".format(alt, image_key)
         return "[Image unavailable: {}]".format(alt)
 
-    return _MARKDOWN_IMAGE.sub(replace, text or "")
+    return _outside_code(text or "", lambda chunk: _MARKDOWN_IMAGE.sub(replace, chunk))
 
 
 def validate_public_image_url(url: str) -> None:

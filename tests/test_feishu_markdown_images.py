@@ -149,3 +149,61 @@ def test_public_image_is_uploaded_to_feishu_without_a_temp_file(monkeypatch):
     assert filename == "markdown-image.png"
     assert payload == b"png-bytes"
     assert content_type == "image/png"
+
+
+@pytest.mark.parametrize(
+    "markdown",
+    [
+        pytest.param(
+            "Embed it like this:\n```markdown\n![logo](https://cdn.example.com/logo.png)\n```",
+            id="backtick-fence",
+        ),
+        pytest.param(
+            "~~~md\n![logo](https://cdn.example.com/logo.png)\n~~~",
+            id="tilde-fence",
+        ),
+        pytest.param(
+            "````md\n```\n![logo](https://cdn.example.com/logo.png)\n```\n````",
+            id="longer-fence-around-a-shorter-one",
+        ),
+        pytest.param(
+            "Write `![logo](https://cdn.example.com/logo.png)` in the README.",
+            id="inline-code",
+        ),
+        pytest.param(
+            "Use ``![a](https://cdn.example.com/a.png) and `x` `` here.",
+            id="double-backtick-inline-code",
+        ),
+    ],
+)
+def test_images_inside_code_are_left_as_written(markdown):
+    """A reply showing Markdown syntax must not have its example fetched,
+    uploaded and swapped for an image key or "[Image unavailable: ...]"."""
+
+    def unexpected(_url):
+        raise AssertionError("uploader should not be called for code")
+
+    assert feishu_static_card.resolve_markdown_images(markdown, unexpected) == markdown
+
+
+def test_images_around_code_are_still_uploaded():
+    calls = []
+
+    def upload(url):
+        calls.append(url)
+        return "img_v2_key"
+
+    markdown = (
+        "![before](https://cdn.example.com/a.png)\n"
+        "```\n![sample](https://cdn.example.com/sample.png)\n```\n"
+        "Inline `![x](https://cdn.example.com/x.png)` then ![after](https://cdn.example.com/b.png)"
+    )
+
+    result = feishu_static_card.resolve_markdown_images(markdown, upload)
+
+    assert result == (
+        "![before](img_v2_key)\n"
+        "```\n![sample](https://cdn.example.com/sample.png)\n```\n"
+        "Inline `![x](https://cdn.example.com/x.png)` then ![after](img_v2_key)"
+    )
+    assert calls == ["https://cdn.example.com/a.png", "https://cdn.example.com/b.png"]
