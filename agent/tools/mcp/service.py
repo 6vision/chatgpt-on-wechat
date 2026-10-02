@@ -264,9 +264,6 @@ def save_servers(workspace: Optional[str], servers: list) -> list:
         if "mcpServers" in current or "mcp_servers" in current:
             payload = {k: v for k, v in current.items() if k not in ("mcpServers", "mcp_servers")}
     payload["mcpServers"] = {entry["name"]: _persistable(entry) for entry in normalized}
-    # Write through the shared atomic writer: its sibling file is unique per
-    # call, so two console saves running at once cannot truncate each other's
-    # half-written file, and a failed write cleans up its sibling.
     write_text_atomic(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
     logger.info("[MCP] Wrote %s (%s server(s))", path, len(normalized))
     return normalized

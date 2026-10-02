@@ -138,16 +138,7 @@ def test_save_keeps_other_top_level_keys_of_mcp_json(tmp_path, monkeypatch):
 
 
 def test_overlapping_save_cannot_truncate_the_store(tmp_path, monkeypatch):
-    """A save running while another one is mid-write must not corrupt mcp.json.
-
-    The console saves from per-request threads, so two editors (or a
-    double-submit) genuinely overlap. save_servers serialises into a fixed
-    ``mcp.json.tmp`` sibling, so the second save's ``open(tmp, "w")`` truncates
-    the first one's half-written file, and the first save's ``os.replace`` then
-    fails or installs the interleaved bytes over mcp.json. Every store in the
-    repo writes through ``common/atomic_write.py``, whose sibling is unique per
-    call precisely so overlapping writers stay isolated.
-    """
+    """A save running while another one is mid-write must not corrupt mcp.json."""
     monkeypatch.setattr(
         "agent.tools.mcp.service.mcp_config_path",
         lambda workspace=None: str(tmp_path / "mcp.json"),
