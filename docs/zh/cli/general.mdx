@@ -19,7 +19,7 @@ description: 查看状态、管理配置和上下文等常用命令
 
 ## status
 
-查看当前会话和服务的运行状态，包括进程信息、模型配置、会话消息数量和已加载技能数量。
+查看当前会话和服务的运行状态，包括进程信息、模型配置、会话消息数量、已加载技能数量和已加载 MCP 数量（就绪/已配置）。
 
 ```text
 /status
@@ -36,7 +36,7 @@ Channel: web
 Model:   MiniMax-M3
 Mode:    agent
 
-Session: 12 messages | 8 skills loaded
+Session: 12 messages | 8 skills loaded | 2/3 MCP ready
 ```
 
 ## cancel

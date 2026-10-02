@@ -589,11 +589,38 @@ class CowCliPlugin(Plugin):
                     if v.get("enabled", True)
                 )
                 lines.append(_t(f"  已加载技能: {enabled}/{total}", f"  Loaded skills: {enabled}/{total}"))
+
+            lines.append(self._mcp_status_line(agent))
         else:
             lines.append("")
             lines.append(_t("  Agent: 未初始化 (首次对话后自动创建)", "  Agent: not initialized (created on first chat)"))
 
         return "\n".join(lines)
+
+    def _mcp_status_line(self, agent) -> str:
+        """One line of MCP servers, shown "ready/total" like the skills line.
+
+        Same source the web console uses (mcp.json, config.json fallback,
+        ToolManager runtime state), and reading it never boots a server.
+        The numerator counts only servers whose live status is "ready"; the
+        denominator counts every configured server (failed, disabled, and
+        not-yet-loaded included). No per-status breakdown ("就绪 2, 失败 1"
+        in parentheses) is shown here by design — the console's MCP page
+        carries that detail.
+        """
+        try:
+            from agent.tools.mcp.service import list_servers_with_status
+
+            servers = list_servers_with_status(agent.workspace_dir).get("servers") or []
+        except Exception as e:
+            logger.warning(f"[CowCli] status: failed to read MCP servers: {e}")
+            servers = []
+
+        ready = sum(1 for item in servers if item.get("status") == "ready")
+        return _t(
+            f"  已加载 MCP: {ready}/{len(servers)}",
+            f"  Loaded MCP: {ready}/{len(servers)}",
+        )
 
     # ------------------------------------------------------------------
     # logs
