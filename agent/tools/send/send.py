@@ -7,6 +7,7 @@ from typing import Dict, Any
 from pathlib import Path
 
 from agent.tools.base_tool import BaseTool, ToolResult
+from agent.tools.utils.credentials import DENIED_MESSAGE, is_credential_path
 from common.utils import expand_path
 
 
@@ -61,7 +62,17 @@ class Send(BaseTool):
         
         # Resolve path
         absolute_path = self._resolve_path(path)
-        
+
+        # Credential files live outside the workspace and must only ever be
+        # reached through the env_config tool. read/write/edit/ls/search_files
+        # all apply this same guard; send is the one tool that hands a local
+        # file to the channel, so leaving it out shipped ~/.cow/.env verbatim
+        # (and copied it to a public URL on a cloud deployment). Checked ahead
+        # of exists() so a missing credential path is refused, not reported as
+        # a missing file.
+        if is_credential_path(absolute_path):
+            return ToolResult.fail(DENIED_MESSAGE)
+
         # Check if file exists
         if not os.path.exists(absolute_path):
             return ToolResult.fail(f"Error: File not found: {path}")
