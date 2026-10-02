@@ -543,8 +543,16 @@ class DingTalkChanel(ChatChannel, dingtalk_stream.ChatbotHandler):
             response = requests.post(url=url, headers=headers, json=body, timeout=10)
 
             logger.info(f"[DingTalk] Image send result: {response.text}")
+
+            # DingTalk reports a rejection as HTTP 200 with a non-zero errcode,
+            # so the status alone calls a dropped image sent (the same contract
+            # _send_file_message and _upload_media already follow).
+            try:
+                result = response.json()
+            except Exception:
+                result = {}
             
-            if response.status_code == 200:
+            if response.status_code == 200 and result.get("errcode", 0) == 0:
                 return True
             else:
                 logger.error(f"[DingTalk] Send image error: {response.text}")
@@ -606,7 +614,9 @@ class DingTalkChanel(ChatChannel, dingtalk_stream.ChatbotHandler):
             response = requests.post(url, headers=headers, json=data, timeout=10)
             result = response.json()
             
-            if response.status_code == 200:
+            # DingTalk rejects with HTTP 200 and a non-zero errcode in the body,
+            # so the status alone reports a dropped image as sent.
+            if response.status_code == 200 and result.get("errcode", 0) == 0:
                 logger.info("[DingTalk] Image message sent successfully")
                 return True
             else:
