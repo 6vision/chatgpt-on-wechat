@@ -39,6 +39,14 @@ def test_written_files_are_collected_and_internal_ones_are_not(tmp_path):
     assert found[0]["path"].endswith("site/index.html")
 
 
+def test_a_written_plan_is_an_artifact(tmp_path):
+    _touch(tmp_path / "plans" / "2026-10-03-setup.md")
+    messages = _tool_turn("write", {"path": "plans/2026-10-03-setup.md"}, {"path": "plans/2026-10-03-setup.md"})
+    found = collect_message_artifacts(messages, str(tmp_path))
+    assert [item["kind"] for item in found] == ["markdown"]
+    assert found[0]["path"].endswith("plans/2026-10-03-setup.md")
+
+
 def test_a_failed_write_produces_nothing(tmp_path):
     _touch(tmp_path / "a.md")
     messages = _tool_turn("write", {"path": "a.md"}, "Error: disk full", is_error=True)
@@ -191,22 +199,22 @@ def test_a_command_is_credited_with_the_files_it_named_and_changed(tmp_path):
 
     page = _touch(tmp_path / "websites" / "plan.html", "<p>old</p>")
     _touch(tmp_path / "websites" / "other.html")
-    _touch(tmp_path / "plans" / "m.md")
+    _touch(tmp_path / "memory" / "m.md")
     backup = tmp_path.parent / f"{tmp_path.name}-plan.bak.html"
     command = (
         f"cd {tmp_path}/websites && cp plan.html {backup} && python3 - <<'PY'\n"
         "p='plan.html'\nopen(p,'w').write(open(p).read().replace('old','newer'))\n"
         "open('fresh.html','w').write('hi')\nPY\n"
-        f"echo \"see（websites/other.html）\" >> {tmp_path}/plans/m.md"
+        f"echo \"see（websites/other.html）\" >> {tmp_path}/memory/m.md"
     )
     before = snapshot_command_files(command, str(tmp_path))
     page.write_text("<p>newer</p>", encoding="utf-8")
     _touch(tmp_path / "websites" / "fresh.html", "hi")
     _touch(backup, "<p>old</p>")
-    _touch(tmp_path / "plans" / "m.md", "y")
+    _touch(tmp_path / "memory" / "m.md", "y")
 
     found = files_changed_by_command(command, str(tmp_path), before)
-    # Unchanged, internal (plans/) and out-of-workspace files are all left out.
+    # Unchanged, internal (memory/) and out-of-workspace files are all left out.
     assert found == [os.path.realpath(page), os.path.realpath(tmp_path / "websites" / "fresh.html")]
 
 

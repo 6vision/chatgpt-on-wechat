@@ -21,7 +21,6 @@ INTERNAL_DIRS = {
     "skills",
     "tmp",
     "scheduler",
-    "plans",
 }
 
 # Workspace-root files that are part of the agent's own configuration.
