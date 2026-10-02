@@ -156,6 +156,17 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 """
 
+# Columns added after the table first shipped, applied with ADD COLUMN when
+# missing. Evolve the schema by appending here, never by editing the DDL alone:
+# CREATE TABLE IF NOT EXISTS is a no-op on a table an older release already
+# created, so a DDL-only change leaves those databases without the column and
+# every read of it raises.
+_ARTIFACTS_ADDED_COLUMNS = (
+    ("extras", "TEXT DEFAULT ''"),
+    ("pinned_at", "INTEGER DEFAULT 0"),
+    ("title", "TEXT DEFAULT ''"),
+)
+
 _ARTIFACTS_INDEX_DDL = """
 CREATE INDEX IF NOT EXISTS idx_artifacts_recent
     ON artifacts (agent_id, updated_at);
@@ -2251,6 +2262,10 @@ class ConversationStore:
         """Create the artifacts index without ever risking the core schema."""
         try:
             conn.executescript(_ARTIFACTS_DDL)
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(artifacts)")}
+            for name, decl in _ARTIFACTS_ADDED_COLUMNS:
+                if name not in cols:
+                    conn.execute(f"ALTER TABLE artifacts ADD COLUMN {name} {decl}")
             conn.executescript(_ARTIFACTS_INDEX_DDL)
             conn.commit()
             self._artifacts_ready = True
