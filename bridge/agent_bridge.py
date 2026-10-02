@@ -149,8 +149,11 @@ class AgentLLMModel(LLMModel):
         A non-dict or disabled entry yields an empty chain so callers can treat
         "not usable" as a single check. Links missing a provider or a model are
         dropped — half a link could route the turn nowhere — as are duplicates
-        of the primary model or of an earlier link, which would only re-probe a
-        model the run has already proven is down.
+        of an earlier link, which would only re-probe a model the run has
+        already proven is down. So is a link naming the primary's own route,
+        matched on provider *and* model: the same model name behind another
+        provider — a second account or endpoint of it — is a legitimate
+        backup, not a duplicate.
 
         The chain is unbounded: however many links the user configured is how
         many switches a turn gets. There is no separate cap.
@@ -168,14 +171,12 @@ class AgentLLMModel(LLMModel):
             raw_chain = [raw]
         primary = (self._session_model or self._agent_model
                    or conf().get("model") or const.DEFAULT_MODEL)
-        primary_provider = (self._session_provider or self._agent_provider or "")
         chain = []
-        seen = {(primary_provider, (primary or "").strip())}
-        # The global model carries no provider (session/agent overrides do), so
-        # a provider+model comparison alone would miss the most common
-        # misconfiguration: listing the primary model as its own backup. Match
-        # on the model name too when no provider was pinned.
-        primary_model_only = (primary or "").strip() if not primary_provider else None
+        # Seed the dedup with the primary's own route: its provider is
+        # resolved first (the global model config carries none), so a link
+        # is matched on the (provider, model) pair — not the model name
+        # alone, which would drop same-model links behind other providers.
+        seen = {(self._primary_provider_id(primary), (primary or "").strip())}
         for item in raw_chain:
             if not isinstance(item, dict):
                 continue
@@ -184,11 +185,30 @@ class AgentLLMModel(LLMModel):
             if not provider or not model:
                 continue
             key = (provider, model)
-            if key in seen or (primary_model_only and model == primary_model_only):
+            if key in seen:
                 continue
             seen.add(key)
             chain.append({"provider": provider, "model": model})
         return {"chain": chain}
+
+    def _primary_provider_id(self, primary_model: str) -> str:
+        """The provider the primary model routes through, as a provider id.
+
+        Resolved in the id space the fallback chain's links are written in
+        ("openai", "custom:<id>", ...), so the chain's dedup seed compares a
+        link against the route the primary actually takes rather than against
+        a provider-less model name. Follows the routing precedence — a session
+        or Agent pin, then use_linkai, the configured bot_type, and finally
+        the model-name inference _primary_bot_type applies when nothing is
+        configured ("chatGPT", the persisted spelling of "openai", maps back
+        onto it).
+        """
+        if self._session_provider:
+            return self._session_provider
+        if self._agent_provider:
+            return self._agent_provider
+        bot_type = self._primary_bot_type(primary_model)
+        return "openai" if bot_type == const.CHATGPT else bot_type
 
     # How many times one turn may walk the whole chain before the failure is
     # reported. Two passes rather than one because a pass takes real time: by
@@ -325,14 +345,22 @@ class AgentLLMModel(LLMModel):
 
     def _resolve_bot_type(self, model_name: str) -> str:
         """Resolve bot type from model name, matching Bridge.__init__ logic."""
-        # A session override wins over every global routing switch, including
-        # use_linkai: the user picked this provider for this conversation.
-        #
-        # An engaged fallback outranks even that: the whole point of the
-        # fallback is to leave whichever provider just failed, and the model
-        # being requested (`self.model`) is already the fallback's own.
+        # An engaged fallback outranks every normal choice: the whole point of
+        # the fallback is to leave whichever provider just failed, and the
+        # model being requested (`self.model`) is already the fallback's own.
         if self._fallback_provider:
             return self.provider_to_bot_type(self._fallback_provider)
+        return self._primary_bot_type(model_name)
+
+    def _primary_bot_type(self, model_name: str) -> str:
+        """Bot type the primary model routes through, ignoring any engaged fallback.
+
+        The tail _resolve_bot_type delegates to; split out so the fallback
+        chain can seed its dedup with the primary's route without an engaged
+        fallback's provider leaking in.
+        """
+        # A session override wins over every global routing switch, including
+        # use_linkai: the user picked this provider for this conversation.
         if self._session_provider:
             return self.provider_to_bot_type(self._session_provider)
         if self._agent_provider:
@@ -344,7 +372,7 @@ class AgentLLMModel(LLMModel):
         configured_bot_type = conf().get("bot_type")
         if configured_bot_type:
             return configured_bot_type
-       
+
         if not model_name or not isinstance(model_name, str):
             return const.OPENAI
         if model_name in self._MODEL_BOT_TYPE_MAP:
