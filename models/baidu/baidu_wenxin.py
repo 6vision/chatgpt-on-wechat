@@ -2,7 +2,7 @@
 
 import requests
 import json
-from common import const
+from common import const, utils
 from models.bot import Bot
 from models.session_manager import SessionManager
 from bridge.context import ContextType
@@ -104,9 +104,15 @@ class BaiduWenxinBot(Bot):
                 "content": res_content,
             }
         except Exception as e:
-            logger.warn("[BAIDU] Exception: {}".format(e))
+            # The url above carries the access token as a query parameter, and
+            # `e` quotes it back when the call fails -- as does get_access_token
+            # with client_secret. This message reaches run.log (a file the
+            # console serves whole) and the user's chat, so mask the credential
+            # before either.
+            error = utils.scrub_secrets(e)
+            logger.warn("[BAIDU] Exception: {}".format(error))
             self.sessions.clear_session(session.session_id)
-            result = {"total_tokens": 0, "completion_tokens": 0, "content": "出错了: {}".format(e)}
+            result = {"total_tokens": 0, "completion_tokens": 0, "content": "出错了: {}".format(error)}
             return result
 
     def get_access_token(self):

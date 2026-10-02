@@ -367,3 +367,25 @@ def tail_lines(path, limit):
         line.decode("utf-8", errors="replace")
         for line in data.splitlines(keepends=True)[-limit:]
     ]
+
+
+# Query parameters whose value is a credential. An endpoint that carries one in
+# its URL hands it to every caller that logs a failure: requests writes the whole
+# URL, query included, into the message of the exception it raises when a call
+# fails ("Max retries exceeded with url: ...?access_token=...").
+_SECRET_QUERY_RE = re.compile(
+    r"((?:access_token|refresh_token|api_key|apikey|client_secret|client_id"
+    r"|app_secret|app_key|secret|token|password)=)[^&\s\"')\]]+",
+    re.IGNORECASE,
+)
+
+
+def scrub_secrets(text) -> str:
+    """Mask the credential values in *text* before it is logged or shown.
+
+    A response body is not the only place a secret can surface: an exception
+    message carries one whenever the request that failed put it in the query
+    string. Mask rather than drop the rest of the message -- the failure still
+    has to be readable to whoever is debugging it.
+    """
+    return _SECRET_QUERY_RE.sub(r"\1***", str(text))
