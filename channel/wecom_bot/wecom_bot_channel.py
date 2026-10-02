@@ -916,12 +916,22 @@ class WecomBotChannel(ChatChannel):
                 has_images = bool(state.get("images"))
                 state["url_sent"] = True
 
-            self._send_via_response_url(stream_id, response_url, content, image_urls, has_images)
+            if not self._send_via_response_url(stream_id, response_url, content, image_urls, has_images):
+                # Refused, so hand the answer back to a late poll.
+                with self._callback_lock:
+                    state = self._callback_streams.get(stream_id)
+                    if state:
+                        state["url_sent"] = False
 
         threading.Thread(target=_run, daemon=True, name=f"wecom-respurl-{stream_id}").start()
 
-    def _send_via_response_url(self, stream_id, response_url, content, image_urls, has_images):
-        """Push a one-shot active markdown reply to response_url (valid 1h, single use)."""
+    def _send_via_response_url(
+        self, stream_id, response_url, content, image_urls, has_images
+    ) -> bool:
+        """Push a one-shot active markdown reply to response_url (valid 1h, single use).
+
+        Returns False only when WeCom answered and refused the reply.
+        """
         md = content or ""
         if image_urls:
             md += ("\n\n" if md else "") + "\n".join(f"![]({u})" for u in image_urls)
@@ -932,12 +942,26 @@ class WecomBotChannel(ChatChannel):
         payload = {"msgtype": "markdown", "markdown": {"content": md}}
         try:
             resp = requests.post(response_url, json=payload, timeout=15)
-            logger.info(
-                f"[WecomBot] response_url active reply sent for {stream_id}: "
+        except Exception as e:
+            # It may still have arrived; keep the claim so a poll cannot repeat it.
+            logger.error(f"[WecomBot] response_url active reply failed for {stream_id}: {e}")
+            return True
+
+        # WeCom answers HTTP 200 even when it refuses; errcode is the real signal.
+        try:
+            body = resp.json()
+        except Exception:
+            body = None
+        errcode = body.get("errcode", 0) if isinstance(body, dict) else None
+        if resp.status_code != 200 or errcode != 0:
+            logger.error(
+                f"[WecomBot] response_url active reply rejected for {stream_id}: "
                 f"status={resp.status_code}, body={resp.text[:200]}"
             )
-        except Exception as e:
-            logger.error(f"[WecomBot] response_url active reply failed for {stream_id}: {e}")
+            return False
+
+        logger.info(f"[WecomBot] response_url active reply sent for {stream_id}")
+        return True
 
     def _load_image_base64(self, img_path_or_url: str):
         """Load a local/remote image, ensure JPG/PNG within 10MB, return (base64, md5)."""
