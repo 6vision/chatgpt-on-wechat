@@ -378,7 +378,35 @@ textarea.doc-editor {
     padding: 24px;
     text-align: center;
 }
-.workspace-empty i { font-size: 26px; opacity: 0.4; }
+.workspace-empty > i { font-size: 26px; opacity: 0.4; }
+.ws-empty-name {
+    max-width: 100%;
+    font-size: 14px;
+    font-weight: 500;
+    color: #334155;
+    overflow-wrap: anywhere;
+}
+.dark .ws-empty-name { color: #e2e8f0; }
+.ws-empty-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 32px;
+    margin-top: 6px;
+    padding: 0 14px;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: border-color .15s, background-color .15s, color .15s;
+}
+.ws-empty-action i { font-size: 12px; color: #4ABE6E; }
+.ws-empty-action:hover { border-color: #4ABE6E; background: #f6fdf8; color: #1e293b; }
+.dark .ws-empty-action { border-color: rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.04); color: #e2e8f0; }
+.dark .ws-empty-action:hover { border-color: #4ABE6E; background: rgba(74, 190, 110, 0.1); color: #fff; }
 
 /* Files tab */
 .workspace-files-toolbar {

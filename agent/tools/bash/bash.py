@@ -245,6 +245,7 @@ SAFETY:
                     "bash_id": job_id,
                 })
 
+            files_before = self._snapshot_files(command)
             try:
                 result = self._run_streaming(
                     command,
@@ -371,11 +372,16 @@ SAFETY:
             if note:
                 output_text += f"\n\n[Exit code {result.returncode}: {note}]"
 
-            return ToolResult.success({
+            payload = {}
+            files = self._files_written(command, files_before)
+            if files:
+                payload["files_written"] = files
+            payload.update({
                 "output": output_text,
                 "exit_code": result.returncode,
                 "details": details if details else None
             })
+            return ToolResult.success(payload)
 
         except _Cancelled:
             return ToolResult.fail("Command was stopped because the user cancelled the run.")
@@ -383,6 +389,27 @@ SAFETY:
             return ToolResult.fail(f"Error: Command timed out after {timeout} seconds")
         except Exception as e:
             return ToolResult.fail(f"Error executing command: {str(e)}")
+
+    def _snapshot_files(self, command: str) -> dict:
+        if not self.cwd:
+            return {}
+        try:
+            from agent.protocol.artifact import snapshot_command_files
+            return snapshot_command_files(command, self.cwd)
+        except Exception as e:
+            logger.debug(f"[Bash] file snapshot skipped: {e}")
+            return {}
+
+    def _files_written(self, command: str, before: dict) -> list:
+        """User-facing files the command created or changed, so they surface as outputs."""
+        if not self.cwd:
+            return []
+        try:
+            from agent.protocol.artifact import files_changed_by_command
+            return files_changed_by_command(command, self.cwd, before)
+        except Exception as e:
+            logger.debug(f"[Bash] changed-file scan skipped: {e}")
+            return []
 
     def _background_followup(self, bash_id: str, want_kill: bool) -> ToolResult:
         """Read from, or kill, an already-running background command."""

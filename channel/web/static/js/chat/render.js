@@ -239,8 +239,9 @@ function splitAssistantTurn(msg) {
 }
 
 // With keepContent every text stays a step: a reply that never reached its
-// answer has no text to promote.
-function renderStepsHtml(steps, keepContent) {
+// answer has no text to promote. `carded` holds the paths the message already
+// shows as file cards.
+function renderStepsHtml(steps, keepContent, carded) {
     if (!steps || steps.length === 0) return { stepsHtml: '', finalContent: '' };
 
     // Find the index of the last content step — it becomes the main answer, not a step
@@ -303,7 +304,7 @@ function renderStepsHtml(steps, keepContent) {
 </div>`;
             // If this tool sent a file (send/read tool), render the media inline
             // so it persists across page refreshes (SSE-only file events are not stored).
-            const mediaHtml = _renderSentFileFromToolResult(step);
+            const mediaHtml = _renderSentFileFromToolResult(step, carded);
             if (mediaHtml) html += mediaHtml;
         }
     }
@@ -311,8 +312,9 @@ function renderStepsHtml(steps, keepContent) {
 }
 
 // Extract file-to-send metadata from a tool's result and render an inline preview.
-// Returns '' if the result isn't a file_to_send payload.
-function _renderSentFileFromToolResult(step) {
+// Returns '' if the result isn't a file_to_send payload, or if `carded` shows
+// the file as a card already.
+function _renderSentFileFromToolResult(step, carded) {
     if (!step || !step.result) return '';
     let payload;
     try {
@@ -328,6 +330,9 @@ function _renderSentFileFromToolResult(step) {
     if (fileType === 'video') {
         return `<div class="agent-step">${_buildVideoHtml(webUrl)}</div>`;
     }
+    // Without a card (file gone, hidden, or not indexed) the link stays the
+    // only trace of the delivery.
+    if (carded && carded.has(payload.path)) return '';
     return `<div class="agent-step"><a href="${webUrl}" download="${escapeHtml(fileName)}" target="_blank" ` +
         `style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;margin:8px 0;border-radius:8px;` +
         `background:var(--bg-secondary,#f3f4f6);color:var(--text-primary,#374151);text-decoration:none;font-size:14px;` +
@@ -379,13 +384,20 @@ function createBotMessageEl(content, timestamp, requestId, msg, peer) {
     const runState = msg && msg.run_state;
     const status = runState || (isCancelMarker(content) ? 'cancelled' : null);
 
+    // Files written this turn, as computed by the history API (workspace.js).
+    const canCard = typeof renderArtifactCards === 'function';
+    const artifacts = canCard && Array.isArray(msg && msg.artifacts) ? msg.artifacts : [];
+    const artifactsHtml = canCard ? renderArtifactCards(artifacts) : '';
+    // A sent file shown as a card here needs no download link as well.
+    const carded = new Set(artifacts.map(a => a && a.abs_path).filter(Boolean));
+
     if (status) {
         const steps = ((msg && msg.steps) || []).filter(s => !(s.type === 'content' && isCancelMarker(s.content)));
-        stepsHtml = renderStepsHtml(steps, true).stepsHtml + replyStatusHtml(status);
+        stepsHtml = renderStepsHtml(steps, true, carded).stepsHtml + replyStatusHtml(status);
         displayContent = '';
     } else if (msg && msg.steps && msg.steps.length > 0) {
         // New format: ordered steps with interleaved content
-        const result = renderStepsHtml(msg.steps);
+        const result = renderStepsHtml(msg.steps, false, carded);
         stepsHtml = result.stepsHtml;
         // The final content (last text after all steps) is the main answer
         displayContent = content || result.lastContentText;
@@ -395,11 +407,6 @@ function createBotMessageEl(content, timestamp, requestId, msg, peer) {
         const reasoning = msg && msg.reasoning;
         stepsHtml = renderThinkingHtml(reasoning) + renderToolCallsHtml(toolCalls);
     }
-
-    // Files written this turn, as computed by the history API (workspace.js).
-    const artifactsHtml = typeof renderArtifactCards === 'function'
-        ? renderArtifactCards(msg && msg.artifacts)
-        : '';
 
     // Self-evolution bubbles get a small badge so the user can feel the agent
     // learned something on its own (text itself stays clean). History replay
@@ -674,6 +681,10 @@ function addBotMessage(content, timestamp, requestId) {
     scrollChatToBottom();
 }
 
+// Bumped to call off the bottom re-pins of a first load that have not run yet,
+// when the view is sent elsewhere in the conversation (chat/timeline.js).
+let historyPinToken = 0;
+
 // Load conversation history from the server (page 1 = most recent messages).
 // Subsequent pages prepend older messages when the user scrolls to the top.
 // With untilSeq, every page from `page` back to the one holding that message
@@ -849,8 +860,10 @@ function loadHistory(page, untilSeq) {
                 // rAF isn't enough: markdown/code-highlight/images keep growing
                 // scrollHeight after the first paint, leaving the last bubble's
                 // timestamp clipped. Re-pin a few times to catch late layout.
-                requestAnimationFrame(() => scrollChatToBottom(true));
-                [120, 350, 700].forEach(d => setTimeout(() => scrollChatToBottom(true), d));
+                const pin = ++historyPinToken;
+                const repin = () => { if (pin === historyPinToken) scrollChatToBottom(true); };
+                requestAnimationFrame(repin);
+                [120, 350, 700].forEach(d => setTimeout(repin, d));
             } else {
                 // Restore scroll position so loading older messages doesn't jump the
                 // view. Offset from where the reader was, not from the top: a page

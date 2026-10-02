@@ -2096,11 +2096,15 @@ class AgentBridge:
             messages_to_store = self._strip_thinking_blocks(new_messages)
 
         try:
-            stored = self.get_conversation_store(agent_id).append_messages(
+            store = self.get_conversation_store(agent_id)
+            stored = store.append_messages(
                 session_id, messages_to_store, channel_type=channel_type,
                 create_if_missing=create_if_missing
             )
-            if not stored and not create_if_missing:
+            if stored:
+                from agent.protocol.artifact import index_message_artifacts
+                index_message_artifacts(store, session_id, messages_to_store, agent_id=agent_id)
+            elif not create_if_missing:
                 logger.info(
                     f"[AgentBridge] Session {session_id} was deleted mid-run, "
                     f"dropped {len(messages_to_store)} reply message(s)"

@@ -53,6 +53,7 @@
     <link rel="stylesheet" href="/assets/css/workspace.css">
     <link rel="stylesheet" href="/assets/css/knowledge.css">
     <link rel="stylesheet" href="/assets/css/agents.css">
+    <link rel="stylesheet" href="/assets/css/artifacts.css">
     <!-- Apply theme/lang before first paint to avoid flash of unstyled content.
          This runs synchronously in <head> so the correct class is on <html>
          before any CSS or body rendering occurs. -->
@@ -115,6 +116,8 @@
             <div id="content-area" class="flex-1 overflow-hidden">
 
 <!--#include templates/views/chat.html-->
+
+<!--#include templates/views/artifacts.html-->
 
 <!--#include templates/views/agents.html-->
 
@@ -212,6 +215,7 @@
     <script defer src="/assets/js/views/doc-viewers.js"></script>
     <script defer src="/assets/js/views/knowledge.js"></script>
     <script defer src="/assets/js/views/logs.js"></script>
+    <script defer src="/assets/js/views/artifacts.js"></script>
 
     <!-- Last of the core layer rather than first, which is where it sat in
          console.js. It installs a window.fetch wrapper for 401 handling, and

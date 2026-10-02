@@ -41,15 +41,19 @@ from models import model_catalog
 def _paths_written_by_step(step: dict) -> list:
     """Files a persisted tool step produced, if any.
 
-    `write`/`edit` name theirs in the arguments. A `subagent` step lists the
-    ones its sub agents wrote in its result: those files never passed through
-    a tool call of this agent's own, so nothing else records them.
+    `write`/`edit` name theirs in the arguments. A `bash` step lists the files
+    its command changed in its result, and a `subagent` step the ones its sub
+    agents wrote: those files never passed through a file tool of this
+    agent's own, so nothing else records them.
     """
     name = step.get("name")
     if name in ("write", "edit"):
         args = step.get("arguments")
         path = str((args or {}).get("path") or "").strip() if isinstance(args, dict) else ""
         return [path] if path else []
+    if name == "bash":
+        from agent.protocol.artifact import command_files_from_result
+        return command_files_from_result(step.get("result"))
     if name != "subagent":
         return []
     try:
@@ -61,6 +65,22 @@ def _paths_written_by_step(step: dict) -> list:
         for item in results if isinstance(item, dict)
         for path in (item.get("files") or [])
     ]
+
+
+def _path_sent_by_step(step: dict) -> str:
+    """The local document a `send` step delivered. Images and videos are left
+    out: the history view renders those inline from the step itself."""
+    if step.get("name") != "send":
+        return ""
+    try:
+        payload = json.loads(step.get("result") or "{}")
+    except (ValueError, TypeError):
+        return ""
+    if not isinstance(payload, dict) or payload.get("type") != "file_to_send":
+        return ""
+    if payload.get("file_type") in ("image", "video") or payload.get("url"):
+        return ""
+    return str(payload.get("path") or "").strip()
 
 
 def _artifacts_from_steps(steps, session_id: str = None, agent_id: str = None) -> list:
@@ -75,7 +95,7 @@ def _artifacts_from_steps(steps, session_id: str = None, agent_id: str = None) -
     ``session_id`` anchors detection to the session's working dir (the project
     dir when one is open), matching the live SSE path; otherwise state_root.
     """
-    from agent.protocol.artifact import get_workspace_root, safe_build_artifact
+    from agent.protocol.artifact import build_sent_artifact, get_workspace_root, safe_build_artifact
 
     out = []
     seen = set()
@@ -83,10 +103,11 @@ def _artifacts_from_steps(steps, session_id: str = None, agent_id: str = None) -
     for step in steps or []:
         if not isinstance(step, dict) or step.get("type") != "tool" or step.get("is_error"):
             continue
-        for path in _paths_written_by_step(step):
+        sent = _path_sent_by_step(step)
+        for path in [sent] if sent else _paths_written_by_step(step):
             if root is None:
                 root = _get_workspace_root(session_id, agent_id) if session_id else get_workspace_root()
-            info = safe_build_artifact(path, root)
+            info = build_sent_artifact(path, root) if sent else safe_build_artifact(path, root)
             if not info or info["path"] in seen:
                 continue
             seen.add(info["path"])

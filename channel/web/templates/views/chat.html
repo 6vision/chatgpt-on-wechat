@@ -222,31 +222,35 @@
                                 </div>
                                 <div class="workspace-header-actions">
                                     <button id="ws-btn-save" class="workspace-icon-btn hidden" onclick="savePreviewEdit()"
-                                            data-i18n-title="ws_edit_save" title="保存 (Ctrl+S)">
+                                            data-tip-key="ws_edit_save" data-tip-float data-tooltip-pos="bottom">
                                         <i class="fas fa-floppy-disk"></i>
                                     </button>
                                     <button id="ws-btn-edit-cancel" class="workspace-icon-btn hidden" onclick="cancelPreviewEdit()"
-                                            data-i18n-title="ws_edit_cancel" title="退出编辑">
+                                            data-tip-key="ws_edit_cancel" data-tip-float data-tooltip-pos="bottom">
                                         <i class="fas fa-rotate-left"></i>
                                     </button>
                                     <button id="ws-btn-edit" class="workspace-icon-btn hidden" onclick="startPreviewEdit()"
-                                            data-i18n-title="ws_edit" title="编辑">
+                                            data-tip-key="ws_edit" data-tip-float data-tooltip-pos="bottom">
                                         <i class="fas fa-pen-to-square"></i>
                                     </button>
+                                    <button id="ws-btn-artifacts" class="workspace-icon-btn hidden" onclick="openArtifactsFor(wsCurrentFile)"
+                                            data-tip-key="artifacts_view_in" data-tip-float data-tooltip-pos="bottom">
+                                        <i class="fas fa-layer-group"></i>
+                                    </button>
                                     <button id="ws-btn-external" class="workspace-icon-btn hidden" onclick="openPreviewExternally()"
-                                            data-i18n-title="ws_open_external" title="在新标签页打开">
+                                            data-tip-key="ws_open_external" data-tip-float data-tooltip-pos="bottom">
                                         <i class="fas fa-up-right-from-square"></i>
                                     </button>
+                                    <button id="ws-btn-reveal" class="workspace-icon-btn hidden" onclick="revealPreviewFile()"
+                                            data-tip-key="ws_reveal" data-tip-float data-tooltip-pos="bottom">
+                                        <i class="fas fa-folder-open"></i>
+                                    </button>
                                     <button id="ws-btn-download" class="workspace-icon-btn hidden" onclick="downloadPreviewFile()"
-                                            data-i18n-title="ws_download" title="下载">
+                                            data-tip-key="ws_download" data-tip-float data-tooltip-pos="bottom">
                                         <i class="fas fa-download"></i>
                                     </button>
-                                    <button id="ws-btn-copy" class="workspace-icon-btn hidden" onclick="copyPreviewPath()"
-                                            data-i18n-title="ws_copy_path" title="复制路径">
-                                        <i class="fas fa-link"></i>
-                                    </button>
                                     <button class="workspace-icon-btn" onclick="closeWorkspacePanel(true)"
-                                            data-i18n-title="ws_close" title="关闭">
+                                            data-tip-key="ws_close" data-tip-float data-tooltip-pos="bottom">
                                         <i class="fas fa-xmark"></i>
                                     </button>
                                 </div>
@@ -267,7 +271,7 @@
                                                data-i18n-placeholder="ws_search_placeholder" placeholder="搜索文件">
                                     </div>
                                     <button class="workspace-icon-btn" onclick="refreshWorkspaceTree()"
-                                            data-i18n-title="ws_refresh" title="刷新">
+                                            data-tip-key="ws_refresh" data-tip-float data-tooltip-pos="bottom">
                                         <i class="fas fa-rotate-right"></i>
                                     </button>
                                 </div>

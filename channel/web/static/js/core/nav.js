@@ -5,8 +5,10 @@
 // =====================================================================
 // Sidebar & Navigation
 // =====================================================================
+// `nav` names the sidebar entry to light when the view has none of its own.
 const VIEW_META = {
     chat:     { group: 'nav_chat',    page: 'menu_chat' },
+    artifacts:{ group: 'nav_chat',    page: 'menu_artifacts', nav: 'chat' },
     agents:   { group: 'nav_manage',  page: 'menu_agents' },
     config:   { group: 'nav_manage',  page: 'menu_config' },
     skills:   { group: 'nav_manage',  page: 'menu_skills' },
@@ -26,10 +28,16 @@ function _switchToView(viewId) {
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     const target = document.getElementById('view-' + viewId);
     if (target) target.classList.add('active');
-    document.querySelectorAll('.sidebar-item').forEach(item => {
-        item.classList.toggle('active', item.dataset.view === viewId);
-    });
     const meta = VIEW_META[viewId];
+    const navId = meta.nav || viewId;
+    document.querySelectorAll('.sidebar-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.view === navId);
+    });
+    const artifactsBtn = document.getElementById('artifacts-toggle-btn');
+    if (artifactsBtn) {
+        artifactsBtn.classList.toggle('hidden', viewId !== 'chat' && viewId !== 'artifacts');
+        artifactsBtn.classList.toggle('is-active', viewId === 'artifacts');
+    }
     document.getElementById('breadcrumb-group').textContent = t(meta.group);
     document.getElementById('breadcrumb-group').dataset.i18n = meta.group;
     document.getElementById('breadcrumb-page').textContent = t(meta.page);
@@ -214,6 +222,7 @@ function navigateTo(viewId, tab) {
     else if (viewId === 'channels') loadChannelsView();
     else if (viewId === 'tasks') { switchTasksTab(tab || 'tasks'); loadTasksView(); }
     else if (viewId === 'logs') startLogStream();
+    else if (viewId === 'artifacts') loadArtifactsView();
     return true;
 }
 

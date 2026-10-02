@@ -172,10 +172,15 @@ function _timelineStopGlide() {
 // Glide to a bubble. The target is re-measured every frame, so images or code
 // blocks that finish rendering mid-flight shift the landing spot instead of
 // leaving the view short and snapping back. A long hop starts a little way
-// off the target so the visible glide stays short.
-function _timelineGlideTo(el) {
+// off the target so the visible glide stays short. `landOffset` is the gap
+// left above the target, TIMELINE_LAND_OFFSET unless given.
+function _timelineGlideTo(el, landOffset) {
+    const land = landOffset != null ? landOffset : TIMELINE_LAND_OFFSET;
     _timelineStopGlide();
     _autoScrollEnabled = false;
+    // A session opened just now still has bottom re-pins queued; they would
+    // yank the view back down once the glide lands.
+    historyPinToken++;
     // Freshly prepended bubbles keep growing for a few frames. Scroll anchoring
     // would answer each growth with a scroll of its own, after ours, and the
     // two tug the view back and forth; the glide already tracks the target.
@@ -183,7 +188,7 @@ function _timelineGlideTo(el) {
     const maxTop = () => messagesDiv.scrollHeight - messagesDiv.clientHeight;
     const targetOf = () => {
         const y = el.getBoundingClientRect().top - messagesDiv.getBoundingClientRect().top
-            + messagesDiv.scrollTop - TIMELINE_LAND_OFFSET;
+            + messagesDiv.scrollTop - land;
         return Math.max(0, Math.min(y, maxTop()));
     };
     const lead = messagesDiv.clientHeight * 0.6;

@@ -828,9 +828,18 @@ class ChatService:
             pass
         try:
             from agent.memory import get_conversation_store
-            return get_conversation_store(workspace_root).append_messages(
+            store = get_conversation_store(workspace_root)
+            stored = store.append_messages(
                 session_id, new_messages, channel_type=channel_type
             )
+            if stored:
+                from agent.protocol.artifact import index_message_artifacts
+                index_message_artifacts(
+                    store, session_id, new_messages,
+                    workspace_root=workspace_root,
+                    agent_id=getattr(store, "_agent_id", None) or None,
+                )
+            return stored
         except Exception as e:
             logger.warning(
                 f"[ChatService] Failed to persist messages for session={session_id}: {e}"

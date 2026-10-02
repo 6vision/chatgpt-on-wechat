@@ -174,9 +174,14 @@ function wsUpdateHeaderActions() {
     const onFile = wsActiveTab === 'preview' && !!wsCurrentFile;
     // While editing, the viewer actions would act on the saved file rather than
     // on what is in the text area, which reads as a bug. Hide them instead.
-    ['ws-btn-external', 'ws-btn-download', 'ws-btn-copy'].forEach(id => {
+    ['ws-btn-external', 'ws-btn-download'].forEach(id => {
         document.getElementById(id)?.classList.toggle('hidden', !onFile || wsEditing);
     });
+    document.getElementById('ws-btn-reveal')?.classList.toggle('hidden',
+        !onFile || wsEditing || !wsCanReveal() || !wsCurrentFile.abs_path);
+    // Only files a conversation produced have a place in the artifacts view.
+    document.getElementById('ws-btn-artifacts')
+        ?.classList.toggle('hidden', !onFile || wsEditing || !wsCurrentFile.artifact);
     document.getElementById('ws-btn-edit')
         ?.classList.toggle('hidden', !onFile || wsEditing || !wsIsEditable(wsCurrentFile));
     ['ws-btn-save', 'ws-btn-edit-cancel'].forEach(id => {
@@ -283,8 +288,13 @@ function wsRenderPreviewTitle() {
     title.classList.remove('hidden');
 }
 
-async function wsRenderPreview(meta) {
-    const body = document.getElementById('ws-preview-content');
+/**
+ * Render a file into the preview area.
+ * @param {HTMLElement} [target] - render here instead of the panel's preview
+ *   tab; the artifacts view reuses the same viewers this way.
+ */
+async function wsRenderPreview(meta, target) {
+    const body = target || document.getElementById('ws-preview-content');
     if (!body) return;
     const kind = meta.kind || wsKindOf(meta.file_name || meta.name || meta.path);
     const name = meta.file_name || meta.name || (meta.path || '').split('/').pop();
@@ -341,7 +351,14 @@ async function wsRenderPreview(meta) {
             }
             applyHighlighting(body);
         } catch (e) {
-            wsSetPreviewEmpty(t('ws_preview_failed') + ': ' + e.message, 'fa-triangle-exclamation');
+            if (target) {
+                body.innerHTML = `<div class="workspace-empty">
+                    <i class="fas fa-triangle-exclamation"></i>
+                    <span>${escapeHtml(t('ws_preview_failed') + ': ' + e.message)}</span>
+                </div>`;
+            } else {
+                wsSetPreviewEmpty(t('ws_preview_failed') + ': ' + e.message, 'fa-triangle-exclamation');
+            }
         }
         return;
     }
@@ -349,11 +366,10 @@ async function wsRenderPreview(meta) {
     // Unsupported type: offer a download instead of a broken viewer.
     body.innerHTML = `<div class="workspace-empty">
         <i class="${wsIconClass(kind)}"></i>
-        <span>${escapeHtml(name)}</span>
+        <span class="ws-empty-name">${escapeHtml(name)}</span>
         <span>${escapeHtml(t('ws_no_inline_preview'))}</span>
-        <a href="${escapeHtml(rawUrl)}" download="${escapeHtml(name)}"
-           class="file-card-btn" style="width:auto;padding:4px 12px;border:1px solid currentColor;">
-            <i class="fas fa-download"></i>&nbsp;${escapeHtml(t('ws_download'))}
+        <a href="${escapeHtml(rawUrl)}" download="${escapeHtml(name)}" class="ws-empty-action">
+            <i class="fas fa-download"></i><span>${escapeHtml(t('ws_download'))}</span>
         </a>
     </div>`;
 }
@@ -373,17 +389,28 @@ function downloadPreviewFile() {
     a.remove();
 }
 
-function copyPreviewPath() {
-    if (!wsCurrentFile) return;
-    const path = wsCurrentFile.abs_path || wsCurrentFile.path || '';
-    copyToClipboard(path).then(() => {
-        const btn = document.getElementById('ws-btn-copy');
-        const icon = btn && btn.querySelector('i');
-        if (icon) {
-            icon.className = 'fas fa-check';
-            setTimeout(() => { icon.className = 'fas fa-link'; }, 1500);
-        }
-    });
+/** Whether the server can open this machine's file manager for the user. */
+function wsCanReveal() {
+    return !!(typeof appConfig !== 'undefined' && appConfig && appConfig.can_reveal_files);
+}
+
+/** Show a file in the system file manager. Resolves when the OS was asked to. */
+function wsRevealPath(path) {
+    return fetch('/api/file/reveal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status !== 'success') throw new Error(data.message || t('ws_reveal_failed'));
+        });
+}
+
+function revealPreviewFile() {
+    const path = wsCurrentFile && wsCurrentFile.abs_path;
+    if (!path) return;
+    wsRevealPath(path).catch(err => _wsToast(err.message || t('ws_reveal_failed')));
 }
 
 // =====================================================================
@@ -629,8 +656,12 @@ function renderFileCard(meta) {
         raw_url: meta.raw_url || '',
         preview_url: meta.preview_url || '',
         previewable: meta.previewable !== false && WS_PREVIEWABLE.has(kind),
+        artifact: true,
     }));
     const canPreview = meta.previewable !== false && WS_PREVIEWABLE.has(kind);
+    const btn = (action, tipKey, icon) =>
+        `<div class="file-card-btn" data-action="${action}" data-tip-key="${tipKey}" data-tip-float
+              data-tooltip="${escapeHtml(t(tipKey))}"><i class="fas ${icon}"></i></div>`;
     return `<div class="file-card" data-file='${payload}'>
         <i class="file-card-icon ${wsIconClass(kind)}"></i>
         <div class="file-card-info">
@@ -638,10 +669,19 @@ function renderFileCard(meta) {
             ${sub ? `<div class="file-card-sub">${escapeHtml(sub)}</div>` : ''}
         </div>
         <div class="file-card-actions">
-            ${canPreview ? `<div class="file-card-btn" data-action="preview" title="${escapeHtml(t('ws_preview'))}"><i class="fas fa-eye"></i></div>` : ''}
-            <div class="file-card-btn" data-action="download" title="${escapeHtml(t('ws_download'))}"><i class="fas fa-download"></i></div>
+            ${canPreview ? btn('preview', 'ws_preview', 'fa-eye') : ''}
+            ${btn('download', 'ws_download', 'fa-download')}
+            ${btn('artifacts', 'artifacts_view_in', 'fa-layer-group')}
         </div>
     </div>`;
+}
+
+/** The turn a message element belongs to: seq of the user message opening it. */
+function wsTurnSeqOf(el) {
+    let node = el && el.closest('.bot-message-group, .user-message-group');
+    while (node && !node.classList.contains('user-message-group')) node = node.previousElementSibling;
+    const seq = node ? parseInt(node.dataset.seq, 10) : NaN;
+    return Number.isNaN(seq) ? null : seq;
 }
 
 /** Append an artifact card to a live bot bubble and remember it for auto-open. */
@@ -654,7 +694,7 @@ function appendArtifactCard(container, item) {
     wrap.dataset.artifactPath = item.abs_path || '';
     wrap.innerHTML = renderFileCard(item);
     container.appendChild(wrap);
-    wsTurnArtifacts.push(item);
+    wsTurnArtifacts.push(Object.assign({ artifact: true }, item));
 }
 
 function resetTurnArtifacts() {
@@ -739,8 +779,15 @@ document.addEventListener('click', async (e) => {
     e.preventDefault();
     let meta;
     try { meta = JSON.parse(card.dataset.file); } catch (_) { return; }
+    // Where the card sits, so the artifacts view can attribute the file to
+    // this turn if it has to index it again.
+    meta.origin = { session_id: sessionId, agent_id: activeAgentId, turn_seq: wsTurnSeqOf(card) };
 
     const action = e.target.closest('[data-action]')?.dataset.action;
+    if (action === 'artifacts') {
+        openArtifactsFor(meta);
+        return;
+    }
     if (action === 'download') {
         if (meta.raw_url) {
             wsTriggerDownload(meta.raw_url, meta.file_name);

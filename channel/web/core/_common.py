@@ -17,6 +17,8 @@ import hmac
 import json
 import os
 import re
+import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -55,6 +57,21 @@ def _is_loopback_request() -> bool:
         return False
     addr = (env.get("REMOTE_ADDR") or "").strip()
     return addr in ("::1", "::ffff:127.0.0.1") or addr.startswith("127.")
+
+
+def _can_reveal_in_file_manager() -> bool:
+    """Whether opening a folder here lands in front of the person asking.
+
+    Only when the browser is on this very machine and the machine has a
+    desktop: for a remote or proxied console, or a headless server, the file
+    manager would open somewhere nobody is looking, if at all.
+    """
+    if not _is_loopback_request():
+        return False
+    if sys.platform in ("darwin", "win32"):
+        return True
+    has_display = os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    return bool(has_display and shutil.which("xdg-open"))
 
 
 def _desktop_token_matches() -> bool:

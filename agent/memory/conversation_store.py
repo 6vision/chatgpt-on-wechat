@@ -125,6 +125,50 @@ CREATE INDEX IF NOT EXISTS idx_runs_task
     ON runs (task_source, task_id);
 """
 
+# Artifacts are auxiliary too: an index of the user-facing files conversations
+# produced, so they can be browsed in one place instead of session by session.
+# One logical row per (agent_id, path), kept unique by record_artifacts inside
+# its write transaction rather than by a constraint. Columns carry defaults
+# but no NOT NULL / UNIQUE either: SQLite can only lift those by rebuilding
+# the table, while adding a column or an index is cheap. Readers coalesce.
+_ARTIFACTS_DDL = """
+CREATE TABLE IF NOT EXISTS artifacts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id    TEXT    DEFAULT '',
+    session_id  TEXT    DEFAULT '',
+    -- seq of the visible user message that opened the turn which last
+    -- produced the file: what the history view scrolls to.
+    turn_seq    INTEGER,
+    path        TEXT    DEFAULT '',
+    kind        TEXT    DEFAULT 'file',
+    size        INTEGER DEFAULT 0,
+    -- What produced it (write / edit / bash / send / subagent / embed / manual).
+    source      TEXT    DEFAULT '',
+    created_at  INTEGER DEFAULT 0,
+    updated_at  INTEGER DEFAULT 0,
+    -- JSON object for metadata that doesn't warrant a column of its own.
+    extras      TEXT    DEFAULT ''
+);
+"""
+
+# Columns added after the table first shipped, applied with ADD COLUMN when
+# missing. Evolve the schema by appending here, never by editing the DDL alone.
+_ARTIFACTS_ADDED_COLUMNS = (
+    ("extras", "TEXT DEFAULT ''"),
+)
+
+# Run after the columns above exist, so an index may reference any of them.
+_ARTIFACTS_INDEX_DDL = """
+CREATE INDEX IF NOT EXISTS idx_artifacts_recent
+    ON artifacts (agent_id, updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_artifacts_updated
+    ON artifacts (updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_artifacts_path
+    ON artifacts (agent_id, path);
+"""
+
 # Migration: add channel_type column to existing databases that predate it.
 _MIGRATION_ADD_CHANNEL_TYPE = """
 ALTER TABLE sessions ADD COLUMN channel_type TEXT NOT NULL DEFAULT '';
@@ -558,6 +602,7 @@ class ConversationStore:
         # bookkeeping degrades to a no-op so it can never break a turn or a
         # history query -- runs are auxiliary to conversation storage.
         self._runs_ready = False
+        self._artifacts_ready = False
         self._init_db()
 
     # ------------------------------------------------------------------
@@ -1966,6 +2011,181 @@ class ConversationStore:
                 conn.close()
 
     # ------------------------------------------------------------------
+    # Artifacts
+    # ------------------------------------------------------------------
+
+    def record_artifacts(
+        self,
+        session_id: str,
+        items: List[Dict[str, Any]],
+        turn_seq: Optional[int] = None,
+    ) -> int:
+        """Index the files one stretch of a turn produced.
+
+        Each item needs ``path`` (absolute) and may carry ``kind``, ``size`` and
+        ``source``. A path already indexed for this Agent is moved to the top
+        and re-pointed at the turn, so the index always leads to the turn that
+        last produced the file. ``turn_seq`` defaults to the session's latest
+        turn. Returns the number of items written.
+        """
+        if not items or not session_id or not self._artifacts_ready:
+            return 0
+        now = int(time.time())
+        with self._lock:
+            conn = self._connect()
+            try:
+                with conn:
+                    aid = self._agent_id
+                    if turn_seq is None:
+                        turn_seq = self._latest_visible_user_seq(conn, session_id)
+                    written = 0
+                    for item in items:
+                        path = str(item.get("path") or "")
+                        if not path:
+                            continue
+                        kind = str(item.get("kind") or "file")
+                        size = int(item.get("size") or 0)
+                        source = str(item.get("source") or "")
+                        row = conn.execute(
+                            "SELECT id FROM artifacts WHERE agent_id = ? AND path = ? "
+                            "ORDER BY id DESC LIMIT 1",
+                            (aid, path),
+                        ).fetchone()
+                        if row:
+                            conn.execute(
+                                """
+                                UPDATE artifacts
+                                SET session_id = ?, turn_seq = ?, kind = ?, size = ?,
+                                    source = ?, updated_at = ?
+                                WHERE id = ?
+                                """,
+                                (session_id, turn_seq, kind, size, source, now, row[0]),
+                            )
+                        else:
+                            conn.execute(
+                                """
+                                INSERT INTO artifacts
+                                    (agent_id, session_id, turn_seq, path, kind, size,
+                                     source, created_at, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """,
+                                (aid, session_id, turn_seq, path, kind, size, source, now, now),
+                            )
+                        written += 1
+                    return written
+            finally:
+                conn.close()
+
+    def list_artifacts(
+        self,
+        agent_ids: Optional[List[str]] = None,
+        kinds: Optional[List[str]] = None,
+        query: str = "",
+        path: str = "",
+        offset: int = 0,
+        limit: int = 60,
+    ) -> Dict[str, Any]:
+        """Newest-first page of indexed artifacts, with their session's title.
+
+        ``agent_ids`` widens the scope from this handle's Agent to the stored
+        ids given (``""`` is the default Agent): every Agent shares the file, so
+        one handle can read them all. ``path`` narrows to one exact file.
+        """
+        if not self._artifacts_ready:
+            return {"items": [], "has_more": False}
+        scope = list(agent_ids) if agent_ids is not None else [self._agent_id]
+        if not scope:
+            return {"items": [], "has_more": False}
+        where: List[str] = ["a.agent_id IN (%s)" % ",".join("?" * len(scope))]
+        args: List[Any] = list(scope)
+        if kinds:
+            where.append("a.kind IN (%s)" % ",".join("?" * len(kinds)))
+            args.extend(kinds)
+        if path:
+            where.append("a.path = ?")
+            args.append(path)
+        if query:
+            escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            where.append("a.path LIKE ? ESCAPE '\\'")
+            args.append(f"%{escaped}%")
+        clause = "WHERE " + " AND ".join(where)
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT a.id, COALESCE(a.agent_id, ''), COALESCE(a.session_id, ''),
+                           a.turn_seq, a.path, COALESCE(a.kind, 'file'),
+                           COALESCE(a.size, 0), COALESCE(a.source, ''),
+                           COALESCE(a.created_at, 0), COALESCE(a.updated_at, 0),
+                           s.title, s.channel_type
+                    FROM artifacts a
+                    LEFT JOIN sessions s
+                        ON s.agent_id = a.agent_id AND s.session_id = a.session_id
+                    {clause}
+                    ORDER BY a.updated_at DESC, a.id DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (*args, limit + 1, offset),
+                ).fetchall()
+            finally:
+                conn.close()
+        items = [
+            {
+                "id": row[0],
+                "agent_id": row[1],
+                "session_id": row[2],
+                "turn_seq": row[3],
+                "path": row[4],
+                "kind": row[5],
+                "size": row[6],
+                "source": row[7],
+                "created_at": row[8],
+                "updated_at": row[9],
+                "session_title": row[10],
+                "session_channel": row[11],
+                "session_exists": row[11] is not None,
+            }
+            for row in rows[:limit]
+        ]
+        return {"items": items, "has_more": len(rows) > limit}
+
+    def delete_artifact(self, artifact_id: int) -> bool:
+        """Drop one row from the index. The file itself is left alone."""
+        if not self._artifacts_ready:
+            return False
+        with self._lock:
+            conn = self._connect()
+            try:
+                with conn:
+                    cur = conn.execute(
+                        "DELETE FROM artifacts WHERE agent_id = ? AND id = ?",
+                        (self._agent_id, int(artifact_id)),
+                    )
+                    return cur.rowcount > 0
+            finally:
+                conn.close()
+
+    def _latest_visible_user_seq(self, conn: sqlite3.Connection, session_id: str) -> Optional[int]:
+        """seq of the newest real user message in a session, if any."""
+        rows = conn.execute(
+            "SELECT seq, content FROM messages "
+            "WHERE agent_id = ? AND session_id = ? AND role = 'user' "
+            "ORDER BY seq DESC LIMIT 50",
+            (self._agent_id, session_id),
+        ).fetchall()
+        for seq, raw in rows:
+            try:
+                content = json.loads(raw)
+            except Exception:
+                content = raw
+            if _is_visible_user_message(content):
+                return int(seq)
+        return None
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
@@ -1982,9 +2202,32 @@ class ConversationStore:
             # half-applied upgrade or any other surprise degrades run tracking
             # instead of taking conversation history offline.
             self._init_runs(conn)
+            self._init_artifacts(conn)
         finally:
             conn.close()
         self._schema_identity = self._db_identity()
+
+    def _init_artifacts(self, conn: sqlite3.Connection) -> None:
+        """Create the artifacts index without ever risking the core schema."""
+        try:
+            conn.executescript(_ARTIFACTS_DDL)
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(artifacts)")}
+            for name, decl in _ARTIFACTS_ADDED_COLUMNS:
+                if name not in cols:
+                    conn.execute(f"ALTER TABLE artifacts ADD COLUMN {name} {decl}")
+            conn.executescript(_ARTIFACTS_INDEX_DDL)
+            conn.commit()
+            self._artifacts_ready = True
+        except Exception as e:
+            self._artifacts_ready = False
+            logger.warning(
+                f"[ConversationStore] Artifact index unavailable ({e}); "
+                "conversation history is unaffected"
+            )
+            try:
+                conn.rollback()
+            except Exception:
+                pass
 
     def _init_runs(self, conn: sqlite3.Connection) -> None:
         """Create the runs table without ever risking the core schema."""

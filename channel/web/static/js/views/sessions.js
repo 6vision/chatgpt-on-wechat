@@ -101,6 +101,7 @@ function _applyInputTooltips() {
     set('attach-btn', 'tip_attach');
     set('steer-btn', 'steer_active');
     set('session-toggle-btn', 'session_history', 'bottom');
+    set('artifacts-toggle-btn', 'artifacts_title', 'bottom');
     set('workspace-toggle-btn', 'ws_toggle', 'bottom');
     set('timeline-toggle-btn', 'timeline_nav', 'bottom');
     // Optimize / mic buttons carry state-dependent tooltips managed in their

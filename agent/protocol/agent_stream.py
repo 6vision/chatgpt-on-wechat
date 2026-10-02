@@ -493,44 +493,64 @@ class AgentStreamExecutor:
                 logger.error(f"Event callback error: {e}")
 
     # Tools whose successful execution may have produced a user-facing file.
-    _ARTIFACT_TOOLS = ("write", "edit")
+    _ARTIFACT_TOOLS = ("write", "edit", "bash")
+
+    @staticmethod
+    def _artifact_paths(tool_call: dict, result: dict) -> list:
+        data = result.get("result")
+        if tool_call.get("name") == "bash":
+            files = data.get("files_written") if isinstance(data, dict) else None
+            return [p for p in files or [] if isinstance(p, str) and p]
+        path = data.get("path") if isinstance(data, dict) else None
+        if not path:
+            path = (tool_call.get("arguments") or {}).get("path")
+        return [path] if path else []
+
+    def _artifact_root(self):
+        """The session's working dir: the project dir in project mode, else
+        None so the default state_root applies."""
+        try:
+            eff = getattr(self.agent, "effective_cwd", None)
+            return eff() if callable(eff) else None
+        except Exception:
+            return None
+
+    def _sent_file_event(self, data: dict) -> dict:
+        """file_to_send event data, plus what clients need to show the file as
+        a card: its kind, size and path relative to the working dir."""
+        from agent.protocol.artifact import build_sent_artifact
+
+        try:
+            info = build_sent_artifact(str(data.get("path") or ""), self._artifact_root())
+        except Exception:
+            info = None
+        if not info:
+            return data
+        return dict(data, rel_path=info["rel_path"], kind=info["kind"],
+                    previewable=info["previewable"], size=info["size"])
 
     def _maybe_emit_artifact(self, tool_call: dict, result: dict) -> None:
-        """Report a file written by `write`/`edit` so clients can preview it."""
+        """Report files a tool wrote or changed so clients can preview them."""
         if not self.on_event:
             return
         if tool_call.get("name") not in self._ARTIFACT_TOOLS:
             return
         if result.get("status") != "success":
             return
-
-        data = result.get("result")
-        path = data.get("path") if isinstance(data, dict) else None
-        if not path:
-            path = (tool_call.get("arguments") or {}).get("path")
-        if not path:
+        paths = self._artifact_paths(tool_call, result)
+        if not paths:
             return
 
         from agent.protocol.artifact import safe_build_artifact
 
-        # Anchor artifact detection to the session's working dir. In project mode
-        # this is the project dir, so files written there surface as cards; the
-        # default state_root is used when no project is open.
-        art_root = None
-        try:
-            eff = getattr(self.agent, "effective_cwd", None)
-            if callable(eff):
-                art_root = eff()
-        except Exception:
-            art_root = None
-        artifact = safe_build_artifact(path, art_root)
-        if not artifact:
-            return
-        if artifact["path"] in self._emitted_artifacts:
-            return
-        self._emitted_artifacts.add(artifact["path"])
-        logger.info(f"🗂  Artifact: {artifact['rel_path']} ({artifact['kind']})")
-        self._emit_event("artifact", artifact)
+        art_root = self._artifact_root()
+        for path in paths:
+            artifact = safe_build_artifact(path, art_root)
+            if not artifact or artifact["path"] in self._emitted_artifacts:
+                continue
+            self._emitted_artifacts.add(artifact["path"])
+            logger.info(f"🗂  Artifact: {artifact['rel_path']} ({artifact['kind']})")
+            self._emit_event("artifact", artifact)
 
     def _is_thinking_enabled(self) -> bool:
         """Whether deep-thinking mode is on at the model layer.
@@ -983,7 +1003,7 @@ class AgentStreamExecutor:
                             if result_data.get("type") == "file_to_send":
                                 self.files_to_send.append(result_data)
                                 logger.info(f"📎 File queued for sending: {result_data.get('file_name', result_data.get('path'))}")
-                                self._emit_event("file_to_send", result_data)
+                                self._emit_event("file_to_send", self._sent_file_event(result_data))
 
                         # Surface user-facing files written by the agent
                         self._maybe_emit_artifact(tool_call, result)

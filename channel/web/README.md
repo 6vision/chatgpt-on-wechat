@@ -14,7 +14,7 @@ scheduled tasks, logs).
 
 # Backend layout
 
-`web_channel.py` is the URL table and nothing else: 77 routes, `build_app()`,
+`web_channel.py` is the URL table and nothing else: 85 routes, `build_app()`,
 and the imports that put every handler in scope. web.py resolves the handler
 names in the table against a namespace dict, so every handler has to be
 importable there -- that is why the file imports names it never calls.
@@ -37,8 +37,9 @@ The code sits in two packages, mirroring the frontend's `core/` and `views/`:
 | `pages.py` | `/`, `/chat`, the in-app view paths, `/assets/*`, `/health` |
 | `auth.py` | `/api/auth/*`, the MCP OAuth callback |
 | `chat.py` | `/api/message`, `/api/poll`, `/api/cancel`, the SSE stream |
-| `files.py` | Uploads, `/api/file`, `/uploads/*`, `/preview/*`, ASR and TTS |
+| `files.py` | Uploads, `/api/file`, `/api/file/reveal` (local-only show in folder), `/uploads/*`, `/preview/*`, ASR and TTS |
 | `sessions.py` | `/api/sessions/*`, `/api/history`, per-session settings and context |
+| `artifacts.py` | `/api/artifacts`, `/api/artifacts/add`, `/api/artifacts/delete`: the cross-Agent index of files the conversations produced |
 | `agents.py` | `/api/agents/*`, core files, avatars |
 | `config.py` | `/api/config` |
 | `models.py` | `/api/models` |
@@ -115,10 +116,11 @@ Two rules for includes:
 | File | Contents |
 |---|---|
 | `layout/login.html` | Login overlay |
-| `layout/sidebar.html` | Left navigation (`data-view` names the target), the update menu on the version row, mobile overlay |
+| `layout/sidebar.html` | Left navigation (`data-view` names the target), the update menu on the version row, the rail toggle, mobile overlay |
 | `layout/session-panel.html` | Session history side panel |
 | `layout/header.html` | Top bar: panel toggle, breadcrumb, language/theme switches, logout |
 | `views/chat.html` | Chat view: message list, composer card, workspace panel |
+| `views/artifacts.html` | Artifacts view: day-grouped gallery and preview pane |
 | `views/agents.html` | Agent team: list, detail drawer, create form |
 | `views/config.html` | Settings view with the "basic" and "models" tabs |
 | `views/skills.html` | Skill list and skill definition viewer |
@@ -336,6 +338,7 @@ auth), see `tests/test_web_console_routing.py`.
 | `views/doc-viewers.js` | Viewer/editor for memory files and skill definitions |
 | `views/knowledge.js` | Knowledge tree, import, relation graph |
 | `views/logs.js` | Live log stream |
+| `views/artifacts.js` | Artifacts view: gallery, thumbnails, preview pane, jump back to the producing turn |
 | `boot.js` | Startup: apply theme and language, auth gate, first fetch of config and history |
 
 ### Three load-order constraints that must not move
@@ -403,13 +406,14 @@ section before reordering or inserting a file.**
 | File | Responsibility |
 |---|---|
 | `base.css` | Keyframes, scrollbars, shared tooltip, `.view` switching, chat column layout, mobile adjustments |
-| `sessions.css` | Sidebar, session history panel and list, project grouping, drag ordering, rename |
+| `sessions.css` | Sidebar and its collapsed rail, session history panel and list, project grouping, drag ordering, rename |
 | `components.css` | Controls shared across views: `cfg-dropdown`, form controls, confirm dialog, update menu, API key masking, floating tooltip |
 | `markdown.css` | Message body rendering: markdown, thinking/tool/subagent steps, log colouring, code block frame |
 | `chat.css` | Input and composer card, attachment bar, slash command menu, context usage popover, drop overlay, voice pill |
 | `workspace.css` | Workspace panel and project selector, document editor, artifact cards, `@` mention menu |
 | `knowledge.css` | Knowledge document tree and relation graph |
 | `agents.css` | Agent cards, detail drawer, composer identity badge |
+| `artifacts.css` | Artifacts view, and the lit state of the header's view buttons |
 
 Two things to watch when moving rules:
 
