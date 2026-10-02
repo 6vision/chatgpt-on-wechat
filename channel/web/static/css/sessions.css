@@ -9,6 +9,69 @@
 }
 .sidebar-item.active .item-icon { color: #4ABE6E; }
 
+/* Rail toggle in the sidebar footer */
+.sidebar-collapse-btn {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 7px;
+    color: #737373;
+    cursor: pointer;
+    transition: color .15s, background-color .15s;
+}
+.sidebar-collapse-btn:hover { color: #e5e5e5; background: rgba(255, 255, 255, 0.06); }
+.sidebar-collapse-chevron { transform-box: fill-box; transform-origin: center; transition: transform .2s ease; }
+@media (max-width: 1023px) {
+    .sidebar-collapse-btn { display: none; }
+}
+
+/* Collapsed rail: icons only, group headers become hairline dividers. The
+   class sits on <html> so the <head> script can apply it before first paint. */
+@media (min-width: 1024px) {
+    #sidebar {
+        overflow: hidden;
+        transition: width .2s ease, transform .3s ease-in-out;
+    }
+    #sidebar .sidebar-item,
+    #sidebar .sidebar-brand-text { white-space: nowrap; }
+    html.sidebar-collapsed #sidebar { width: 64px; }
+    html.sidebar-collapsed .sidebar-brand { padding-left: 16px; padding-right: 16px; }
+    html.sidebar-collapsed .sidebar-brand-text { display: none; }
+    html.sidebar-collapsed #sidebar-nav { padding-left: 12px; padding-right: 12px; }
+    html.sidebar-collapsed .menu-group > button { display: none; }
+    html.sidebar-collapsed .menu-group-items { max-height: none; padding-left: 0; transition: none; }
+    html.sidebar-collapsed .menu-group-items > * + * { margin-top: 2px; }
+    html.sidebar-collapsed .menu-group + .menu-group {
+        position: relative;
+        margin-top: 10px;
+        padding-top: 10px;
+    }
+    html.sidebar-collapsed .menu-group + .menu-group::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 10px;
+        right: 10px;
+        height: 1px;
+        background: rgba(255, 255, 255, 0.08);
+    }
+    html.sidebar-collapsed .sidebar-item {
+        justify-content: center;
+        gap: 0;
+        height: 40px;
+        padding: 0;
+    }
+    html.sidebar-collapsed .sidebar-item > span { display: none; }
+    html.sidebar-collapsed .sidebar-item .item-icon { font-size: 14px; }
+    html.sidebar-collapsed .sidebar-footer { padding-left: 0; padding-right: 0; }
+    html.sidebar-collapsed .sidebar-footer > div:first-child { justify-content: center; }
+    html.sidebar-collapsed .sidebar-version-row { display: none; }
+    html.sidebar-collapsed .sidebar-collapse-chevron { transform: scaleX(-1); }
+}
+
 /* Session Panel */
 .session-panel {
     width: 220px;

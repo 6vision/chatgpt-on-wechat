@@ -79,11 +79,64 @@ function closeSidebar() {
     document.getElementById('sidebar-overlay').classList.add('hidden');
 }
 
+// Group open/closed state and the collapsed rail are remembered per browser.
+// The first paint already honours both: the <head> script sets
+// html.sidebar-collapsed and sidebar.html closes the stored groups inline.
+const SIDEBAR_COLLAPSED_KEY = 'cow_sidebar_collapsed';
+const SIDEBAR_GROUPS_KEY = 'cow_sidebar_groups';
+
+function _saveSidebarGroups() {
+    const state = {};
+    document.querySelectorAll('#sidebar .menu-group[data-group]').forEach(g => {
+        state[g.dataset.group] = g.classList.contains('open');
+    });
+    try { localStorage.setItem(SIDEBAR_GROUPS_KEY, JSON.stringify(state)); } catch (_) { /* private mode */ }
+}
+
 document.querySelectorAll('.menu-group > button').forEach(btn => {
     btn.addEventListener('click', () => {
         btn.parentElement.classList.toggle('open');
+        _saveSidebarGroups();
     });
 });
+
+function isSidebarCollapsed() {
+    return document.documentElement.classList.contains('sidebar-collapsed');
+}
+
+// The rail hides every label, so each entry carries its name as a hover tip
+// instead. Re-run on language switch (applyI18n) and on every toggle.
+function syncSidebarTips() {
+    const collapsed = isSidebarCollapsed();
+    document.querySelectorAll('#sidebar .sidebar-item').forEach(item => {
+        const label = item.querySelector('[data-i18n]');
+        if (collapsed && label) {
+            item.setAttribute('data-tooltip', label.textContent.trim());
+            item.setAttribute('data-tooltip-pos', 'right');
+            item.setAttribute('data-tip-float', '');
+        } else {
+            item.removeAttribute('data-tooltip');
+            item.removeAttribute('data-tooltip-pos');
+            item.removeAttribute('data-tip-float');
+        }
+    });
+    const toggle = document.getElementById('sidebar-collapse-btn');
+    if (toggle) {
+        toggle.setAttribute('data-tooltip', t(collapsed ? 'sidebar_expand' : 'sidebar_collapse'));
+        toggle.setAttribute('data-tooltip-pos', collapsed ? 'right' : 'top');
+        toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    }
+}
+
+function toggleSidebarCollapsed() {
+    const collapsed = !isSidebarCollapsed();
+    document.documentElement.classList.toggle('sidebar-collapsed', collapsed);
+    try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (_) { /* private mode */ }
+    if (typeof closeUpdateMenu === 'function') closeUpdateMenu();
+    syncSidebarTips();
+}
+
+syncSidebarTips();
 
 document.querySelectorAll('.sidebar-item').forEach(item => {
     item.addEventListener('click', () => navigateTo(item.dataset.view));

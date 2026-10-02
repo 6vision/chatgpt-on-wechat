@@ -83,6 +83,9 @@
         window.__COW_DEFAULT_LANG__ = '{{COW_DEFAULT_LANG}}';
         var theme = localStorage.getItem('cow_theme') || 'dark';
         if (theme === 'dark') document.documentElement.classList.add('dark');
+        if (localStorage.getItem('cow_sidebar_collapsed') === '1') {
+            document.documentElement.classList.add('sidebar-collapsed');
+        }
         document.documentElement.setAttribute('lang', window.__cowResolveLang__());
     })();
     </script>

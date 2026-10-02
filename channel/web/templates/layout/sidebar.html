@@ -5,21 +5,21 @@
                                     transform -translate-x-full lg:relative lg:translate-x-0
                                     transition-transform duration-300 ease-in-out">
             <!-- Logo -->
-            <div class="flex items-center gap-3 px-5 h-14 border-b border-white/10 flex-shrink-0">
+            <div class="sidebar-brand flex items-center gap-3 px-5 h-14 border-b border-white/10 flex-shrink-0">
                 <!-- The mark itself goes home, as it does everywhere else on the
                      web. Only the image: the name beside it is a heading. -->
                 <img id="sidebar-home" role="button" tabindex="0"
                      src="/assets/logo.jpg" alt="CowAgent"
                      class="w-8 h-8 rounded-lg flex-shrink-0 cursor-pointer
                             hover:opacity-80 transition-opacity duration-150">
-                <div class="flex flex-col min-w-0">
+                <div class="sidebar-brand-text flex flex-col min-w-0">
                     <span class="text-white font-semibold text-sm truncate">CowAgent</span>
                     <span class="text-neutral-500 text-xs" data-i18n="console">控制台</span>
                 </div>
             </div>
 
             <!-- Navigation -->
-            <nav class="flex-1 overflow-y-auto py-4 px-3 space-y-1">
+            <nav id="sidebar-nav" class="flex-1 overflow-y-auto py-4 px-3 space-y-1">
                 <!-- Chat Group -->
                 <div class="menu-group open" data-group="chat">
                     <button class="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-neutral-500 hover:text-neutral-300 cursor-pointer transition-colors duration-150">
@@ -97,12 +97,23 @@
             </nav>
 
             <!-- Sidebar Footer -->
-            <div class="px-4 py-3 border-t border-white/10 flex-shrink-0 relative">
+            <div class="sidebar-footer pl-4 pr-2 py-2 border-t border-white/10 flex-shrink-0 relative">
                 <div class="flex items-center gap-2 text-xs text-neutral-600">
-                    <i class="fas fa-circle text-[6px] text-primary-400"></i>
-                    <button type="button" id="sidebar-version" onclick="toggleUpdateMenu(event)"
-                       class="update-version-btn hover:text-primary-400 transition-colors duration-150 cursor-pointer bg-transparent border-0 p-0 text-left"
-                       aria-haspopup="menu" aria-controls="update-menu" aria-expanded="false"></button>
+                    <div class="sidebar-version-row flex items-center gap-2 min-w-0 flex-1">
+                        <i class="fas fa-circle text-[6px] text-primary-400"></i>
+                        <button type="button" id="sidebar-version" onclick="toggleUpdateMenu(event)"
+                           class="update-version-btn hover:text-primary-400 transition-colors duration-150 cursor-pointer bg-transparent border-0 p-0 text-left"
+                           aria-haspopup="menu" aria-controls="update-menu" aria-expanded="false"></button>
+                    </div>
+                    <!-- Rail toggle (desktop widths only; phones use the drawer) -->
+                    <button type="button" id="sidebar-collapse-btn" class="sidebar-collapse-btn"
+                            onclick="toggleSidebarCollapsed()" data-tip-float aria-controls="sidebar">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <rect x="1.75" y="2.25" width="12.5" height="11.5" rx="2.25" stroke="currentColor" stroke-width="1.3"/>
+                            <path d="M6.25 2.5v11" stroke="currentColor" stroke-width="1.3"/>
+                            <path class="sidebar-collapse-chevron" d="M10.6 6.2 9 8l1.6 1.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
                 </div>
 
                 <!-- Up-popover menu anchored to the version row -->
@@ -124,6 +135,18 @@
                 </div>
             </div>
         </aside>
+        <!-- Close the groups the user folded last time before the first paint,
+             so they don't flash open and then animate shut. -->
+        <script>
+        (function () {
+            try {
+                var groups = JSON.parse(localStorage.getItem('cow_sidebar_groups') || '{}');
+                document.querySelectorAll('#sidebar .menu-group[data-group]').forEach(function (g) {
+                    if (groups[g.getAttribute('data-group')] === false) g.classList.remove('open');
+                });
+            } catch (e) { /* unreadable state: keep the defaults */ }
+        })();
+        </script>
 
         <!-- Mobile Overlay -->
         <div id="sidebar-overlay" class="fixed inset-0 bg-black/50 z-40 hidden lg:hidden cursor-pointer" onclick="toggleSidebar()"></div>

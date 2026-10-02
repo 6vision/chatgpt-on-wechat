@@ -451,6 +451,7 @@ const I18N = {
         session_history: '历史会话',
         ws_toggle: '工作空间', ws_tab_preview: '预览', ws_tab_files: '文件',
         timeline_nav: '消息导航',
+        sidebar_collapse: '收起侧边栏', sidebar_expand: '展开侧边栏',
         ws_default_workspace: '默认空间', ws_sel_title: '选择工作空间',
         ws_sel_default_hint: '使用默认工作空间（~/cow）', ws_sel_recents: '最近使用',
         ws_sel_open: '打开项目…', ws_sel_new: '新建项目', ws_sel_new_placeholder: '项目名称',
@@ -1038,6 +1039,7 @@ const I18N = {
         session_history: '歷史會話',
         ws_toggle: '工作空間', ws_tab_preview: '預覽', ws_tab_files: '檔案',
         timeline_nav: '訊息導覽',
+        sidebar_collapse: '收合側邊欄', sidebar_expand: '展開側邊欄',
         ws_default_workspace: '預設空間', ws_sel_title: '選擇工作空間',
         ws_sel_default_hint: '使用預設工作空間（~/cow）', ws_sel_recents: '最近使用',
         ws_sel_open: '開啟專案…', ws_sel_new: '新建專案', ws_sel_new_placeholder: '專案名稱',
@@ -1620,6 +1622,7 @@ const I18N = {
         session_history: 'History',
         ws_toggle: 'Workspace', ws_tab_preview: 'Preview', ws_tab_files: 'Files',
         timeline_nav: 'Jump to message',
+        sidebar_collapse: 'Collapse sidebar', sidebar_expand: 'Expand sidebar',
         ws_default_workspace: 'Default', ws_sel_title: 'Select workspace',
         ws_sel_default_hint: 'Use the default workspace (~/cow)', ws_sel_recents: 'Recent',
         ws_sel_open: 'Open project…', ws_sel_new: 'New project', ws_sel_new_placeholder: 'Project name',
@@ -1823,6 +1826,7 @@ function applyI18n() {
     });
     installCfgTipPortal();
     installContextUsagePopover();
+    if (typeof syncSidebarTips === 'function') syncSidebarTips();
     
     // Clear any status messages when language changes
     document.querySelectorAll('[id$="-status"]').forEach(el => {
@@ -2000,12 +2004,19 @@ function installCfgTipPortal() {
         _cfgTipPortalEl.style.top = '0px';
         _cfgTipPortalEl.classList.add('show');
         const tipRect = _cfgTipPortalEl.getBoundingClientRect();
-        let left = rect.left + rect.width / 2 - tipRect.width / 2;
-        // Clamp horizontally to the viewport with an 8px gutter.
-        left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
-        // Default above the target; place below when data-tooltip-pos="bottom".
-        const below = target.getAttribute('data-tooltip-pos') === 'bottom';
-        const top = below ? rect.bottom + 6 : rect.top - tipRect.height - 6;
+        const pos = target.getAttribute('data-tooltip-pos');
+        let left;
+        let top;
+        if (pos === 'right') {
+            left = rect.right + 10;
+            top = rect.top + rect.height / 2 - tipRect.height / 2;
+        } else {
+            left = rect.left + rect.width / 2 - tipRect.width / 2;
+            // Clamp horizontally to the viewport with an 8px gutter.
+            left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
+            // Default above the target; place below when data-tooltip-pos="bottom".
+            top = pos === 'bottom' ? rect.bottom + 6 : rect.top - tipRect.height - 6;
+        }
         _cfgTipPortalEl.style.left = left + 'px';
         _cfgTipPortalEl.style.top = top + 'px';
     };
