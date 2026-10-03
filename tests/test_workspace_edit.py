@@ -212,7 +212,7 @@ def test_read_handler_returns_content_and_baseline(tmp_path):
 
     with patch("channel.web.api.workspace._get_workspace_root", return_value=str(tmp_path)), \
          patch("common.state_dir.state_root_str", return_value=str(tmp_path)):
-        response = _get(WorkspaceReadHandler, {"path": "notes.md", "session": "s1", "agent": ""})
+        response = _get(WorkspaceReadHandler, {"path": "notes.md", "session": "s1", "agent": "", "agent_id": ""})
 
     assert response["status"] == "success"
     assert response["content"] == "hello\n"
@@ -305,6 +305,75 @@ def test_write_handler_falls_back_to_state_root_for_system_assets(tmp_path):
 
     assert response["status"] == "success"
     assert memory_file.read_text(encoding="utf-8") == "new\n"
+
+
+def _roots_by_agent(tmp_path):
+    """One workspace per Agent, plus a `_root` resolver to hand out by id."""
+    roots = {"default": tmp_path / "default", "writer": tmp_path / "writer"}
+    files = {}
+    for agent_id, root in roots.items():
+        root.mkdir()
+        files[agent_id] = _write(root / "notes.md", "hello\n")
+
+    def _root(session_id=None, agent_id=None):
+        return str(roots.get(agent_id or "default", roots["default"]))
+
+    return files, _root
+
+
+def test_write_handler_saves_into_the_agent_the_client_names(tmp_path):
+    """Both console clients inject `agent_id`, so the save must follow it."""
+    from channel.web.api.workspace import WorkspaceWriteHandler
+
+    files, _root = _roots_by_agent(tmp_path)
+
+    with patch("channel.web.api.workspace._get_workspace_root", side_effect=_root), \
+         patch("common.state_dir.state_root_str", side_effect=_root):
+        response = _post(WorkspaceWriteHandler, {
+            "path": "notes.md",
+            "content": "goodbye\n",
+            "session": "s1",
+            "agent_id": "writer",
+        })
+
+    assert response["status"] == "success"
+    assert files["writer"].read_text(encoding="utf-8") == "goodbye\n"
+    assert files["default"].read_text(encoding="utf-8") == "hello\n"
+
+
+def test_write_handler_still_accepts_the_agent_key(tmp_path):
+    from channel.web.api.workspace import WorkspaceWriteHandler
+
+    files, _root = _roots_by_agent(tmp_path)
+
+    with patch("channel.web.api.workspace._get_workspace_root", side_effect=_root), \
+         patch("common.state_dir.state_root_str", side_effect=_root):
+        response = _post(WorkspaceWriteHandler, {
+            "path": "notes.md",
+            "content": "goodbye\n",
+            "session": "s1",
+            "agent": "writer",
+        })
+
+    assert response["status"] == "success"
+    assert files["writer"].read_text(encoding="utf-8") == "goodbye\n"
+    assert files["default"].read_text(encoding="utf-8") == "hello\n"
+
+
+def test_read_handler_reads_from_the_agent_the_client_names(tmp_path):
+    from channel.web.api.workspace import WorkspaceReadHandler
+
+    files, _root = _roots_by_agent(tmp_path)
+    _write(files["writer"], "writer\n")
+
+    with patch("channel.web.api.workspace._get_workspace_root", side_effect=_root), \
+         patch("common.state_dir.state_root_str", side_effect=_root):
+        response = _get(WorkspaceReadHandler, {
+            "path": "notes.md", "session": "s1", "agent": "", "agent_id": "writer",
+        })
+
+    assert response["status"] == "success"
+    assert response["content"] == "writer\n"
 
 
 # ----------------------------------------------------------------------

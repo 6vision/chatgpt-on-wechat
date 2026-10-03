@@ -61,8 +61,8 @@ class WorkspaceTreeHandler:
         _require_auth()
         web.header('Content-Type', 'application/json; charset=utf-8')
         try:
-            params = web.input(path='', show_hidden='', session='', agent='')
-            svc = _workspace_service(params.session or None, params.agent or None)
+            params = web.input(path='', show_hidden='', session='', agent='', agent_id='')
+            svc = _workspace_service(params.session or None, params.agent or params.agent_id or None)
             result = svc.list_dir(params.path, show_hidden=params.show_hidden == '1')
             result["entries"] = [_decorate_entry(svc, e) for e in result["entries"]]
             return json.dumps({"status": "success", **result}, ensure_ascii=False)
@@ -78,12 +78,12 @@ class WorkspaceSearchHandler:
         _require_auth()
         web.header('Content-Type', 'application/json; charset=utf-8')
         try:
-            params = web.input(q='', limit='30', session='', agent='')
+            params = web.input(q='', limit='30', session='', agent='', agent_id='')
             try:
                 limit = max(1, min(100, int(params.limit)))
             except (TypeError, ValueError):
                 limit = 30
-            svc = _workspace_service(params.session or None, params.agent or None)
+            svc = _workspace_service(params.session or None, params.agent or params.agent_id or None)
             result = svc.search(params.q, limit=limit)
             result["results"] = [_decorate_entry(svc, e) for e in result["results"]]
             return json.dumps({"status": "success", **result}, ensure_ascii=False)
@@ -105,12 +105,12 @@ class WorkspaceResolveHandler:
         web.header('Content-Type', 'application/json; charset=utf-8')
         try:
             from agent.protocol.artifact import classify_kind, is_previewable
-            params = web.input(path='', session='', agent='')
+            params = web.input(path='', session='', agent='', agent_id='')
             raw_path = (params.path or '').strip()
             if not raw_path:
                 return json.dumps({"status": "error", "message": "path is required"})
 
-            svc = _workspace_service(params.session or None, params.agent or None)
+            svc = _workspace_service(params.session or None, params.agent or params.agent_id or None)
             if os.path.isabs(os.path.expanduser(raw_path)):
                 abs_path = os.path.realpath(os.path.expanduser(raw_path))
                 if not _is_path_allowed(abs_path):
@@ -157,8 +157,8 @@ class WorkspaceMetaHandler:
         _require_auth()
         web.header('Content-Type', 'application/json; charset=utf-8')
         try:
-            params = web.input(session='', agent='')
-            svc = _workspace_service(params.session or None, params.agent or None)
+            params = web.input(session='', agent='', agent_id='')
+            svc = _workspace_service(params.session or None, params.agent or params.agent_id or None)
             return json.dumps({"status": "success", **svc.meta()}, ensure_ascii=False)
         except Exception as e:
             logger.error(f"[WebChannel] Workspace meta error: {e}")
@@ -219,11 +219,11 @@ class WorkspaceReadHandler:
         _require_auth()
         web.header('Content-Type', 'application/json; charset=utf-8')
         try:
-            params = web.input(path='', session='', agent='')
+            params = web.input(path='', session='', agent='', agent_id='')
             raw_path = (params.path or '').strip()
             if not raw_path:
                 return json.dumps({"status": "error", "message": "path is required"})
-            svc, rel = _editable_target(raw_path, params.session or None, params.agent or None)
+            svc, rel = _editable_target(raw_path, params.session or None, params.agent or params.agent_id or None)
             return json.dumps({"status": "success", **svc.read_text(rel)}, ensure_ascii=False)
         except (ValueError, FileNotFoundError) as e:
             return json.dumps({"status": "error", "message": str(e)})
@@ -261,7 +261,7 @@ class WorkspaceWriteHandler:
             if not isinstance(content, str):
                 return json.dumps({"status": "error", "message": "content must be a string"})
 
-            agent_id = body.get("agent") or None
+            agent_id = body.get("agent") or body.get("agent_id") or None
             svc, rel = _editable_target(raw_path, body.get("session") or None, agent_id)
             try:
                 result = svc.write_text(rel, content, expected_mtime=body.get("expected_mtime"))
@@ -315,8 +315,8 @@ class ProjectsHandler:
         _require_auth()
         web.header('Content-Type', 'application/json; charset=utf-8')
         try:
-            params = web.input(session='', agent='')
-            state = _project_state(params.session or None, params.agent or None)
+            params = web.input(session='', agent='', agent_id='')
+            state = _project_state(params.session or None, params.agent or params.agent_id or None)
             return json.dumps({"status": "success", **state}, ensure_ascii=False)
         except Exception as e:
             logger.error(f"[WebChannel] Projects list error: {e}")
