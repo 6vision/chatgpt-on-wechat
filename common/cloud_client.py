@@ -444,7 +444,7 @@ class CloudClient(LinkAIClient):
             if pconf("linkai")["midjourney"]:
                 pconf("linkai")["midjourney"]["enabled"] = True
                 pconf("linkai")["midjourney"]["use_image_create_prefix"] = True
-        elif config.get("text_to_image") and config.get("text_to_image") in ["dall-e-2", "dall-e-3"]:
+        elif config.get("text_to_image") in ["dall-e-2", "dall-e-3"] and pconf("linkai"):
             if pconf("linkai")["midjourney"]:
                 pconf("linkai")["midjourney"]["use_image_create_prefix"] = False
 
@@ -1336,7 +1336,7 @@ class CloudClient(LinkAIClient):
             return
 
         query = payload.get("query", "")
-        session_id = payload.get("session_id", "cloud_console")
+        session_id = payload.get("session_id") or "cloud_console"
         channel_type = payload.get("channel_type", "")
         # Console user on whose behalf this runs; usage is attributed to them
         # instead of the account this deployment is registered under.
