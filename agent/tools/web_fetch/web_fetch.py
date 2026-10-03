@@ -18,9 +18,12 @@ from agent.tools.base_tool import BaseTool, ToolResult
 from agent.tools.utils.truncate import truncate_head, format_size
 from agent.tools.utils.url_safety import validate_url_safe, safe_get
 from common.log import logger
+from common.media_download import MediaTooLargeError, read_response
 
 
 DEFAULT_TIMEOUT = 30
+# A slow sender never trips the per-read timeout, so a page read is capped as a whole.
+PAGE_READ_SECONDS = 60
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
 DEFAULT_HEADERS = {
@@ -72,6 +75,14 @@ def _is_document_url(url: str) -> bool:
     """Check if URL points to a downloadable document file."""
     suffix = _get_url_suffix(url)
     return suffix in ALL_DOC_SUFFIXES
+
+
+def _parse_content_length(response: requests.Response) -> int:
+    """Content-Length as a non-negative int, or 0 when absent or malformed."""
+    try:
+        return max(int(response.headers.get("Content-Length", 0)), 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 class WebFetch(BaseTool):
@@ -162,6 +173,24 @@ class WebFetch(BaseTool):
             content_type = response.headers.get("Content-Type", "")
             if self._is_binary_content_type(content_type) and not _is_document_url(url):
                 return self._handle_download_by_content_type(url, response, content_type)
+
+            content_length = _parse_content_length(response)
+            if content_length > MAX_FILE_SIZE:
+                return ToolResult.fail(
+                    f"Error: File too large ({format_size(content_length)} > {format_size(MAX_FILE_SIZE)})"
+                )
+
+            try:
+                body = read_response(response, MAX_FILE_SIZE, max_seconds=PAGE_READ_SECONDS)
+            except MediaTooLargeError:
+                return ToolResult.fail(
+                    f"Error: File too large (>{format_size(MAX_FILE_SIZE)}), download aborted"
+                )
+            except requests.Timeout:
+                return ToolResult.fail(f"Error: Reading {parsed.netloc} took longer than {PAGE_READ_SECONDS}s")
+            # .content and .text decode these bytes instead of draining the spent stream.
+            response._content = body
+            response._content_consumed = True
 
             response.encoding = self._detect_encoding(response)
             html = response.text
