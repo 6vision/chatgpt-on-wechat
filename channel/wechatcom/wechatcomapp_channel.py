@@ -146,6 +146,16 @@ class WechatComAppChannel(ChatChannel):
                     os.remove(amr_file)
             except Exception:
                 pass
+            # split_audio() exported one file per 60s slice beside the .amr and
+            # every one of them was uploaded above, so none is read again. They
+            # land in the Agent's managed tmp/, which nothing else prunes.
+            for path in files:
+                if path in (file_path, amr_file):
+                    continue
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
             for media_id in media_ids:
                 self.client.message.send_voice(self.agent_id, receiver, media_id)
                 time.sleep(1)
