@@ -82,10 +82,10 @@ const NavRail: React.FC<NavRailProps> = ({ onLangChange }) => {
   const menu = useMenuStore((s) => s.doc)
   const openMenuEditor = useMenuStore((s) => s.openEditor)
   // Until the user saves a menu the rail stays the flat list it has always
-  // been, with the logs in the footer menu; a saved one is drawn by group.
+  // been; a saved one is drawn by group.
   const sections: { group: MenuGroup | null; items: MenuItem[] }[] = savedMenu
     ? menu.groups.map((group) => ({ group, items: group.items.filter(itemShows) })).filter((s) => s.items.length)
-    : [{ group: null, items: menu.groups.flatMap((g) => g.items).filter((i) => itemShows(i) && i.view !== 'logs') }]
+    : [{ group: null, items: menu.groups.flatMap((g) => g.items).filter(itemShows) }]
 
   const openItem = (item: MenuItem) => {
     if (item.type === 'url' && item.open === 'tab') {

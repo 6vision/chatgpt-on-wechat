@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import apiClient from '../api/client'
 import { mergeMenu } from '../lib/menu'
-import type { MenuDoc } from '../types'
+import type { MenuDoc, MenuItem } from '../types'
 
 const CACHE_KEY = 'cow_menu_cache'
 
@@ -34,8 +34,15 @@ interface MenuState {
   /** Save the whole menu (null restores the built-in one). Throws with the backend's reason. */
   save: (menu: MenuDoc | null) => Promise<void>
   editorOpen: boolean
-  openEditor: () => void
+  /** What the editor opens on: an entry to place in the first group, or one to point out. */
+  editorIntent: EditorIntent | null
+  openEditor: (intent?: EditorIntent) => void
   closeEditor: () => void
+}
+
+export interface EditorIntent {
+  add?: MenuItem
+  focus?: string
 }
 
 const apply = (menu: MenuDoc | null) => {
@@ -70,6 +77,7 @@ export const useMenuStore = create<MenuState>((set) => ({
   },
 
   editorOpen: false,
-  openEditor: () => set({ editorOpen: true }),
-  closeEditor: () => set({ editorOpen: false }),
+  editorIntent: null,
+  openEditor: (intent) => set({ editorOpen: true, editorIntent: intent || null }),
+  closeEditor: () => set({ editorOpen: false, editorIntent: null }),
 }))

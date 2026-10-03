@@ -29,6 +29,23 @@ function railIndexes(n: number): number[] {
   return Array.from({ length: RAIL_MAX }, (_, k) => Math.round(k * step))
 }
 
+/** The element in the reply to the question at `start` that shows the file at `path`. */
+function fileInTurn(start: HTMLElement, path: string): HTMLElement | null {
+  for (let el = start.nextElementSibling; el && !(el as HTMLElement).dataset.userSeq; el = el.nextElementSibling) {
+    const card = el.querySelector<HTMLElement>(`[data-artifact-path="${CSS.escape(path)}"]`)
+    if (card) return card
+    const media = Array.from(el.querySelectorAll<HTMLElement>('img[src], video[src], audio[src]')).find((m) => {
+      try {
+        return new URL(m.getAttribute('src') || '', location.href).searchParams.get('path') === path
+      } catch {
+        return false
+      }
+    })
+    if (media) return media
+  }
+  return null
+}
+
 /**
  * Message navigator: a column of dashes on the right edge of the conversation,
  * one per question. Hovering it unfolds a card listing every question beside
@@ -175,12 +192,13 @@ const ChatTimeline: React.FC<ChatTimelineProps> = ({ sessionId, scrollRef, revis
     [scrollRef]
   )
 
-  // Glide to a bubble. The target is re-measured every frame, so media or code
-  // blocks that finish rendering mid-flight shift the landing spot instead of
-  // leaving the view short and snapping back. A long hop starts a little way
-  // off the target so the visible glide stays short.
+  // Glide to a bubble, or to `flash` inside the turn and `offset` below the
+  // top. The target is re-measured every frame, so media or code blocks that
+  // finish rendering mid-flight shift the landing spot instead of leaving the
+  // view short and snapping back. A long hop starts a little way off the
+  // target so the visible glide stays short.
   const glideTo = useCallback(
-    (el: HTMLElement) => {
+    (el: HTMLElement, offset = LAND_OFFSET, flash?: HTMLElement) => {
       const root = scrollRef.current
       if (!root) return endJump()
       stopGlide()
@@ -190,7 +208,7 @@ const ChatTimeline: React.FC<ChatTimelineProps> = ({ sessionId, scrollRef, revis
       // tracks the target.
       root.style.overflowAnchor = 'none'
       const targetOf = () => {
-        const y = el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - LAND_OFFSET
+        const y = el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - offset
         return Math.max(0, Math.min(y, root.scrollHeight - root.clientHeight))
       }
       const lead = root.clientHeight * 0.6
@@ -222,7 +240,7 @@ const ChatTimeline: React.FC<ChatTimelineProps> = ({ sessionId, scrollRef, revis
         }
         stopGlide()
         setJumping(false)
-        const bubble = el.querySelector<HTMLElement>('.bg-bubble-user') || el
+        const bubble = flash || el.querySelector<HTMLElement>('.bg-bubble-user') || el
         bubble.classList.remove('timeline-flash')
         void bubble.offsetWidth
         bubble.classList.add('timeline-flash')
@@ -233,14 +251,12 @@ const ChatTimeline: React.FC<ChatTimelineProps> = ({ sessionId, scrollRef, revis
     [scrollRef, stopGlide, endJump, setJumping]
   )
 
-  // Jump to a question. An old one may sit in a history page that isn't
-  // loaded yet: fetch everything back to it in one request, holding the
-  // viewport still while it prepends.
-  const jumpTo = useCallback(
-    async (seq: number) => {
-      const token = ++jumpTokenRef.current
-      stopGlide()
-      setJumping(true)
+  // Bring a question on screen. An old one may sit in a history page that
+  // isn't loaded yet: fetch everything back to it in one request, holding the
+  // viewport still while it prepends. Resolves to undefined once a newer jump
+  // has taken over.
+  const reach = useCallback(
+    async (seq: number, token: number): Promise<HTMLElement | null | undefined> => {
       const target = sessionId
       let el = findBubble(seq)
       const s = useChatStore.getState().sessions[target]
@@ -256,16 +272,54 @@ const ChatTimeline: React.FC<ChatTimelineProps> = ({ sessionId, scrollRef, revis
         // once after the next frame in case it landed a frame later.
         hold()
         await nextFrame()
-        if (token !== jumpTokenRef.current) return
+        if (token !== jumpTokenRef.current) return undefined
         hold()
         el = findBubble(seq)
       }
-      if (token !== jumpTokenRef.current) return
+      return token === jumpTokenRef.current ? el : undefined
+    },
+    [findBubble, scrollRef, sessionId]
+  )
+
+  const jumpTo = useCallback(
+    async (seq: number) => {
+      const token = ++jumpTokenRef.current
+      stopGlide()
+      setJumping(true)
+      const el = await reach(seq, token)
+      if (el === undefined) return
       if (el) glideTo(el)
       else setJumping(false)
     },
-    [findBubble, glideTo, scrollRef, sessionId, stopGlide, setJumping]
+    [reach, glideTo, stopGlide, setJumping]
   )
+
+  // A jump asked for from the artifacts page: the turn that produced a file,
+  // landing on the file's card (a third of the way down, so the reply around
+  // it shows) when the turn has one, on its question otherwise.
+  const pendingJump = useTimelineStore((s) => s.pendingJump)
+  const historyLoaded = useChatStore((s) => !!s.sessions[sessionId]?.historyLoaded)
+  useEffect(() => {
+    if (!pendingJump || pendingJump.sessionId !== sessionId || !historyLoaded) return
+    useTimelineStore.getState().requestJump(null)
+    const token = ++jumpTokenRef.current
+    stopGlide()
+    setJumping(true)
+    void (async () => {
+      // Let the chat page's snap to the newest message, queued in the same
+      // commit as this effect, land first.
+      await nextFrame()
+      await nextFrame()
+      if (token !== jumpTokenRef.current) return
+      const el = await reach(pendingJump.seq, token)
+      if (el === undefined) return
+      const file = el && pendingJump.path ? fileInTurn(el, pendingJump.path) : null
+      const root = scrollRef.current
+      if (file && root) glideTo(file, Math.round(root.clientHeight * 0.3), file)
+      else if (el) glideTo(el)
+      else setJumping(false)
+    })()
+  }, [pendingJump, sessionId, historyLoaded, reach, glideTo, stopGlide, setJumping, scrollRef])
 
   if (items.length < 2) return null
 

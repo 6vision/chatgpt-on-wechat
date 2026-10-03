@@ -3,7 +3,7 @@ import apiClient from '../api/client'
 import { t } from '../i18n'
 import { isEditable } from '../lib/fileKind'
 import { askConfirm } from './confirmStore'
-import type { Artifact, WorkspaceEntry } from '../types'
+import type { Artifact, ArtifactOrigin, WorkspaceEntry } from '../types'
 
 const WIDTH_KEY = 'cow_workspace_width'
 export const WS_MIN_WIDTH = 300
@@ -87,7 +87,8 @@ interface WorkspaceState {
    *  id is unchanged so onSessionSwitch would no-op. */
   reloadRoot: () => void
 
-  preview: (target: WorkspaceEntry | Artifact | string) => Promise<void>
+  /** `origin` marks a file a conversation produced, so the panel can lead to it in the artifacts view. */
+  preview: (target: WorkspaceEntry | Artifact | string, opts?: { origin?: ArtifactOrigin }) => Promise<void>
   openLink: (path: string) => Promise<void>
   addTurnArtifact: (a: Artifact) => void
   resetTurnArtifacts: () => void
@@ -216,7 +217,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     })
   },
 
-  preview: async (target) => {
+  preview: async (target, opts) => {
     // Opening another file replaces the editor.
     if (!(await get().guardUnsavedEdit())) return
 
@@ -269,6 +270,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (browseIfDir(entry)) return
     }
 
+    if (entry && opts?.origin) entry = { ...entry, origin: opts.origin }
     set({ open: true, tab: 'preview', current: entry, previewError: null, edit: null })
   },
 
@@ -322,12 +324,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
    * artifact, and only while the user hasn't dismissed the panel by hand.
    */
   maybeAutoOpen: () => {
-    const { turnArtifacts, autoOpenSuppressed, preview, edit } = get()
+    const { turnArtifacts, autoOpenSuppressed, preview, edit, sessionId } = get()
     const previewable = turnArtifacts.filter((a) => a.previewable)
     set({ turnArtifacts: [] })
     // Never replace an open editor: the file cards stay in the message either way.
     if (autoOpenSuppressed || edit || previewable.length !== 1) return
-    preview(previewable[0])
+    // The turn just ended, so it isn't persisted with a seq yet; the Agent is
+    // the session's owner, worked out when the file is taken to the artifacts view.
+    preview(previewable[0], { origin: { session_id: sessionId, agent_id: '', turn_seq: null } })
   },
 
   guardUnsavedEdit: async () => {

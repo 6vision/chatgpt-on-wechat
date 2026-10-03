@@ -1,13 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Check } from 'lucide-react'
+import { ChevronDown, Check, Users } from 'lucide-react'
 import { t } from '../i18n'
 import { useAgentStore, selectMultiAgent, enabledDefaultFirst } from '../store/agentStore'
 import AgentAvatar from './AgentAvatar'
 
+/** The value that stands for every Agent, when the picker offers it. */
+const SCOPE_ALL = 'all'
+
 interface AgentScopeSelectProps {
-  /** The Agent whose data is currently shown. */
+  /** The Agent whose data is currently shown, or SCOPE_ALL. */
   value: string
   onChange: (agentId: string) => void
+  /** Label of a first row covering every Agent; without it there is no such row. */
+  allLabel?: string
 }
 
 /**
@@ -18,7 +23,7 @@ interface AgentScopeSelectProps {
  * Renders nothing in single-Agent mode, so those pages look exactly as they did
  * before the multi-Agent upgrade.
  */
-const AgentScopeSelect: React.FC<AgentScopeSelectProps> = ({ value, onChange }) => {
+const AgentScopeSelect: React.FC<AgentScopeSelectProps> = ({ value, onChange, allLabel }) => {
   const multiAgent = useAgentStore(selectMultiAgent)
   const agents = useAgentStore((s) => s.agents)
   const defaultAgentId = useAgentStore((s) => s.defaultAgentId)
@@ -40,6 +45,14 @@ const AgentScopeSelect: React.FC<AgentScopeSelectProps> = ({ value, onChange }) 
   const ordered = enabledDefaultFirst(agents, defaultAgentId)
 
   const current = agents.find((a) => a.id === value) || null
+  const pick = (id: string) => {
+    onChange(id)
+    setOpen(false)
+  }
+  const rowClass = (active: boolean) =>
+    `w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left cursor-pointer transition-colors ${
+      active ? 'bg-accent-soft text-accent' : 'hover:bg-inset text-content'
+    }`
 
   return (
     <div ref={rootRef} className="relative">
@@ -51,27 +64,34 @@ const AgentScopeSelect: React.FC<AgentScopeSelectProps> = ({ value, onChange }) 
         }`}
         title={t('scope_agent_tip')}
       >
-        {current ? <AgentAvatar agent={current} size={18} /> : null}
-        <span className="max-w-[128px] truncate">{current?.name || current?.id || t('scope_agent_all')}</span>
+        {current ? (
+          <AgentAvatar agent={current} size={18} />
+        ) : allLabel ? (
+          <span className="w-[18px] h-[18px] rounded-full bg-inset-2 flex items-center justify-center flex-shrink-0">
+            <Users size={11} />
+          </span>
+        ) : null}
+        <span className="max-w-[128px] truncate">
+          {current?.name || current?.id || allLabel || t('scope_agent_all')}
+        </span>
         <ChevronDown size={12} className={`opacity-60 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
       {open && (
         <div className="absolute right-0 top-full mt-1.5 w-56 max-h-[360px] overflow-y-auto rounded-xl border border-default bg-elevated shadow-xl z-30 p-1">
+          {allLabel && (
+            <button type="button" onClick={() => pick(SCOPE_ALL)} className={rowClass(value === SCOPE_ALL)}>
+              <span className="w-5 h-5 rounded-full bg-inset-2 flex items-center justify-center flex-shrink-0">
+                <Users size={12} />
+              </span>
+              <span className="flex-1 min-w-0 truncate text-[13px]">{allLabel}</span>
+              {value === SCOPE_ALL && <Check size={13} className="shrink-0" />}
+            </button>
+          )}
           {ordered.map((a) => {
             const active = a.id === value
             return (
-              <button
-                key={a.id}
-                type="button"
-                onClick={() => {
-                  onChange(a.id)
-                  setOpen(false)
-                }}
-                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left cursor-pointer transition-colors ${
-                  active ? 'bg-accent-soft text-accent' : 'hover:bg-inset text-content'
-                }`}
-              >
+              <button key={a.id} type="button" onClick={() => pick(a.id)} className={rowClass(active)}>
                 <AgentAvatar agent={a} size={20} />
                 <span className="flex-1 min-w-0 truncate text-[13px]">{a.name || a.id}</span>
                 {a.id === defaultAgentId && (

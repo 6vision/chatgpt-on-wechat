@@ -4,6 +4,8 @@ export interface PendingConfirm {
   /** i18n keys for the heading and the body text. */
   titleKey: string
   msgKey: string
+  /** Values for `{name}`-style placeholders in the body text. */
+  vars?: Record<string, string>
   /** Label for the affirmative button; the other one is always a plain cancel. */
   okKey: string
   resolve: (ok: boolean) => void

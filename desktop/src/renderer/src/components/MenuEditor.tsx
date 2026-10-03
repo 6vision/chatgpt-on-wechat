@@ -29,6 +29,7 @@ import {
   MENU_TITLE_MAX,
   builtinItem,
   findItem,
+  isFooterItem,
   itemIcon,
   itemLabel,
   newMenuId,
@@ -134,13 +135,18 @@ const EditorDialog: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
 
-  const [draft, setDraft] = useState<MenuDoc>(() => clone(doc))
+  const intent = useMenuStore((s) => s.editorIntent)
+  const [draft, setDraft] = useState<MenuDoc>(() => {
+    const copy = clone(doc)
+    if (intent?.add && copy.groups.length) copy.groups[0].items.push(intent.add)
+    return copy
+  })
   const [error, setError] = useState('')
   const [invalid, setInvalid] = useState('')
   const [saving, setSaving] = useState(false)
   const [pop, setPop] = useState<Pop | null>(null)
   const [drag, setDrag] = useState<Drag | null>(null)
-  const [fresh, setFresh] = useState('')
+  const [fresh, setFresh] = useState(() => intent?.add?.id || intent?.focus || '')
 
   const panelRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -600,6 +606,10 @@ const EditorDialog: React.FC = () => {
           onScroll={() => pop && setPop(null)}
         >
           {draft.groups.map((group) => {
+            // Footer pages stay in the document for the web console but have no
+            // row here, and a group holding nothing else has nothing to edit.
+            const rows = group.items.filter((i) => !isFooterItem(i))
+            if (group.items.length && !rows.length) return null
             const keeps = group.items.some((i) => i.type === 'builtin' && MENU_DEFAULT_VIEWS.has(i.view || ''))
             return (
               <section
@@ -639,7 +649,7 @@ const EditorDialog: React.FC = () => {
                     <Trash2 size={14} />
                   </button>
                 </div>
-                <div className="space-y-1.5 min-h-[6px]">{group.items.map(renderItem)}</div>
+                <div className="space-y-1.5 min-h-[6px]">{rows.map(renderItem)}</div>
               </section>
             )
           })}

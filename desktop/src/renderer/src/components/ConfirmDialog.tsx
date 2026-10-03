@@ -28,9 +28,14 @@ const ConfirmDialog: React.FC = () => {
 
   if (!pending) return null
 
+  const message = Object.entries(pending.vars || {}).reduce(
+    (text, [key, value]) => text.split(`{${key}}`).join(value),
+    t(pending.msgKey),
+  )
+
   return (
     <Modal open elevated title={t(pending.titleKey)} onClose={() => answer(false)}>
-      <p className="text-sm text-content-secondary leading-relaxed">{t(pending.msgKey)}</p>
+      <p className="text-sm text-content-secondary leading-relaxed">{message}</p>
       <div className="flex items-center justify-end gap-2 pt-1">
         <Btn onClick={() => answer(false)}>{t('config_cancel')}</Btn>
         <Btn variant="danger" onClick={() => answer(true)} autoFocus>

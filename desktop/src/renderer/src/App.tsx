@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react'
 import { Routes, Route, useLocation, useNavigate } from 'react-router-dom'
-import { History, FolderTree } from 'lucide-react'
+import { History, FolderTree, Layers } from 'lucide-react'
 import NavRail from './layout/NavRail'
 import SessionList from './layout/SessionList'
 import WindowControls from './layout/WindowControls'
@@ -31,6 +31,7 @@ import ChannelsPage from './pages/ChannelsPage'
 import TasksPage from './pages/TasksPage'
 import LogsPage from './pages/LogsPage'
 import AgentsPage from './pages/AgentsPage'
+import ArtifactsPage from './pages/ArtifactsPage'
 import CustomPage, { CustomPageActions } from './pages/CustomPage'
 import MenuEditor from './components/MenuEditor'
 import { useAgentStore } from './store/agentStore'
@@ -218,7 +219,16 @@ const App: React.FC = () => {
   const showProductGate = !!(ProductGate && productRequiresAuth && !productAuthed)
 
   const isChat = location.pathname === '/'
+  const isArtifacts = location.pathname === '/artifacts'
   const showSessions = isChat && !sessionsCollapsed && !showProductGate
+  const titlebarButton = (active: boolean) =>
+    `titlebar-no-drag inline-flex items-center justify-center w-7 h-7 rounded-btn cursor-pointer transition-colors ${
+      active ? 'text-accent bg-accent-soft' : 'text-content-tertiary hover:text-content hover:bg-surface-2'
+    } ${isMac ? 'mt-1' : ''}`
+  const toggleArtifacts = async () => {
+    if (!(await guardDocEditors())) return
+    navigate(isArtifacts ? '/' : '/artifacts')
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-base text-content">
@@ -251,16 +261,13 @@ const App: React.FC = () => {
               <CustomPageActions />
             </div>
           )}
+          {(isChat || isArtifacts) && !showProductGate && (
+            <button onClick={toggleArtifacts} title={t('menu_artifacts')} className={titlebarButton(isArtifacts)}>
+              <Layers size={16} />
+            </button>
+          )}
           {isChat && !showProductGate && (
-            <button
-              onClick={toggleWorkspace}
-              title={t('ws_toggle')}
-              className={`titlebar-no-drag inline-flex items-center justify-center w-7 h-7 rounded-btn cursor-pointer transition-colors ${
-                workspaceOpen
-                  ? 'text-accent bg-accent-soft'
-                  : 'text-content-tertiary hover:text-content hover:bg-surface-2'
-              } ${isMac ? 'mt-1' : ''}`}
-            >
+            <button onClick={toggleWorkspace} title={t('ws_toggle')} className={titlebarButton(workspaceOpen)}>
               <FolderTree size={16} />
             </button>
           )}
@@ -280,6 +287,7 @@ const App: React.FC = () => {
           ) : (
           <Routes>
             <Route path="/" element={<ChatPage baseUrl={backend.baseUrl} />} />
+            <Route path="/artifacts" element={<ArtifactsPage />} />
             <Route path="/knowledge" element={<KnowledgePage baseUrl={backend.baseUrl} />} />
             <Route path="/memory" element={<MemoryPage baseUrl={backend.baseUrl} />} />
             <Route path="/skills" element={<SkillsPage baseUrl={backend.baseUrl} />} />

@@ -43,11 +43,12 @@ import {
 } from 'lucide-react'
 import { t } from '../i18n'
 import { iconFor } from './fileKind'
-import type { MenuDoc, MenuGroup, MenuItem } from '../types'
+import type { FileKind, MenuDoc, MenuGroup, MenuItem } from '../types'
 
 /** The pages of this app a menu can lead to, by the view name the document uses. */
 export const MENU_BUILTINS: Record<string, { path: string; labelKey: string; icon: LucideIcon }> = {
   chat: { path: '/', labelKey: 'menu_chat', icon: MessageSquare },
+  artifacts: { path: '/artifacts', labelKey: 'menu_artifacts', icon: Layers },
   agents: { path: '/agents', labelKey: 'menu_agents', icon: Users },
   knowledge: { path: '/knowledge', labelKey: 'menu_knowledge', icon: BookOpen },
   memory: { path: '/memory', labelKey: 'menu_memory', icon: Brain },
@@ -59,9 +60,10 @@ export const MENU_BUILTINS: Record<string, { path: string; labelKey: string; ico
 }
 
 // The built-in menu. Until the user saves one the rail draws it flat, in this
-// order, with the logs left to the footer menu.
+// order. The document is shared with the web console, so it keeps every page
+// the console has, footer ones included.
 export const MENU_DEFAULT: { id: string; views: string[] }[] = [
-  { id: 'chat', views: ['chat'] },
+  { id: 'chat', views: ['chat', 'artifacts'] },
   { id: 'manage', views: ['agents', 'knowledge', 'memory', 'skills', 'channels', 'tasks', 'config'] },
   { id: 'monitor', views: ['logs'] },
 ]
@@ -75,8 +77,22 @@ export const MENU_GROUP_LABELS: Record<string, string> = {
 /** Pages a menu must always lead to; mirrors REQUIRED_VIEWS in channel/web/api/menu.py. */
 export const MENU_REQUIRED = new Set(['chat', 'config'])
 
+/** Artifacts that can be a page of the menu; mirrors MENU_KINDS in channel/web/api/menu.py. */
+export const MENU_KINDS: ReadonlySet<FileKind> = new Set<FileKind>(['html', 'markdown'])
+
 /** Pages the built-in menu carries: they can be hidden, never removed. */
 export const MENU_DEFAULT_VIEWS = new Set(MENU_DEFAULT.flatMap((g) => g.views))
+
+/**
+ * Pages this app keeps in the rail's footer menu rather than in the menu. The
+ * entry stays in the document, untouched, for the web console; here neither
+ * the rail nor the editor shows it.
+ */
+const MENU_FOOTER_VIEWS: ReadonlySet<string> = new Set(['logs'])
+
+export function isFooterItem(item: MenuItem): boolean {
+  return item.type === 'builtin' && MENU_FOOTER_VIEWS.has(item.view || '')
+}
 
 // Icons a user can give an entry. Only the names travel in the document; the
 // web console maps the same names to its own icon set.
@@ -176,10 +192,10 @@ export function itemIcon(item: MenuItem): LucideIcon {
   return iconFor(item.file?.kind || 'file')
 }
 
-/** Whether this app draws the entry: hidden pages and pages only the web console has are skipped. */
+/** Whether the rail draws the entry: hidden pages, footer pages and pages only the web console has are skipped. */
 export function itemShows(item: MenuItem): boolean {
   if (item.type !== 'builtin') return true
-  return !!item.view && !!MENU_BUILTINS[item.view] && !item.hidden
+  return !!item.view && !!MENU_BUILTINS[item.view] && !item.hidden && !isFooterItem(item)
 }
 
 /** Where an entry leads inside the app. */

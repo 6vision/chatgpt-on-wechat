@@ -22,6 +22,8 @@ interface MessageBubbleProps {
   /** Fired when an inline image/video finishes loading, so the parent can
    *  re-scroll to the bottom (async media changes bubble height after mount). */
   onMediaLoad?: () => void
+  /** Seq of the question opening this turn, for the file cards it shows. */
+  turnSeq?: number | null
 }
 
 function fmtTime(ts: number): string {
@@ -47,7 +49,14 @@ const HoverAction: React.FC<{ onClick: () => void; title: string; danger?: boole
   </button>
 )
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onRegenerate, onEdit, onDelete, onMediaLoad }) => {
+const MessageBubble: React.FC<MessageBubbleProps> = ({
+  message,
+  onRegenerate,
+  onEdit,
+  onDelete,
+  onMediaLoad,
+  turnSeq = null,
+}) => {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
   const preview = useWorkspaceStore((s) => s.preview)
@@ -209,7 +218,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onRegenerate, on
           {message.artifacts && message.artifacts.length > 0 && (
             <div className="flex flex-col items-start">
               {message.artifacts.map((a) => (
-                <FileCard key={a.abs_path || a.rel_path} meta={a} />
+                <FileCard key={a.abs_path || a.rel_path} meta={a} turnSeq={turnSeq} />
               ))}
             </div>
           )}

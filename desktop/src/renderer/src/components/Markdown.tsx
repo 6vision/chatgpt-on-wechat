@@ -207,6 +207,11 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
   )
 }
 
+/** The HTML the renderer would show, for a picture of the text rather than a live view. */
+export function markdownToHtml(content: string): string {
+  return md.render(content || '')
+}
+
 interface MarkdownProps {
   content: string
   /**

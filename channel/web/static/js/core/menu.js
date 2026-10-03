@@ -24,7 +24,7 @@ const MENU_BUILTINS = {
 
 // The built-in menu, as sidebar.html draws it before any script runs.
 const MENU_DEFAULT = [
-    { id: 'chat',    views: ['chat'] },
+    { id: 'chat',    views: ['chat', 'artifacts'] },
     { id: 'manage',  views: ['agents', 'config', 'skills', 'memory', 'knowledge', 'channels', 'tasks'] },
     { id: 'monitor', views: ['logs'] },
 ];

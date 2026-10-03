@@ -595,6 +595,10 @@ function setupIPC() {
     return err
   })
 
+  ipcMain.handle('reveal-path', (_event, targetPath: string) => {
+    if (targetPath) shell.showItemInFolder(targetPath)
+  })
+
   // Custom window controls (used by Windows frameless titlebar)
   ipcMain.handle('window-minimize', () => mainWindow?.minimize())
   ipcMain.handle('window-maximize', () => {
