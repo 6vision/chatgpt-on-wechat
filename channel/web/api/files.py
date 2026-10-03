@@ -277,18 +277,52 @@ _PREVIEW_SCROLLBAR_CSS = (
     "</style>"
 )
 
+# Injected ahead of the page's own scripts, so a framed page scrolls only
+# itself. A native scrollIntoView() or focus() inside an iframe also scrolls
+# every scrollable ancestor of the frame in the host page: a page that
+# brings "today" into view on load would drag the artifacts list, or the
+# chat, along with it. Here both scroll the frame's own containers and
+# viewport, and nothing above it. Opened as a tab, the page keeps the natives.
+_PREVIEW_SCROLL_GUARD_JS = """<script>(function(){
+if(window.top===window)return;
+var E=Element.prototype,root=function(){return document.scrollingElement||document.documentElement;};
+function delta(start,size,viewStart,viewSize,mode){
+if(mode==='start')return start-viewStart;
+if(mode==='end')return start+size-viewStart-viewSize;
+if(mode==='center')return start+size/2-viewStart-viewSize/2;
+if(start<viewStart)return start-viewStart;
+if(start+size>viewStart+viewSize)return Math.min(start-viewStart,start+size-viewStart-viewSize);
+return 0;}
+function scrollable(n){var s=getComputedStyle(n);return /auto|scroll|overlay/.test(s.overflowX+s.overflowY)&&(n.scrollHeight>n.clientHeight||n.scrollWidth>n.clientWidth);}
+E.scrollIntoView=function(arg){
+var o=arg===false?{block:'end'}:(arg&&typeof arg==='object'?arg:{block:'start'});
+var block=o.block||'start',inline=o.inline||'nearest',behavior=o.behavior||'auto',top=root();
+for(var n=this.parentElement;n;n=n.parentElement){
+var isRoot=n===top;if(!isRoot&&!scrollable(n))continue;
+var r=this.getBoundingClientRect(),v=isRoot?{top:0,left:0}:n.getBoundingClientRect();
+var vt=v.top+(isRoot?0:n.clientTop),vl=v.left+(isRoot?0:n.clientLeft);
+var dy=delta(r.top,r.height,vt,isRoot?innerHeight:n.clientHeight,block);
+var dx=delta(r.left,r.width,vl,isRoot?innerWidth:n.clientWidth,inline);
+if(dx||dy)(isRoot?window:n).scrollBy({top:dy,left:dx,behavior:behavior});
+if(isRoot)break;}};
+var focus=HTMLElement.prototype.focus;
+HTMLElement.prototype.focus=function(o){
+var keep=o&&o.preventScroll;focus.call(this,Object.assign({},o,{preventScroll:true}));
+if(!keep&&this.isConnected)this.scrollIntoView({block:'nearest'});};
+})();</script>"""
+
 _HEAD_OPEN_RE = re.compile(rb"<head\b[^>]*>", re.IGNORECASE)
 _HTML_OPEN_RE = re.compile(rb"<html\b[^>]*>", re.IGNORECASE)
 
 
 def _inject_preview_chrome(raw: bytes) -> bytes:
-    """Insert the scrollbar stylesheet into a previewed HTML document."""
-    css = _PREVIEW_SCROLLBAR_CSS.encode("utf-8")
+    """Insert the scrollbar stylesheet and the scroll guard into a previewed HTML document."""
+    chrome = (_PREVIEW_SCROLLBAR_CSS + _PREVIEW_SCROLL_GUARD_JS).encode("utf-8")
     for pattern in (_HEAD_OPEN_RE, _HTML_OPEN_RE):
         m = pattern.search(raw)
         if m:
-            return raw[: m.end()] + css + raw[m.end():]
-    return css + raw
+            return raw[: m.end()] + chrome + raw[m.end():]
+    return chrome + raw
 
 
 class PreviewHandler:
