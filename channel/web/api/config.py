@@ -211,11 +211,21 @@ class ConfigHandler:
                     merged = dict(local_config.get("reasoning_effort_by_model") or {})
                     merged.update(value)
                     value = merged
-                local_config[key] = value
                 applied[key] = value
 
             if not applied and not nested:
                 return json.dumps({"status": "error", "message": "no valid keys to update"})
+
+            # Only now that every submitted value has survived its coercion is
+            # the save known to be acceptable, so the live config adopts them
+            # together. Assigning key by key inside the loop above meant one
+            # bad value rejected the whole save while the keys ahead of it were
+            # already live in this process: it answered with the new model
+            # against a config.json that still held the old one, and the write
+            # below never ran. The next save, or the next restart, reverted it
+            # with nothing having said so.
+            for key, value in applied.items():
+                local_config[key] = value
 
             config_path = os.path.join(get_data_root(), "config.json")
             file_cfg = _read_config_file_for_write()
