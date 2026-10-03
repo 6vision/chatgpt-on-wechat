@@ -11,9 +11,6 @@ from common.log import logger
 from config import conf
 from models.baidu.baidu_wenxin_session import BaiduWenxinSession
 
-BAIDU_API_KEY = conf().get("baidu_wenxin_api_key")
-BAIDU_SECRET_KEY = conf().get("baidu_wenxin_secret_key")
-
 class BaiduWenxinBot(Bot):
 
     def __init__(self):
@@ -115,5 +112,5 @@ class BaiduWenxinBot(Bot):
         :return: access_token，或是None(如果错误)
         """
         url = "https://aip.baidubce.com/oauth/2.0/token"
-        params = {"grant_type": "client_credentials", "client_id": BAIDU_API_KEY, "client_secret": BAIDU_SECRET_KEY}
+        params = {"grant_type": "client_credentials", "client_id": conf().get("baidu_wenxin_api_key"), "client_secret": conf().get("baidu_wenxin_secret_key")}
         return str(requests.post(url, params=params, timeout=180).json().get("access_token"))
