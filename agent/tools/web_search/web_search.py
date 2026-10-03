@@ -81,15 +81,8 @@ def _tools_web_search_conf() -> dict:
 
 
 def _conf_str(value, default: str = "") -> str:
-    """Read a config value that is expected to be a string.
-
-    config.json is hand-editable, so a JSON boolean or number is reachable. The
-    block type is already guarded in _tools_web_search_conf(); this covers the
-    values inside it, which otherwise reach ``.strip()`` and raise an
-    AttributeError -- before execute()'s try block, so the error leaves the tool
-    instead of becoming a ToolResult.
-    """
-    return value.strip() if isinstance(value, str) else default
+    """A stripped string config value; non-strings (hand-edited JSON) and blanks give ``default``."""
+    return (value.strip() if isinstance(value, str) else "") or default
 
 
 def _get_api_key(provider: str) -> str:

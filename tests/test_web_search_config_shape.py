@@ -80,6 +80,10 @@ class TestWebSearchToleratesNonStringConfig(unittest.TestCase):
         with patch.object(ws, "conf", _conf_web_search(strategy="  FIXED  ")):
             self.assertEqual(ws._configured_strategy(), "fixed")
 
+    def test_an_empty_string_strategy_still_falls_back_to_auto(self):
+        with patch.object(ws, "conf", _conf_web_search(strategy="")):
+            self.assertEqual(ws._configured_strategy(), "auto")
+
 
 if __name__ == "__main__":
     unittest.main()
