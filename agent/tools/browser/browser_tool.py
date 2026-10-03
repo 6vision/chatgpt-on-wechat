@@ -100,6 +100,10 @@ class BrowserTool(BaseTool):
                 "type": "string",
                 "description": "Scroll direction: up, down, left, right (for 'scroll' action, default: down)"
             },
+            "amount": {
+                "type": "integer",
+                "description": "Scroll distance in pixels (for 'scroll' action, default: 500)"
+            },
             "script": {
                 "type": "string",
                 "description": "JavaScript code to execute (for 'evaluate' action)"
@@ -371,9 +375,12 @@ class BrowserTool(BaseTool):
 
     def _do_scroll(self, args: Dict[str, Any]) -> ToolResult:
         direction = args.get("direction", "down")
-        amount = args.get("timeout", 500)  # reuse timeout field or default
-        if "amount" in args:
-            amount = args["amount"]
+        # The distance comes from `amount`, in pixels. It used to be read from
+        # `timeout`, which the schema documents as milliseconds and which every
+        # other action here reads as a wait -- so asking for a 10s timeout
+        # scrolled 10000px and reported success, and no scroll could name both a
+        # distance and a wait at once.
+        amount = args.get("amount", 500)
         result = self._get_service().scroll(direction=direction, amount=amount)
         if "error" in result:
             return ToolResult.fail(result["error"])
