@@ -155,8 +155,11 @@ class MemoryManager:
         Returns:
             List of search results sorted by relevance
         """
-        max_results = max_results or self.config.max_results
-        min_score = min_score or self.config.min_score
+        # Resolved with an explicit None check, not `or`: 0 is a meaningful value
+        # for both (min_score=0 means "no threshold", max_results=0 means "return
+        # nothing"), and `or` would quietly substitute the configured default.
+        max_results = self.config.max_results if max_results is None else max_results
+        min_score = self.config.min_score if min_score is None else min_score
         
         # Determine scopes
         scopes = []
