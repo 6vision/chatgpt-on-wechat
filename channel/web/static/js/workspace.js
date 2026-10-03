@@ -5,7 +5,6 @@
  * ===================================================================== */
 
 const WS_WIDTH_KEY = 'cow_workspace_width';
-const WS_DEFAULT_WIDTH = 420;
 const WS_MIN_WIDTH = 280;
 
 // Panel state
@@ -189,9 +188,12 @@ function wsUpdateHeaderActions() {
     });
 }
 
-function initWorkspaceResizer() {
-    const resizer = document.getElementById('ws-resizer');
-    const panel = document.getElementById('workspace-panel');
+/**
+ * Let a right-hand panel be widened by dragging the handle on its left edge.
+ * The width is remembered under `opts.key`; `opts.content` is the part that
+ * may hold an iframe, which would otherwise swallow the drag.
+ */
+function wsBindResizer(resizer, panel, opts) {
     if (!resizer || !panel) return;
 
     let startX = 0;
@@ -199,18 +201,18 @@ function initWorkspaceResizer() {
 
     function onMove(e) {
         const delta = startX - e.clientX;
-        const next = Math.max(WS_MIN_WIDTH, Math.min(window.innerWidth * 0.7, startWidth + delta));
+        const next = Math.max(opts.min, Math.min(opts.max(), startWidth + delta));
         panel.style.width = `${next}px`;
     }
 
     function onUp() {
         resizer.classList.remove('dragging');
         document.body.style.userSelect = '';
-        // The preview iframe swallows mousemove while dragging over it.
-        document.getElementById('ws-preview-content')?.style.removeProperty('pointer-events');
+        opts.content?.style.removeProperty('pointer-events');
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
-        localStorage.setItem(WS_WIDTH_KEY, String(parseInt(panel.style.width, 10) || WS_DEFAULT_WIDTH));
+        const width = parseInt(panel.style.width, 10);
+        if (width) localStorage.setItem(opts.key, String(width));
     }
 
     resizer.addEventListener('mousedown', (e) => {
@@ -219,9 +221,18 @@ function initWorkspaceResizer() {
         startWidth = panel.offsetWidth;
         resizer.classList.add('dragging');
         document.body.style.userSelect = 'none';
-        document.getElementById('ws-preview-content')?.style.setProperty('pointer-events', 'none');
+        opts.content?.style.setProperty('pointer-events', 'none');
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
+    });
+}
+
+function initWorkspaceResizer() {
+    wsBindResizer(document.getElementById('ws-resizer'), document.getElementById('workspace-panel'), {
+        key: WS_WIDTH_KEY,
+        min: WS_MIN_WIDTH,
+        max: () => window.innerWidth * 0.7,
+        content: document.getElementById('ws-preview-content'),
     });
 }
 

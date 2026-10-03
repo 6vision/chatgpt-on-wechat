@@ -40,6 +40,7 @@ from channel.web.api.logs import LogsDownloadHandler, LogsHandler  # noqa: F401
 from channel.web.api.memory import (  # noqa: F401
     MemoryContentHandler, MemoryHandler,
 )
+from channel.web.api.menu import MenuHandler  # noqa: F401
 from channel.web.api.models import ModelsHandler  # noqa: F401
 from channel.web.api.openai_compat import (  # noqa: F401
     OpenAIChatCompletionsHandler,
@@ -104,6 +105,7 @@ URLS = (
     '/api/artifacts/add', 'ArtifactAddHandler',
     '/api/artifacts/pin', 'ArtifactPinHandler',
     '/api/artifacts/rename', 'ArtifactRenameHandler',
+    '/api/menu', 'MenuHandler',
     '/api/artifacts/delete', 'ArtifactDeleteHandler',
     '/api/artifacts', 'ArtifactsHandler',
     '/api/projects', 'ProjectsHandler',
@@ -178,6 +180,8 @@ URLS = (
     # API already owns.
     '/(?:agents|artifacts|settings|skills|memory|knowledge|channels|scheduler|logs)'
     '(?:/[a-z]+)?/?', 'ChatHandler',
+    # A page the user put in the menu: /m/<item id>.
+    '/m/[A-Za-z0-9_-]{1,40}/?', 'ChatHandler',
 )
 
 

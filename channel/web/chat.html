@@ -54,6 +54,7 @@
     <link rel="stylesheet" href="/assets/css/knowledge.css">
     <link rel="stylesheet" href="/assets/css/agents.css">
     <link rel="stylesheet" href="/assets/css/artifacts.css">
+    <link rel="stylesheet" href="/assets/css/menu.css">
     <!-- Apply theme/lang before first paint to avoid flash of unstyled content.
          This runs synchronously in <head> so the correct class is on <html>
          before any CSS or body rendering occurs. -->
@@ -86,6 +87,13 @@
         if (theme === 'dark') document.documentElement.classList.add('dark');
         if (localStorage.getItem('cow_sidebar_collapsed') === '1') {
             document.documentElement.classList.add('sidebar-collapsed');
+        }
+        // A customised menu is drawn by menu.js; keep the built-in one in
+        // sidebar.html from showing first. The timer is the way out should
+        // that script never run.
+        if (localStorage.getItem('cow_menu_cache')) {
+            document.documentElement.classList.add('menu-pending');
+            setTimeout(function () { document.documentElement.classList.remove('menu-pending'); }, 3000);
         }
         document.documentElement.setAttribute('lang', window.__cowResolveLang__());
     })();
@@ -135,6 +143,8 @@
 
 <!--#include templates/views/logs.html-->
 
+<!--#include templates/views/custom.html-->
+
             </div><!-- /content-area -->
         </div><!-- /main-content -->
     </div><!-- /app -->
@@ -159,6 +169,8 @@
 
 <!--#include templates/modals/run-detail.html-->
 
+<!--#include templates/modals/menu-editor.html-->
+
     <!-- Split out of a single console.js. These are classic scripts, not
          modules: they share one global scope and `defer` runs them in this
          order. The order is load-bearing - see channel/web/README.md before
@@ -175,6 +187,9 @@
     <script defer src="/assets/js/core/confirm.js"></script>
     <script defer src="/assets/js/core/notify.js"></script>
     <script defer src="/assets/js/core/nav.js"></script>
+    <!-- Right after nav.js: draws the sidebar at load time, and nav.js's
+         click handler and view switch call into it. -->
+    <script defer src="/assets/js/core/menu.js"></script>
     <!-- After nav.js, whose navigateTo it drives and whose VIEW_META it
          validates against. Only registers a popstate listener at load time;
          the first route is applied from initApp(), once auth has settled. -->
@@ -216,6 +231,7 @@
     <script defer src="/assets/js/views/knowledge.js"></script>
     <script defer src="/assets/js/views/logs.js"></script>
     <script defer src="/assets/js/views/artifacts.js"></script>
+    <script defer src="/assets/js/views/menu-editor.js"></script>
 
     <!-- Last of the core layer rather than first, which is where it sat in
          console.js. It installs a window.fetch wrapper for 401 handling, and

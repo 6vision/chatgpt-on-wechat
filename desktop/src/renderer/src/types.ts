@@ -304,6 +304,52 @@ export interface Artifact {
   preview_url: string
 }
 
+/** One row of GET /api/artifacts: a file some conversation produced. */
+export interface ArtifactListItem extends Artifact {
+  id: number
+  title: string
+  exists: boolean
+}
+
+// ============================================================
+// Menu the user arranged (/api/menu), shared with the web console
+// ============================================================
+
+/** What the backend works out on each read to show an artifact entry. */
+export interface MenuFile {
+  file_name: string
+  kind: FileKind
+  exists: boolean
+  previewable?: boolean
+  raw_url: string
+  preview_url: string
+}
+
+export interface MenuItem {
+  id: string
+  /** `builtin` names a page by `view`; `artifact` shows a file by `path`; `url` shows a web page. */
+  type: 'builtin' | 'artifact' | 'url'
+  title: string
+  icon: string
+  view?: string
+  hidden?: boolean
+  path?: string
+  url?: string
+  open?: 'embed' | 'tab'
+  file?: MenuFile
+}
+
+export interface MenuGroup {
+  id: string
+  title: string
+  items: MenuItem[]
+}
+
+export interface MenuDoc {
+  version?: number
+  groups: MenuGroup[]
+}
+
 /** Live tool event during SSE streaming. */
 export interface ToolCall {
   type: 'tool_start' | 'tool_end' | 'tool_progress'

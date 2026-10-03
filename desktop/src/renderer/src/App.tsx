@@ -31,7 +31,10 @@ import ChannelsPage from './pages/ChannelsPage'
 import TasksPage from './pages/TasksPage'
 import LogsPage from './pages/LogsPage'
 import AgentsPage from './pages/AgentsPage'
+import CustomPage, { CustomPageActions } from './pages/CustomPage'
+import MenuEditor from './components/MenuEditor'
 import { useAgentStore } from './store/agentStore'
+import { useMenuStore } from './store/menuStore'
 import { product } from '@product'
 
 const App: React.FC = () => {
@@ -140,6 +143,13 @@ const App: React.FC = () => {
     if (backend.status === 'ready' && authState === 'ok') void refreshRoster()
   }, [backend.status, authState, backend.baseUrl, refreshRoster])
 
+  // The menu the user arranged, shared with the web console. Until it answers
+  // the rail draws the last copy seen, or the built-in menu.
+  const loadMenu = useMenuStore((s) => s.load)
+  useEffect(() => {
+    if (backend.status === 'ready' && authState === 'ok') void loadMenu()
+  }, [backend.status, authState, backend.baseUrl, loadMenu])
+
   // Poll for scheduler/push messages once the backend and auth are settled.
   usePushPoll(backend.status === 'ready' && authState === 'ok')
   // Independently watch the global runs ledger so a scheduled task firing into a
@@ -215,6 +225,7 @@ const App: React.FC = () => {
       {onboardingOpen && <OnboardingWizard onDone={handleLangChange} />}
       <Lightbox />
       <ConfirmDialog />
+      <MenuEditor />
       <NavRail onLangChange={handleLangChange} />
 
       {showSessions && <SessionList />}
@@ -235,6 +246,11 @@ const App: React.FC = () => {
             </button>
           )}
           <div className="flex-1 min-w-0" />
+          {!showProductGate && (
+            <div className={isMac ? 'mt-1' : ''}>
+              <CustomPageActions />
+            </div>
+          )}
           {isChat && !showProductGate && (
             <button
               onClick={toggleWorkspace}
@@ -274,6 +290,7 @@ const App: React.FC = () => {
             {/* Legacy /models route now lives as a tab inside settings */}
             <Route path="/models" element={<SettingsPage baseUrl={backend.baseUrl} onLangChange={handleLangChange} />} />
             <Route path="/logs" element={<LogsPage baseUrl={backend.baseUrl} />} />
+            <Route path="/m/:id" element={<CustomPage />} />
             {product.routes?.map((r) => (
               <Route key={r.path} path={r.path} element={r.element} />
             ))}

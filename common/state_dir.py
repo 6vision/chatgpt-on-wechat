@@ -185,6 +185,11 @@ def models_catalog_file(base=None) -> Path:
     return system_dir(base) / "models.json"
 
 
+def menu_file(base=None) -> Path:
+    """The console menu the user arranged, shared by the web and desktop clients."""
+    return system_dir(base) / "menu.json"
+
+
 def scheduler_recipients_file(base=None) -> Path:
     """The one directory of people/groups observed on inbound IM channels.
 

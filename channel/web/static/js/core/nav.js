@@ -17,6 +17,8 @@ const VIEW_META = {
     channels: { group: 'nav_manage',  page: 'menu_channels' },
     tasks:    { group: 'nav_manage',  page: 'menu_tasks' },
     logs:     { group: 'nav_monitor', page: 'menu_logs' },
+    // An artifact or link the user put in the menu; menu.js names it in the breadcrumb.
+    custom:   { group: 'nav_chat',    page: 'menu_chat' },
 };
 
 let currentView = 'chat';
@@ -29,10 +31,6 @@ function _switchToView(viewId) {
     const target = document.getElementById('view-' + viewId);
     if (target) target.classList.add('active');
     const meta = VIEW_META[viewId];
-    const navId = meta.nav || viewId;
-    document.querySelectorAll('.sidebar-item').forEach(item => {
-        item.classList.toggle('active', item.dataset.view === navId);
-    });
     const artifactsBtn = document.getElementById('artifacts-toggle-btn');
     if (artifactsBtn) {
         artifactsBtn.classList.toggle('hidden', viewId !== 'chat' && viewId !== 'artifacts');
@@ -46,6 +44,7 @@ function _switchToView(viewId) {
     if (breadcrumb) breadcrumb.style.display = viewId === 'chat' ? 'none' : '';
     const leavingAgents = currentView === 'agents' && viewId !== 'agents';
     currentView = viewId;
+    menuSyncActive();
     // The Agent detail is a fixed drawer, so it would otherwise hang over
     // whatever view you navigate to. It only belongs to the Agent Team page.
     if (viewId !== 'agents') closeAgentDetail();
@@ -94,18 +93,28 @@ const SIDEBAR_COLLAPSED_KEY = 'cow_sidebar_collapsed';
 const SIDEBAR_GROUPS_KEY = 'cow_sidebar_groups';
 
 function _saveSidebarGroups() {
-    const state = {};
+    // Merged into what is stored: a group the menu does not draw right now
+    // keeps the state it had.
+    let state = {};
+    try { state = JSON.parse(localStorage.getItem(SIDEBAR_GROUPS_KEY) || '{}'); } catch (_) { /* start over */ }
     document.querySelectorAll('#sidebar .menu-group[data-group]').forEach(g => {
         state[g.dataset.group] = g.classList.contains('open');
     });
     try { localStorage.setItem(SIDEBAR_GROUPS_KEY, JSON.stringify(state)); } catch (_) { /* private mode */ }
 }
 
-document.querySelectorAll('.menu-group > button').forEach(btn => {
-    btn.addEventListener('click', () => {
-        btn.parentElement.classList.toggle('open');
+// Delegated: menu.js redraws the entries whenever the menu changes.
+document.getElementById('sidebar-nav').addEventListener('click', e => {
+    const header = e.target.closest('.menu-group-head');
+    if (header) {
+        header.parentElement.classList.toggle('open');
         _saveSidebarGroups();
-    });
+        return;
+    }
+    const item = e.target.closest('.sidebar-item');
+    if (!item) return;
+    if (item.dataset.menuId) menuOpenItem(item.dataset.menuId);
+    else navigateTo(item.dataset.view);
 });
 
 function isSidebarCollapsed() {
@@ -117,7 +126,7 @@ function isSidebarCollapsed() {
 function syncSidebarTips() {
     const collapsed = isSidebarCollapsed();
     document.querySelectorAll('#sidebar .sidebar-item').forEach(item => {
-        const label = item.querySelector('[data-i18n]');
+        const label = item.querySelector(':scope > span');
         if (collapsed && label) {
             item.setAttribute('data-tooltip', label.textContent.trim());
             item.setAttribute('data-tooltip-pos', 'right');
@@ -145,10 +154,6 @@ function toggleSidebarCollapsed() {
 }
 
 syncSidebarTips();
-
-document.querySelectorAll('.sidebar-item').forEach(item => {
-    item.addEventListener('click', () => navigateTo(item.dataset.view));
-});
 
 // The logo goes home, same as the sidebar items do: through navigateTo, so the
 // address bar, the unsaved-edit guard and the mobile drawer all behave as they
@@ -196,7 +201,7 @@ function navigateTo(viewId, tab) {
 
     _switchToView(viewId);
     // The address bar follows the view, so a reload lands back here.
-    routeEnterView(viewId);
+    routeEnterView(viewId, tab);
 
     // Lazy-load view data
     if (viewId === 'config') { loadConfigView(); switchConfigTab(tab || 'basic'); }
@@ -223,6 +228,7 @@ function navigateTo(viewId, tab) {
     else if (viewId === 'tasks') { switchTasksTab(tab || 'tasks'); loadTasksView(); }
     else if (viewId === 'logs') startLogStream();
     else if (viewId === 'artifacts') loadArtifactsView();
+    else if (viewId === 'custom') menuShowPage(tab);
     return true;
 }
 

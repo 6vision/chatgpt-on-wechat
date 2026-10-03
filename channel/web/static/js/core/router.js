@@ -33,6 +33,10 @@ const ROUTE_PATHS = {
     logs:      'logs',
 };
 
+// An artifact or link the user put in the menu is at /m/<item id>, served by
+// its own pattern in web_channel.py. The id travels as the view's "tab".
+const ROUTE_MENU_SEGMENT = 'm';
+
 const ROUTE_VIEWS = {};
 for (const view in ROUTE_PATHS) ROUTE_VIEWS[ROUTE_PATHS[view]] = view;
 
@@ -85,6 +89,7 @@ let routeTab = '';
 let _routeApplying = false;
 
 function _routePath(view, tab) {
+    if (view === 'custom') return '/' + ROUTE_MENU_SEGMENT + '/' + encodeURIComponent(tab || '');
     const path = ROUTE_PATHS[view] || '';
     if (!path || !tab || tab === ROUTE_DEFAULT_TABS[view]) return '/' + path;
     return '/' + path + '/' + _tabPath(view, tab);
@@ -92,6 +97,11 @@ function _routePath(view, tab) {
 
 function _routeParse(pathname) {
     const parts = String(pathname || '/').replace(/^\/+|\/+$/g, '').split('/');
+    if (parts[0] === ROUTE_MENU_SEGMENT && parts[1]) {
+        let id = parts[1];
+        try { id = decodeURIComponent(id); } catch (_) { /* keep it as typed */ }
+        return { view: 'custom', tab: id };
+    }
     const view = ROUTE_VIEWS[parts[0] || ''];
     // An unknown path -- a stale bookmark, a hand-edited URL -- falls back to
     // chat rather than leaving the console on whatever happens to be on screen.
@@ -116,20 +126,24 @@ function _routeApplyTab(view, tab) {
     else if (view === 'memory') switchMemoryTab(tab);
     else if (view === 'tasks') switchTasksTab(tab);
     else if (view === 'knowledge') switchKnowledgeTab(tab);
+    else if (view === 'custom') navigateTo('custom', tab);
 }
 
 // Called by navigateTo() once it has committed to a view: the history gains an
 // entry, so Back returns to where the user came from.
-function routeEnterView(view) {
+function routeEnterView(view, tab) {
     if (!VIEW_META[view]) return;
-    routeTab = '';
+    // The custom view is one view for every entry the user added, so which
+    // one it shows is part of the destination, not a refinement of it.
+    routeTab = view === 'custom' ? (tab || '') : '';
     if (_routeApplying) return;
     // Re-entering the view already on screen -- clicking its sidebar item
     // again -- is not a new destination. Refine the entry instead of stacking
     // another, or Back would have to undo a run of no-op navigations before it
     // appeared to do anything.
-    const reentry = _routeParse(location.pathname).view === view;
-    _routeWrite(view, '', reentry);
+    const here = _routeParse(location.pathname);
+    const reentry = here.view === view && (view !== 'custom' || here.tab === routeTab);
+    _routeWrite(view, routeTab, reentry);
 }
 
 // Called by the tab switchers. A tab is a refinement of the view already on

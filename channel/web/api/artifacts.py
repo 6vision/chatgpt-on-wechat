@@ -23,6 +23,8 @@ KIND_GROUPS = {
     "media": ["video", "audio"],
     "doc": ["markdown", "pdf", "office", "text", "csv"],
     "other": ["code", "file"],
+    # What a menu entry can show as a page of its own; mirrors MENU_KINDS in menu.py.
+    "page": ["html", "markdown"],
 }
 
 
