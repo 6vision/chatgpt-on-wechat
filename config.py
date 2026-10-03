@@ -486,38 +486,6 @@ def _quarantine_corrupted_config(config_path):
         logger.warning("[INIT] failed to back up corrupted config: {}".format(e))
 
 
-def _coerce_env_override(name, value):
-    """Read an env override that is not a Python literal as its documented type.
-
-    ``available_setting`` documents each key with a placeholder that states the
-    expected type, which is the only description of that type the codebase has.
-    A key documented as a string takes the value verbatim. A key documented as an
-    int or a float takes the value only when it converts cleanly, so
-    ``REQUEST_TIMEOUT=180`` works and ``REQUEST_TIMEOUT=180s`` does not guess.
-
-    Returns ``(accepted, value)``. ``accepted`` is False when the value cannot be
-    read as the documented type and the caller should keep whatever the config
-    file already had. bool is deliberately not coerced: ``bool("yes")`` is True,
-    so anything but the two words handled by the caller would read an
-    unrecognised value as "on".
-    """
-    expected = type(available_setting[name])
-    if expected is str:
-        return True, value
-    if expected is int:
-        try:
-            return True, int(value)
-        except (TypeError, ValueError):
-            return False, None
-    if expected is float:
-        try:
-            return True, float(value)
-        except (TypeError, ValueError):
-            return False, None
-    # A list/dict/tuple placeholder cannot be produced from a bare string.
-    return False, None
-
-
 def load_config():
     global config
 
@@ -618,30 +586,17 @@ def load_config():
                 # literal_eval can raise ValueError/SyntaxError for non-literal
                 # strings, but also TypeError/RecursionError on malformed input
                 # (e.g. unhashable dict keys); catch broadly to avoid crashing
-                # startup, and fall back to the documented type of the key.
-                #
-                # Storing the raw string for a key documented as an int or a bool
-                # is not a usable fallback: the mismatch only shows up much later
-                # and as a different exception each time (the console re-reads
-                # these keys with int(), the chat service divides them), so the
-                # mistyped variable is nowhere near the traceback. Such a value
-                # is rejected instead, leaving the configured value in place.
+                # startup, and fall back to treating the value as a plain string.
+                # Numeric keys reject it instead: a string there fails much later.
                 if value.lower() == "false":
                     config[name] = False
                 elif value.lower() == "true":
                     config[name] = True
+                elif type(available_setting[name]) in (int, float):
+                    logger.warning("[INIT] ignoring environment override {}: not a {}".format(
+                        name, type(available_setting[name]).__name__))
                 else:
-                    accepted, coerced = _coerce_env_override(name, value)
-                    if accepted:
-                        config[name] = coerced
-                    else:
-                        # Name the key so the typo is findable, but never the
-                        # value: a registered key may hold an api key or a token.
-                        logger.warning(
-                            "[INIT] ignoring environment override {}={}: not a {}".format(
-                                name, "<rejected>",
-                                type(available_setting[name]).__name__)
-                        )
+                    config[name] = value
 
     if config.get("debug", False):
         logger.setLevel(logging.DEBUG)
