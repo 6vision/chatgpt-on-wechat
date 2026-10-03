@@ -78,12 +78,8 @@ def normalize_entry(raw) -> dict:
     if not isinstance(caps, list):
         raise ValueError(f"capabilities for {name} must be a list")
     # Silently drop unrecognized tags (e.g. hand-edited config) instead of
-    # rejecting the whole entry — the UI only ever offers valid ones. The
-    # membership test has to run on the normalized tag: testing the raw one
-    # discarded every capitalized tag as if it were unrecognized, and since
-    # save_catalog persists the result, the tag was then gone from disk too.
-    caps = [str(c).strip().lower() for c in caps]
-    caps = [c for c in caps if c in VALID_CAPABILITIES]
+    # rejecting the whole entry — the UI only ever offers valid ones.
+    caps = [c for c in (str(x).strip().lower() for x in caps) if c in VALID_CAPABILITIES]
     # A model with no tags would be unreachable everywhere (not text, not any
     # capability), so an empty set falls back to the default: text.
     if not caps:
