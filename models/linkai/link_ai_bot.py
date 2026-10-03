@@ -59,24 +59,10 @@ def _explain_linkai_error(status_code, error_msg):
 
 
 def _linkai_error_body(res) -> tuple:
-    """The message and kind out of a rejected LinkAI response.
+    """Return ``(message, kind)`` from a rejected response in any shape.
 
-    A rejection does not arrive in one shape. LinkAI answers with its own
-    ``{"code", "message"}``; a misconfigured base gets FastAPI's bare
-    ``{"detail": "Not Found"}`` (see ``_explain_linkai_error``); and a proxy in
-    front of either answers with an HTML page that is not JSON at all. Only the
-    OpenAI shape ``{"error": {"message", "type"}}`` is what ``_chat`` and
-    ``reply_text`` used to assume, which turned every other one into an
-    ``AttributeError`` on ``None`` -- and that error was swallowed by their own
-    ``except``, so they retried the refusal instead of reporting it.
-
-    ``_handle_linkai_sync_response`` already read the body this way
-    (``.get("error", {})`` plus a ``res.text`` fallback). Read it here, once, so
-    the next caller that only wants to log a failure cannot write the
-    OpenAI-only version again.
-
-    Returns ``(message, kind)``; ``kind`` is whatever the body labelled the
-    failure with, and is "" when it labelled it with nothing.
+    Handles ``{"code", "message"}``, ``{"detail"}``, the OpenAI ``{"error": {...}}``
+    shape and non-JSON bodies; ``kind`` is "" when the body has none.
     """
     text = getattr(res, "text", "") or ""
     try:
@@ -530,12 +516,7 @@ def _download_file(url: str):
         # not be able to write, and state_dir owns the layout anyway.
         file_path = state_dir.tmp_dir() / file_name
         response = requests.get(url, timeout=(5, 60))
-        # The links handed to this helper are signed and expire, so the usual
-        # failure is not a connection error but a well-formed response carrying
-        # an error status whose body is an HTML page. Checking the status first
-        # stops that page from being saved under the document's own filename and
-        # returned as a successful download, which sent the user an error page
-        # as their file reply.
+        # An expired signed link answers with an HTML error page, not the file.
         response.raise_for_status()
         file_path.write_bytes(response.content)
         return str(file_path)

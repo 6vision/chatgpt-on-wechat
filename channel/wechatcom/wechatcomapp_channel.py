@@ -140,18 +140,7 @@ class WechatComAppChannel(ChatChannel):
             except WeChatClientException as e:
                 logger.error("[wechatcom] upload voice failed: {}".format(e))
                 return
-            try:
-                os.remove(file_path)
-                if amr_file != file_path:
-                    os.remove(amr_file)
-            except Exception:
-                pass
-            # split_audio() exported one file per 60s slice beside the .amr and
-            # every one of them was uploaded above, so none is read again. They
-            # land in the Agent's managed tmp/, which nothing else prunes.
-            for path in files:
-                if path in (file_path, amr_file):
-                    continue
+            for path in {file_path, amr_file, *files}:
                 try:
                     os.remove(path)
                 except OSError:

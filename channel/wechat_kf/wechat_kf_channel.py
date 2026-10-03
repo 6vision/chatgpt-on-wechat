@@ -211,12 +211,11 @@ class WechatKfChannel(ChatChannel):
                 logger.error("[wechat_kf] upload voice failed: {}".format(e))
                 return
 
-            try:
-                os.remove(file_path)
-                if amr_file != file_path:
-                    os.remove(amr_file)
-            except Exception:
-                pass
+            for path in {file_path, amr_file, *files}:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
             for media_id in media_ids:
                 self._send_voice(external_userid, open_kfid, media_id)

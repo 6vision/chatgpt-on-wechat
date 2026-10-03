@@ -337,10 +337,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             chunk = texts[i:i + step]
             result = self._call_api(chunk)
             items = result["data"]
-            # Each item's `index` is its position in the request, so order by it
-            # rather than trusting the reply: a proxy or gateway that answers out
-            # of order would otherwise return vectors bound to the wrong texts,
-            # and callers zip them positionally, so nothing would notice.
+            # Some gateways answer out of order; `index` is the request position.
             if all("index" in item for item in items):
                 items = sorted(items, key=lambda item: item["index"])
             out.extend(self._post_process(item["embedding"]) for item in items)

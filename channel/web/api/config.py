@@ -216,14 +216,7 @@ class ConfigHandler:
             if not applied and not nested:
                 return json.dumps({"status": "error", "message": "no valid keys to update"})
 
-            # Only now that every submitted value has survived its coercion is
-            # the save known to be acceptable, so the live config adopts them
-            # together. Assigning key by key inside the loop above meant one
-            # bad value rejected the whole save while the keys ahead of it were
-            # already live in this process: it answered with the new model
-            # against a config.json that still held the old one, and the write
-            # below never ran. The next save, or the next restart, reverted it
-            # with nothing having said so.
+            # Apply only after every value coerced, so a rejected save changes nothing.
             for key, value in applied.items():
                 local_config[key] = value
 

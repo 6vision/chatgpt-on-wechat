@@ -575,10 +575,6 @@ def load_config():
         if name.startswith("_"):
             continue
         if name in available_setting:
-            # Mask the value the same way every other config line in this module
-            # does: an override of an *_API_KEY / *_SECRET setting is a
-            # credential, and run.log gets attached to bug reports. The name is
-            # kept so the line still says which setting was overridden.
             logger.info("[INIT] override config by environ args: {}={}".format(
                 name, drag_sensitive({name: value})[name]))
             try:

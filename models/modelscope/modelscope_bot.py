@@ -742,10 +742,6 @@ class ModelScopeBot(Bot):
             
         except Exception as e:
             logger.error("[MODELSCOPE] stream tool call error: {}".format(e))
-            # Yield the error, don't return it: this method is a generator, and
-            # `return error_generator()` inside a generator ends the stream and
-            # discards the object, so the consumer saw a truncated answer with
-            # no indication the API had failed.
             yield {"error": True, "message": "{}".format(e), "status_code": 500}
 
     # ==================== Format Conversion ====================

@@ -92,13 +92,7 @@ class OpenAICompatibleBot:
             
             # Convert messages from Claude format to OpenAI format
             messages = self._convert_messages_to_openai_format(messages)
-            # Private markers we carry between turns (_gemini_raw_parts and
-            # friends) are in-memory bookkeeping, not API schema. The outgoing
-            # payload filter only drops None values, so they would go out
-            # verbatim and a strict endpoint rejects the whole request with
-            # "Unrecognized request argument supplied". LinkAI binds its own
-            # call_with_tools, so the path that does need to echo them (Gemini
-            # thoughtSignature round-trip) keeps working.
+            # "_"-prefixed keys are in-memory markers; strict endpoints reject them.
             messages = [
                 {k: v for k, v in msg.items() if not k.startswith("_")}
                 for msg in messages

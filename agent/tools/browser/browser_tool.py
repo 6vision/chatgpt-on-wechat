@@ -375,11 +375,6 @@ class BrowserTool(BaseTool):
 
     def _do_scroll(self, args: Dict[str, Any]) -> ToolResult:
         direction = args.get("direction", "down")
-        # The distance comes from `amount`, in pixels. It used to be read from
-        # `timeout`, which the schema documents as milliseconds and which every
-        # other action here reads as a wait -- so asking for a 10s timeout
-        # scrolled 10000px and reported success, and no scroll could name both a
-        # distance and a wait at once.
         amount = args.get("amount", 500)
         result = self._get_service().scroll(direction=direction, amount=amount)
         if "error" in result:

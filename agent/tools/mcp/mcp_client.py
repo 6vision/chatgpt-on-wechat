@@ -291,13 +291,7 @@ class McpClient:
         ).start()
 
         if not self._handshake():
-            # The child and both reader threads are live right now, and nothing
-            # downstream reaps them: start_all() only logs "failed to
-            # initialize - skipping" and drops this client, so every reload of
-            # a broken server would leave another orphaned subprocess behind.
-            # Go through the same shutdown() a normal teardown uses rather than
-            # a second teardown path, so the child, its threads and the read
-            # queue sentinel are handled once and in one place.
+            # start_all() drops a failed client, so reap the child here.
             self.shutdown()
             return False
         return True
@@ -425,12 +419,8 @@ class McpClient:
         self._proc.stdin.flush()
 
         expected_id = message.get("id")
-        # One budget for the whole exchange, not one per line read. Every line
-        # this loop skips -- notifications, stale ids, blanks -- satisfies
-        # queue.get() instantly, so a per-read timeout is reset by each of them
-        # and a server that keeps talking never lets the request time out at
-        # all. A monotonic deadline is what the SSE path already uses for the
-        # same reason (_sse_discover_endpoint).
+        # One deadline for the whole exchange: skipped lines (notifications,
+        # stale ids) would otherwise reset a per-read timeout forever.
         deadline = time.monotonic() + self._timeout
         while True:
             remaining = deadline - time.monotonic()
@@ -815,15 +805,9 @@ class McpClient:
     def _read_sse_response(self, resp, expected_id, timeout: Optional[float] = None) -> dict:
         """Read an SSE stream and return the first JSON-RPC response with matching id.
 
-        urlopen()'s timeout only bounds a single socket read and every arriving
-        byte resets it, so a server that holds the stream open with keepalive
-        comments (": keepalive", which servers send every few seconds) while
-        withholding its response would keep this loop running forever, hanging
-        the tool call and leaking the connection. The loop therefore carries a
-        total deadline of its own.
-
-        Uses the per-server timeout from mcp.json config when no explicit
-        timeout is provided.
+        urlopen()'s timeout is per read and keepalive comments reset it, so the
+        loop carries its own total deadline (the per-server mcp.json timeout
+        unless one is given).
         """
         effective = timeout if timeout is not None else self._timeout
         deadline = time.monotonic() + effective

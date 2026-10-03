@@ -156,11 +156,8 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 """
 
-# Columns added after the table first shipped, applied with ADD COLUMN when
-# missing. Evolve the schema by appending here, never by editing the DDL alone:
-# CREATE TABLE IF NOT EXISTS is a no-op on a table an older release already
-# created, so a DDL-only change leaves those databases without the column and
-# every read of it raises.
+# Columns added after the table first shipped. Append new columns here too:
+# CREATE TABLE IF NOT EXISTS never adds them to an existing table.
 _ARTIFACTS_ADDED_COLUMNS = (
     ("extras", "TEXT DEFAULT ''"),
     ("pinned_at", "INTEGER DEFAULT 0"),

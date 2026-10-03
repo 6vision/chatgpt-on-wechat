@@ -24,11 +24,7 @@ _embedding_logged: bool = False
 def create_default_embedding_provider():
     """Build the embedding provider from config, or None for keyword-only mode.
 
-    config.json is hand-editable, so a value that is not a string at all
-    (``true`` or ``1`` are reachable) is treated as "not configured" rather than
-    raising out of the factory -- an AttributeError here escapes
-    AgentInitializer._setup_memory_system()'s broad except and costs the Agent
-    its whole memory system, not just embeddings.
+    A non-string value in hand-edited config is treated as not configured.
     """
     from config import conf
 

@@ -164,10 +164,7 @@ def _compress_image(data: bytes, max_bytes: int = 4 * 1024 * 1024, max_edge: int
 
     img = Image.open(io.BytesIO(data))
     w, h = img.size
-    # Read the format before the downscale. Image.resize() returns a new image
-    # with .format cleared, so taking it afterwards left every resized source on
-    # the "PNG" default below: a resized JPEG was re-encoded losslessly as PNG
-    # and _save_image then sniffed those bytes and labelled the file .png.
+    # Image.resize() clears .format, so read it first.
     fmt = img.format or "PNG"
 
     if max(w, h) > max_edge:
@@ -1228,12 +1225,7 @@ def main():
         try:
             args = json.loads(raw)
         except json.JSONDecodeError:
-            # Retry with typographic quotes straightened, but only once the
-            # payload has failed to parse: an agent sometimes emits curly quotes
-            # as the JSON delimiters themselves and that form is recoverable.
-            # Doing this up front corrupted valid payloads whose prompt merely
-            # contained a typographic quote, since a straight " ends the JSON
-            # string early and the whole call then failed as Invalid JSON.
+            # Curly quotes used as JSON delimiters; never straighten valid payloads.
             raw = raw.replace('\u201c', '"').replace('\u201d', '"').replace('\u2018', "'").replace('\u2019', "'")
             args = json.loads(raw)
     except json.JSONDecodeError as e:

@@ -31,13 +31,9 @@ class Util:
 
     @staticmethod
     def parse_linkai_response(res):
-        """Return ``(ok, data, message)`` for a response from a LinkAI API.
+        """Return ``(ok, data, message)``; ``data`` is always a dict.
 
-        LinkAI answers a refused call with HTTP 200 and a non-zero ``code`` in
-        the body, so the HTTP status alone never says whether the call was
-        accepted. The body of an error page (a gateway's HTML 502, say) is not
-        JSON at all, so ``res.json()`` cannot be trusted to return a dict
-        either. ``data`` is always a dict, never ``None``.
+        A refused call can answer HTTP 200 with a non-zero ``code``.
         """
         try:
             body = res.json()
