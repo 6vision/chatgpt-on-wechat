@@ -530,6 +530,13 @@ def _download_file(url: str):
         # not be able to write, and state_dir owns the layout anyway.
         file_path = state_dir.tmp_dir() / file_name
         response = requests.get(url, timeout=(5, 60))
+        # The links handed to this helper are signed and expire, so the usual
+        # failure is not a connection error but a well-formed response carrying
+        # an error status whose body is an HTML page. Checking the status first
+        # stops that page from being saved under the document's own filename and
+        # returned as a successful download, which sent the user an error page
+        # as their file reply.
+        response.raise_for_status()
         file_path.write_bytes(response.content)
         return str(file_path)
     except Exception as e:
