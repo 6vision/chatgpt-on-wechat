@@ -1279,7 +1279,20 @@ class CowCliPlugin(Plugin):
 
         import shutil
         import json
+        from cli.commands.skill import SkillInstallError, _check_skill_name
         from cli.utils import get_skills_dir
+
+        # This name comes from a chat message, and it is joined onto the skills
+        # directory and handed to shutil.rmtree a few lines below, so "..",
+        # "../victim" and an absolute path all resolve to something real and
+        # take the whole tree with it. The CLI uninstall already rejects those
+        # names; reuse the same check rather than trusting the channel.
+        # _check_skill_name is the raising form of that check -- the CLI one
+        # calls sys.exit, which would take the whole chat process down.
+        try:
+            _check_skill_name(name)
+        except SkillInstallError as e:
+            return _t(f"无法卸载: {e}", f"Cannot uninstall: {e}")
 
         skills_dir = get_skills_dir()
         skill_dir = os.path.join(skills_dir, name)
