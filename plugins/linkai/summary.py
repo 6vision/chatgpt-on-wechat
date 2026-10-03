@@ -4,6 +4,8 @@ from common.log import logger
 import os
 import html
 
+from .utils import Util
+
 
 class LinkSummary:
     def __init__(self):
@@ -45,34 +47,26 @@ class LinkSummary:
             "summary_id": summary_id
         }
         res = requests.post(url=self.base_url() + "/v1/summary/chat", headers=self.headers(), json=body, timeout=(5, 180))
-        if res.status_code == 200:
-            res = res.json()
-            logger.debug(f"[LinkSum] chat open, res={res}")
-            if res.get("code") == 200:
-                data = res.get("data")
-                return {
-                    "questions": data.get("questions"),
-                    "file_id": data.get("file_id")
-                }
-        else:
-            res_json = res.json()
-            logger.error(f"[LinkSum] summary error, status_code={res.status_code}, msg={res_json.get('message')}")
+        ok, data, message = Util.parse_linkai_response(res)
+        logger.debug(f"[LinkSum] chat open, ok={ok}, message={message}")
+        if not ok:
+            logger.error(f"[LinkSum] summary error, status_code={res.status_code}, msg={message}")
             return None
+        return {
+            "questions": data.get("questions"),
+            "file_id": data.get("file_id")
+        }
 
     def _parse_summary_res(self, res):
-        if res.status_code == 200:
-            res = res.json()
-            logger.debug(f"[LinkSum] summary result, res={res}")
-            if res.get("code") == 200:
-                data = res.get("data")
-                return {
-                    "summary": data.get("summary"),
-                    "summary_id": data.get("summary_id")
-                }
-        else:
-            res_json = res.json()
-            logger.error(f"[LinkSum] summary error, status_code={res.status_code}, msg={res_json.get('message')}")
+        ok, data, message = Util.parse_linkai_response(res)
+        logger.debug(f"[LinkSum] summary result, ok={ok}, message={message}")
+        if not ok:
+            logger.error(f"[LinkSum] summary error, status_code={res.status_code}, msg={message}")
             return None
+        return {
+            "summary": data.get("summary"),
+            "summary_id": data.get("summary_id")
+        }
 
     def base_url(self):
         return conf().get("linkai_api_base", "https://api.link-ai.tech")
