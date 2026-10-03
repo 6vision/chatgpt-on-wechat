@@ -114,9 +114,6 @@ class MemoryService:
                 if os.path.isfile(full) and name.endswith(".md"):
                     files.append(self._file_info(full, name, ftype))
         # Sort newest first by filename (date-named); ties favor evolution.
-        # reverse=True means the larger key comes first, so the evolution entry
-        # needs the larger flag — `type != "evolution"` was the other way round
-        # and ranked the dream diary above the log it belongs behind.
         files.sort(key=lambda f: (f["filename"], f["type"] == "evolution"), reverse=True)
         return files
 
