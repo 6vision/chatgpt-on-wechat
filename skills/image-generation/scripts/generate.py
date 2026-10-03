@@ -1221,8 +1221,17 @@ def main():
 
     try:
         raw = sys.argv[1]
-        raw = raw.replace('\u201c', '"').replace('\u201d', '"').replace('\u2018', "'").replace('\u2019', "'")
-        args = json.loads(raw)
+        try:
+            args = json.loads(raw)
+        except json.JSONDecodeError:
+            # Retry with typographic quotes straightened, but only once the
+            # payload has failed to parse: an agent sometimes emits curly quotes
+            # as the JSON delimiters themselves and that form is recoverable.
+            # Doing this up front corrupted valid payloads whose prompt merely
+            # contained a typographic quote, since a straight " ends the JSON
+            # string early and the whole call then failed as Invalid JSON.
+            raw = raw.replace('\u201c', '"').replace('\u201d', '"').replace('\u2018', "'").replace('\u2019', "'")
+            args = json.loads(raw)
     except json.JSONDecodeError as e:
         print(json.dumps({"error": f"Invalid JSON: {e}"}))
         sys.exit(1)
