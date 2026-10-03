@@ -176,7 +176,7 @@ def xunfei_tts(APPID, APIKey, APISecret,BusinessArgsTTS, Text, OutFile):
     wsUrl = wsParam.create_url()
     ws = websocket.WebSocketApp(wsUrl, on_message=on_message, on_error=on_error, on_close=on_close)
     ws.on_open = on_open
-    ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE},
+    ws.run_forever(sslopt={"context": ssl.create_default_context()},
                    ping_interval=WS_PING_INTERVAL,
                    ping_timeout=WS_PING_TIMEOUT)
     if stream_error:
