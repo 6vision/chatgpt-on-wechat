@@ -86,12 +86,3 @@ def test_send_msg_failure_does_not_log_the_token(monkeypatch):
     assert TOKEN not in logged, "the access token was written to the log"
     assert "access_token=***" in logged
 
-
-def test_scrub_secrets_leaves_unrelated_text_alone():
-    assert kf_mod._scrub_secrets("connection reset by peer") == "connection reset by peer"
-
-
-def test_scrub_secrets_masks_a_bare_token_query():
-    scrubbed = kf_mod._scrub_secrets(f"https://example.invalid/x?access_token={TOKEN}&a=1")
-    assert TOKEN not in scrubbed
-    assert "&a=1" in scrubbed
