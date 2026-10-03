@@ -74,6 +74,19 @@ def _is_document_url(url: str) -> bool:
     return suffix in ALL_DOC_SUFFIXES
 
 
+def _parse_content_length(response: requests.Response) -> int:
+    """Read Content-Length as a non-negative int, or 0 when absent/unusable.
+
+    A malformed header is reported as unknown rather than raised: the caller
+    still enforces the cap while reading, and treating a bad header as a hard
+    failure would reject a page that may well be within the limit.
+    """
+    try:
+        return max(int(response.headers.get("Content-Length", 0)), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 class WebFetch(BaseTool):
     """Tool for fetching web pages and remote document files"""
 
@@ -162,6 +175,33 @@ class WebFetch(BaseTool):
             content_type = response.headers.get("Content-Type", "")
             if self._is_binary_content_type(content_type) and not _is_document_url(url):
                 return self._handle_download_by_content_type(url, response, content_type)
+
+            # A streamed response is not a bounded one: response.text joins
+            # iter_content, so the whole body is buffered before it can return,
+            # and requests' timeout is a per-read inactivity timeout that a peer
+            # dribbling bytes out of never trips. Bound the page the same way
+            # _fetch_document bounds a document.
+            content_length = _parse_content_length(response)
+            if content_length > MAX_FILE_SIZE:
+                return ToolResult.fail(
+                    f"Error: File too large ({format_size(content_length)} > {format_size(MAX_FILE_SIZE)})"
+                )
+
+            chunks = []
+            downloaded = 0
+            for chunk in response.iter_content(chunk_size=8192):
+                downloaded += len(chunk)
+                if downloaded > MAX_FILE_SIZE:
+                    return ToolResult.fail(
+                        f"Error: File too large (>{format_size(MAX_FILE_SIZE)}), download aborted"
+                    )
+                chunks.append(chunk)
+
+            # The stream is spent, so hand the response exactly the bytes that
+            # were already read and marked them consumed: .content and .text
+            # then decode those instead of trying to drain the stream again.
+            response._content = b"".join(chunks)
+            response._content_consumed = True
 
             response.encoding = self._detect_encoding(response)
             html = response.text
