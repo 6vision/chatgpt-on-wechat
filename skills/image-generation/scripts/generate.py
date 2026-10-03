@@ -164,6 +164,11 @@ def _compress_image(data: bytes, max_bytes: int = 4 * 1024 * 1024, max_edge: int
 
     img = Image.open(io.BytesIO(data))
     w, h = img.size
+    # Read the format before the downscale. Image.resize() returns a new image
+    # with .format cleared, so taking it afterwards left every resized source on
+    # the "PNG" default below: a resized JPEG was re-encoded losslessly as PNG
+    # and _save_image then sniffed those bytes and labelled the file .png.
+    fmt = img.format or "PNG"
 
     if max(w, h) > max_edge:
         ratio = max_edge / max(w, h)
@@ -171,7 +176,6 @@ def _compress_image(data: bytes, max_bytes: int = 4 * 1024 * 1024, max_edge: int
         img = img.resize((w, h), Image.LANCZOS)
 
     buf = io.BytesIO()
-    fmt = img.format or "PNG"
     if fmt.upper() == "JPEG":
         quality = 85
         while True:
