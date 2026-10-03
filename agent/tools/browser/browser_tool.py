@@ -100,6 +100,10 @@ class BrowserTool(BaseTool):
                 "type": "string",
                 "description": "Scroll direction: up, down, left, right (for 'scroll' action, default: down)"
             },
+            "amount": {
+                "type": "integer",
+                "description": "Scroll distance in pixels (for 'scroll' action, default: 500)"
+            },
             "script": {
                 "type": "string",
                 "description": "JavaScript code to execute (for 'evaluate' action)"
@@ -343,7 +347,7 @@ class BrowserTool(BaseTool):
         result = self._get_service().click(ref=ref, selector=selector, timeout=timeout)
         if "error" in result:
             return ToolResult.fail(result["error"])
-        return ToolResult.success(f"Clicked successfully. Use 'snapshot' to see updated page.")
+        return ToolResult.success("Clicked successfully. Use 'snapshot' to see updated page.")
 
     def _do_fill(self, args: Dict[str, Any]) -> ToolResult:
         text = args.get("text", "")
@@ -355,7 +359,7 @@ class BrowserTool(BaseTool):
         result = self._get_service().fill(text, ref=ref, selector=selector, timeout=timeout)
         if "error" in result:
             return ToolResult.fail(result["error"])
-        return ToolResult.success(f"Filled text into element. Use 'snapshot' to verify.")
+        return ToolResult.success("Filled text into element. Use 'snapshot' to verify.")
 
     def _do_select(self, args: Dict[str, Any]) -> ToolResult:
         value = args.get("value", "")
@@ -371,9 +375,12 @@ class BrowserTool(BaseTool):
 
     def _do_scroll(self, args: Dict[str, Any]) -> ToolResult:
         direction = args.get("direction", "down")
-        amount = args.get("timeout", 500)  # reuse timeout field or default
-        if "amount" in args:
-            amount = args["amount"]
+        # The distance comes from `amount`, in pixels. It used to be read from
+        # `timeout`, which the schema documents as milliseconds and which every
+        # other action here reads as a wait -- so asking for a 10s timeout
+        # scrolled 10000px and reported success, and no scroll could name both a
+        # distance and a wait at once.
+        amount = args.get("amount", 500)
         result = self._get_service().scroll(direction=direction, amount=amount)
         if "error" in result:
             return ToolResult.fail(result["error"])
@@ -391,7 +398,7 @@ class BrowserTool(BaseTool):
         result = self._get_service().wait(selector=selector, timeout=timeout)
         if "error" in result:
             return ToolResult.fail(result["error"])
-        return ToolResult.success(f"Wait completed.")
+        return ToolResult.success("Wait completed.")
 
     def _do_back(self, args: Dict[str, Any]) -> ToolResult:
         result = self._get_service().go_back()
