@@ -212,7 +212,7 @@ def test_read_handler_returns_content_and_baseline(tmp_path):
 
     with patch("channel.web.api.workspace._get_workspace_root", return_value=str(tmp_path)), \
          patch("common.state_dir.state_root_str", return_value=str(tmp_path)):
-        response = _get(WorkspaceReadHandler, {"path": "notes.md", "session": "s1", "agent": ""})
+        response = _get(WorkspaceReadHandler, {"path": "notes.md", "session": "s1", "agent": "", "agent_id": ""})
 
     assert response["status"] == "success"
     assert response["content"] == "hello\n"
@@ -322,12 +322,7 @@ def _roots_by_agent(tmp_path):
 
 
 def test_write_handler_saves_into_the_agent_the_client_names(tmp_path):
-    """Both console clients inject `agent_id`, never `agent`.
-
-    Resolving the target from `agent` alone left every save in the default
-    Agent's workspace, so an edit made for another Agent was written into the
-    wrong workspace.
-    """
+    """Both console clients inject `agent_id`, so the save must follow it."""
     from channel.web.api.workspace import WorkspaceWriteHandler
 
     files, _root = _roots_by_agent(tmp_path)
@@ -363,6 +358,22 @@ def test_write_handler_still_accepts_the_agent_key(tmp_path):
     assert response["status"] == "success"
     assert files["writer"].read_text(encoding="utf-8") == "goodbye\n"
     assert files["default"].read_text(encoding="utf-8") == "hello\n"
+
+
+def test_read_handler_reads_from_the_agent_the_client_names(tmp_path):
+    from channel.web.api.workspace import WorkspaceReadHandler
+
+    files, _root = _roots_by_agent(tmp_path)
+    _write(files["writer"], "writer\n")
+
+    with patch("channel.web.api.workspace._get_workspace_root", side_effect=_root), \
+         patch("common.state_dir.state_root_str", side_effect=_root):
+        response = _get(WorkspaceReadHandler, {
+            "path": "notes.md", "session": "s1", "agent": "", "agent_id": "writer",
+        })
+
+    assert response["status"] == "success"
+    assert response["content"] == "writer\n"
 
 
 # ----------------------------------------------------------------------
