@@ -337,7 +337,9 @@ def _aes_ecb_decrypt(data: bytes, key: bytes) -> bytes:
     cipher = AES.new(key, AES.MODE_ECB)
     decrypted = cipher.decrypt(data)
     pad_len = decrypted[-1]
-    if pad_len > 16:
+    # 0 is never a PKCS#7 pad length (the encoding always emits 1..16), and
+    # data[:-0] is the empty sequence, so it would discard the whole plaintext.
+    if pad_len == 0 or pad_len > 16:
         return decrypted
     return decrypted[:-pad_len]
 
