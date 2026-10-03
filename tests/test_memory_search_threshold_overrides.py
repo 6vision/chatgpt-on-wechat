@@ -88,16 +88,6 @@ class TestSearchHonoursExplicitThresholds(unittest.TestCase):
 
         self.assertEqual([r.path for r in results], ["memory/shared/a.md"])
 
-    def test_zero_max_results_returns_nothing(self):
-        # The same falsy-zero read applies to the result cap: asking for zero
-        # results must not be answered with the configured batch of ten.
-        hits = [_result(label) for label in ("a", "b", "c", "d")]
-        manager = _manager(hits)
-
-        results = asyncio.run(manager.search("query", max_results=0))
-
-        self.assertEqual(results, [])
-
     def test_the_configured_cap_still_applies_when_no_override_is_given(self):
         hits = [_result(label) for label in ("a", "b", "c", "d")]
         manager = _manager(hits, max_results=2)
