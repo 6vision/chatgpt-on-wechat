@@ -1,14 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
-  MessageSquare,
-  BookOpen,
-  Brain,
-  Zap,
-  Radio,
-  Clock,
-  Users,
-  Settings,
   PanelLeftClose,
   PanelLeftOpen,
   Sun,
@@ -24,9 +16,11 @@ import {
   MessageSquareWarning,
   Palette,
   Check,
+  SquarePen,
+  ExternalLink,
 } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
 import type { Theme } from '../theme/themes'
+import type { MenuGroup, MenuItem } from '../types'
 // The desktop app's own brand icon (transparent PNG), bundled by Vite.
 import brandLogo from '../assets/logo.png'
 import { t, getLang, setLang, Lang } from '../i18n'
@@ -36,6 +30,8 @@ import { useTheme } from '../hooks/useTheme'
 import { usePlatform } from '../hooks/usePlatform'
 import { useUpdateStore, hasPendingUpdate, hasAvailableUpdate } from '../store/updateStore'
 import UpdateBanner from '../components/UpdateBanner'
+import { useMenuStore } from '../store/menuStore'
+import { groupLabel, itemIcon, itemLabel, itemRoute, itemShows } from '../lib/menu'
 import { product } from '@product'
 
 // Fallback shown when app.getVersion() is unavailable (dev/web preview). Keep
@@ -57,26 +53,6 @@ const docsUrl = () => (getLang() === 'zh' ? 'https://docs.cowagent.ai/zh' : 'htt
 const openExternal = (url: string) => {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
-
-interface NavItem {
-  path: string
-  labelKey: string
-  icon: LucideIcon
-}
-
-const NAV_ITEMS: NavItem[] = [
-  { path: '/', labelKey: 'menu_chat', icon: MessageSquare },
-  { path: '/knowledge', labelKey: 'menu_knowledge', icon: BookOpen },
-  { path: '/memory', labelKey: 'menu_memory', icon: Brain },
-  { path: '/skills', labelKey: 'menu_skills', icon: Zap },
-  { path: '/channels', labelKey: 'menu_channels', icon: Radio },
-  { path: '/tasks', labelKey: 'menu_tasks', icon: Clock },
-  { path: '/settings', labelKey: 'menu_settings', icon: Settings },
-]
-
-// The Team entry only exists once the install runs more than one Agent, so a
-// single-Agent client shows exactly the original menu. Inserted after Chat.
-const AGENTS_ITEM: NavItem = { path: '/agents', labelKey: 'menu_agents', icon: Users }
 
 interface NavRailProps {
   onLangChange: () => void
@@ -102,10 +78,22 @@ const NavRail: React.FC<NavRailProps> = ({ onLangChange }) => {
     navigate(path)
   }
 
-  // Always surface the Team entry: it is the only way to add a second Agent,
-  // so gating it on multi-Agent mode created a chicken-and-egg trap where a
-  // single-Agent install could never opt into a team. Inserted after Chat.
-  const navItems = [NAV_ITEMS[0], AGENTS_ITEM, ...NAV_ITEMS.slice(1)]
+  const savedMenu = useMenuStore((s) => s.saved)
+  const menu = useMenuStore((s) => s.doc)
+  const openMenuEditor = useMenuStore((s) => s.openEditor)
+  // Until the user saves a menu the rail stays the flat list it has always
+  // been, with the logs in the footer menu; a saved one is drawn by group.
+  const sections: { group: MenuGroup | null; items: MenuItem[] }[] = savedMenu
+    ? menu.groups.map((group) => ({ group, items: group.items.filter(itemShows) })).filter((s) => s.items.length)
+    : [{ group: null, items: menu.groups.flatMap((g) => g.items).filter((i) => itemShows(i) && i.view !== 'logs') }]
+
+  const openItem = (item: MenuItem) => {
+    if (item.type === 'url' && item.open === 'tab') {
+      if (item.url) openExternal(item.url)
+      return
+    }
+    void go(itemRoute(item))
+  }
 
   const updateState = useUpdateStore()
   // Footer dot: hidden once dismissed for this version (user asked for this).
@@ -213,28 +201,46 @@ const NavRail: React.FC<NavRailProps> = ({ onLangChange }) => {
       {/* Content area carries the right divider, starting below the titlebar */}
       <div className="flex-1 flex flex-col min-h-0 border-r border-default">
       {/* Nav items */}
-      <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
-        {navItems.map((item) => {
-          const Icon = item.icon
-          const isActive = location.pathname === item.path
-          return (
-            <button
-              key={item.path}
-              onClick={() => void go(item.path)}
-              title={collapsed ? t(item.labelKey) : undefined}
-              className={`group w-full flex items-center gap-3 rounded-btn cursor-pointer transition-colors h-9 ${
-                collapsed ? 'justify-center px-0' : 'px-3'
-              } ${
-                isActive
-                  ? 'bg-accent-soft text-accent'
-                  : 'text-content-secondary hover:bg-surface-2 hover:text-content'
-              }`}
-            >
-              <Icon size={18} strokeWidth={isActive ? 2.2 : 1.8} className="flex-shrink-0" />
-              {!collapsed && <span className="text-[13px] truncate">{t(item.labelKey)}</span>}
-            </button>
-          )
-        })}
+      <nav className="flex-1 overflow-y-auto px-2 py-2">
+        {sections.map(({ group, items }, index) => (
+          <div
+            key={group?.id ?? 'flat'}
+            className={index ? (collapsed ? 'mt-1.5 pt-1.5 border-t border-subtle' : 'mt-2') : ''}
+          >
+            {group && !collapsed && (
+              <div className="px-3 pt-1 pb-1 text-[11px] font-medium text-content-tertiary truncate select-none">
+                {groupLabel(group)}
+              </div>
+            )}
+            <div className="space-y-0.5">
+              {items.map((item) => {
+                const Icon = itemIcon(item)
+                const label = itemLabel(item)
+                const isActive = location.pathname === itemRoute(item)
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => openItem(item)}
+                    title={collapsed ? label : undefined}
+                    className={`group w-full flex items-center gap-3 rounded-btn cursor-pointer transition-colors h-9 ${
+                      collapsed ? 'justify-center px-0' : 'px-3'
+                    } ${
+                      isActive
+                        ? 'bg-accent-soft text-accent'
+                        : 'text-content-secondary hover:bg-surface-2 hover:text-content'
+                    }`}
+                  >
+                    <Icon size={18} strokeWidth={isActive ? 2.2 : 1.8} className="flex-shrink-0" />
+                    {!collapsed && <span className="flex-1 min-w-0 text-left text-[13px] truncate">{label}</span>}
+                    {!collapsed && item.type === 'url' && item.open === 'tab' && (
+                      <ExternalLink size={12} className="flex-shrink-0 opacity-50" />
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       {/* Update banner floats above the footer when a new version is pending */}
@@ -256,6 +262,10 @@ const NavRail: React.FC<NavRailProps> = ({ onLangChange }) => {
             onLogs={() => {
               setMenuOpen(false)
               void go('/logs')
+            }}
+            onEditMenu={() => {
+              setMenuOpen(false)
+              openMenuEditor()
             }}
             onTheme={toggleTheme}
             themeId={themeId}
@@ -302,6 +312,12 @@ const NavRail: React.FC<NavRailProps> = ({ onLangChange }) => {
             <div className="flex-1" />
           )}
 
+          {/* The editor lives in the "more" menu; a build that hides it keeps a button. */}
+          {product.nav?.hideFooterMenu && (
+            <FooterBtn collapsed={collapsed} onClick={() => openMenuEditor()} title={t('menu_edit')}>
+              <SquarePen size={16} />
+            </FooterBtn>
+          )}
           <FooterBtn collapsed={collapsed} onClick={toggleNav} title={collapsed ? t('nav_expand') : t('nav_collapse')}>
             {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
           </FooterBtn>
@@ -356,11 +372,12 @@ const FooterMenu: React.FC<{
   themes: Theme[]
   onThemeId: (id: string) => void
   onLogs: () => void
+  onEditMenu: () => void
   onTheme: () => void
   onLanguage: () => void
   onCheckUpdate: () => void
   onOpenLink: (url: string) => void
-}> = ({ theme, checking, pendingUpdate, upToDate, themeId, themes, onThemeId, onLogs, onTheme, onLanguage, onCheckUpdate, onOpenLink }) => {
+}> = ({ theme, checking, pendingUpdate, upToDate, themeId, themes, onThemeId, onLogs, onEditMenu, onTheme, onLanguage, onCheckUpdate, onOpenLink }) => {
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
   const updateLabel = checking
     ? t('update_checking')
@@ -385,7 +402,7 @@ const FooterMenu: React.FC<{
       </>
     )}
 
-    {/* App actions below: update, theme, language, logs */}
+    {/* App actions below: update, theme, language, menu, logs */}
     <MenuItem
       icon={checking ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
       label={updateLabel}
@@ -422,6 +439,7 @@ const FooterMenu: React.FC<{
       trailing={getLang() === 'zh' ? 'EN' : '中'}
       onClick={onLanguage}
     />
+    <MenuItem icon={<SquarePen size={16} />} label={t('menu_edit')} onClick={onEditMenu} />
     <MenuItem icon={<ScrollText size={16} />} label={t('menu_logs')} onClick={onLogs} />
   </div>
   )

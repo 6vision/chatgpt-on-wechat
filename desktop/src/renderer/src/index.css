@@ -287,6 +287,13 @@ body * {
   -webkit-app-region: no-drag;
 }
 
+/* While the menu editor is sorting, the grab cursor wins over inputs under the pointer */
+.menu-sorting,
+.menu-sorting * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
 /* ============================================================
    Animations
    ============================================================ */

@@ -494,6 +494,7 @@
    Preview pane
    --------------------------------------------------------------------- */
 .art-preview {
+    position: relative;
     width: clamp(380px, 46%, 780px);
     flex-shrink: 0;
     display: flex;
@@ -680,9 +681,11 @@
         position: absolute;
         inset: 0;
         z-index: 10;
-        width: auto;
+        /* Over the dragged width: here the pane covers the view. */
+        width: auto !important;
         border-left: 0;
     }
+    #art-resizer { display: none; }
 }
 @media (max-width: 640px) {
     .art-inner { padding: 16px 14px 40px; }

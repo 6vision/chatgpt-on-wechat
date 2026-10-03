@@ -43,6 +43,7 @@
 
                         <!-- Preview pane: opens beside the timeline on selection -->
                         <aside id="art-preview" class="art-preview hidden" aria-hidden="true">
+                            <div id="art-resizer" class="workspace-resizer"></div>
                             <div class="art-preview-head">
                                 <div class="art-preview-titles">
                                     <div id="art-preview-name" class="art-preview-name"></div>
@@ -56,6 +57,10 @@
                                     <button id="art-btn-jump" class="workspace-icon-btn art-jump-btn" onclick="artJumpToSelected()"
                                             data-tip-key="artifacts_jump" data-tip-float data-tooltip-pos="bottom">
                                         <i class="fas fa-message"></i>
+                                    </button>
+                                    <button id="art-btn-menu" class="workspace-icon-btn" onclick="artAddSelectedToMenu()"
+                                            data-tip-key="menu_add_to_menu" data-tip-float data-tooltip-pos="bottom">
+                                        <i class="fas fa-bars-staggered"></i>
                                     </button>
                                     <button id="art-btn-external" class="workspace-icon-btn" onclick="artOpenSelectedExternally()"
                                             data-tip-key="ws_open_external" data-tip-float data-tooltip-pos="bottom">

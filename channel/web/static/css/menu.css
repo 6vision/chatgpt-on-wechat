@@ -1,0 +1,321 @@
+/* The menu the user arranged: the sidebar bits it adds, the custom view that
+   shows its artifacts and links, and the editor dialog.
+   See channel/web/README.md for the load order, which is load-bearing. */
+
+/* Sidebar */
+html.menu-pending #sidebar-nav { visibility: hidden; }
+.sidebar-item .sidebar-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-ext { margin-left: auto; font-size: 9px; opacity: .45; }
+@media (min-width: 1024px) {
+    html.sidebar-collapsed .sidebar-ext { display: none; }
+}
+/* The editor's entry: a pencil at the end of a group header, shown while the
+   header is hovered. The rail hides it with the headers. */
+.menu-group { position: relative; }
+.menu-group-edit {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    font-size: 10px;
+    color: #737373;
+    opacity: 0;
+    cursor: pointer;
+    transition: opacity .15s, color .15s, background-color .15s;
+}
+.menu-group-head:hover + .menu-group-edit,
+.menu-group-edit:hover,
+.menu-group-edit:focus-visible { opacity: 1; }
+.menu-group-edit:hover { color: #e5e5e5; background: rgba(255, 255, 255, 0.06); }
+@media (hover: none) { .menu-group-edit { opacity: 1; } }
+@media (min-width: 1024px) {
+    html.sidebar-collapsed .menu-group-edit { display: none; }
+}
+
+/* Next to the breadcrumb: open the page on screen outside the console. */
+.breadcrumb-external {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    font-size: 11px;
+    color: #94a3b8;
+    cursor: pointer;
+    transition: color .15s, background-color .15s;
+}
+.breadcrumb-external:hover { color: #35A85B; background: #f1f5f9; }
+.dark .breadcrumb-external { color: #64748b; }
+.dark .breadcrumb-external:hover { color: #4ABE6E; background: rgba(255, 255, 255, 0.08); }
+.breadcrumb-external.hidden { display: none; }
+
+/* The custom view */
+.menu-page-body { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #fff; }
+.dark .menu-page-body { background: #1A1A1A; }
+.menu-page-body > iframe,
+.menu-page-stage > iframe { flex: 1; width: 100%; height: 100%; border: 0; background: #fff; }
+.menu-page-stage { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+/* A markdown document reads as a page: a centred column with room around it. */
+.menu-page-stage > .ws-pad { width: 100%; max-width: 920px; margin: 0 auto; padding: 32px 40px 56px; }
+@media (max-width: 640px) { .menu-page-stage > .ws-pad { padding: 20px 16px 40px; } }
+.menu-page-body > .workspace-empty { flex: 1; }
+
+/* Editor dialog */
+.menu-editor {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 680px;
+    max-height: min(780px, calc(100vh - 48px));
+    margin: 0 16px;
+    border-radius: 16px;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    box-shadow: 0 24px 60px -20px rgba(15, 23, 42, 0.35);
+    overflow: hidden;
+}
+.dark .menu-editor { background: #1A1A1A; border-color: rgba(255, 255, 255, 0.1); }
+.menu-editor-head { display: flex; align-items: flex-start; gap: 12px; padding: 20px 20px 14px 24px; }
+.menu-editor-head > div { flex: 1; }
+.menu-editor-title { font-size: 16px; font-weight: 600; color: #1e293b; }
+.menu-editor-desc { margin-top: 4px; font-size: 12.5px; line-height: 1.5; color: #64748b; }
+.dark .menu-editor-title { color: #f1f5f9; }
+.dark .menu-editor-desc { color: #94a3b8; }
+.menu-editor-body { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 20px 16px; }
+.menu-editor-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 20px;
+    border-top: 1px solid #f1f5f9;
+}
+.dark .menu-editor-foot { border-top-color: rgba(255, 255, 255, 0.06); }
+.menu-editor-error { flex: 1; min-width: 0; font-size: 12.5px; color: #ef4444; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.me-foot-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #475569;
+    cursor: pointer;
+    transition: background-color .15s, color .15s;
+}
+.me-foot-btn i { font-size: 12px; color: #94a3b8; }
+.me-foot-btn:hover { background: #f1f5f9; color: #1e293b; }
+.dark .me-foot-btn { color: #cbd5e1; }
+.dark .me-foot-btn:hover { background: rgba(255, 255, 255, 0.06); color: #f1f5f9; }
+
+.me-group { border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; }
+.me-group + .me-group { margin-top: 12px; }
+.dark .me-group { border-color: rgba(255, 255, 255, 0.08); background: #141414; }
+.me-group.is-dragging, .me-item.is-dragging { opacity: .4; }
+.me-group-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 6px 4px; }
+.me-group-input {
+    flex: 1;
+    min-width: 0;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #475569;
+    outline: none;
+}
+.me-group-input:hover { border-color: #e2e8f0; }
+.me-group-input:focus { border-color: #4ABE6E; background: #fff; text-transform: none; letter-spacing: 0; }
+.dark .me-group-input { color: #cbd5e1; }
+.dark .me-group-input:hover { border-color: rgba(255, 255, 255, 0.1); }
+.dark .me-group-input:focus { background: #111; }
+.me-items { min-height: 12px; padding: 0 8px 8px; }
+
+.me-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px 6px 2px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #fff;
+}
+.me-item + .me-item { margin-top: 6px; }
+.dark .me-item { background: #1E1E1E; border-color: rgba(255, 255, 255, 0.08); }
+.me-item.is-new { border-color: #4ABE6E; box-shadow: 0 0 0 3px rgba(74, 190, 110, 0.15); }
+.me-item.is-hidden .me-icon,
+.me-item.is-hidden .me-main,
+.me-item.is-foreign .me-main { opacity: .45; }
+.me-handle {
+    flex-shrink: 0;
+    width: 20px;
+    display: flex;
+    justify-content: center;
+    font-size: 12px;
+    color: #cbd5e1;
+    cursor: grab;
+}
+.me-handle:hover { color: #94a3b8; }
+.dark .me-handle { color: #475569; }
+.me-icon {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    color: #475569;
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color .15s, color .15s;
+}
+.me-icon:hover { border-color: #4ABE6E; color: #35A85B; }
+.dark .me-icon { border-color: rgba(255, 255, 255, 0.1); color: #cbd5e1; }
+.me-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.me-input {
+    width: 100%;
+    height: 26px;
+    padding: 0 6px;
+    margin-left: -6px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    font-size: 13.5px;
+    color: #1e293b;
+    outline: none;
+}
+.me-input:hover { border-color: #e2e8f0; }
+.me-input:focus { border-color: #4ABE6E; background: #fff; }
+.me-input.is-invalid { border-color: #ef4444; }
+/* A built-in page left unnamed shows its own name, which is not a hint. */
+.me-item[data-type="builtin"] .me-input:not(:focus)::placeholder { color: inherit; opacity: 1; }
+.me-input.me-url { height: 22px; font-size: 11.5px; color: #64748b; font-family: "JetBrains Mono", "Fira Code", Consolas, monospace; }
+.dark .me-input { color: #f1f5f9; }
+.dark .me-input:hover { border-color: rgba(255, 255, 255, 0.1); }
+.dark .me-input:focus { background: #111; }
+.dark .me-input.me-url { color: #94a3b8; }
+.me-sub { font-size: 11.5px; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.me-btn {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    height: 28px;
+    padding: 0 9px;
+    border-radius: 7px;
+    font-size: 12.5px;
+    color: #64748b;
+    cursor: pointer;
+    transition: background-color .15s, color .15s;
+}
+.me-btn i { font-size: 11.5px; }
+.me-btn-icon { width: 28px; padding: 0; }
+.me-btn:hover { background: #f1f5f9; color: #1e293b; }
+.me-btn:disabled { opacity: .35; cursor: default; background: transparent; }
+.dark .me-btn { color: #94a3b8; }
+.dark .me-btn:hover { background: rgba(255, 255, 255, 0.06); color: #f1f5f9; }
+.dark .me-btn:disabled:hover { background: transparent; }
+.me-seg { flex-shrink: 0; display: inline-flex; padding: 2px; border-radius: 8px; background: #f1f5f9; }
+.me-seg button { height: 24px; padding: 0 8px; border-radius: 6px; font-size: 12px; color: #64748b; cursor: pointer; }
+.me-seg button.active { background: #fff; color: #1e293b; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12); }
+.dark .me-seg { background: rgba(255, 255, 255, 0.06); }
+.dark .me-seg button { color: #94a3b8; }
+.dark .me-seg button.active { background: #2a2a2a; color: #f1f5f9; }
+
+/* Popovers inside the dialog */
+.me-pop {
+    position: absolute;
+    z-index: 5;
+    min-width: 180px;
+    max-width: 360px;
+    padding: 6px;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    box-shadow: 0 16px 40px -12px rgba(15, 23, 42, 0.3);
+}
+.me-pop.hidden { display: none; }
+.dark .me-pop { background: #222; border-color: rgba(255, 255, 255, 0.1); }
+.me-menu { display: flex; flex-direction: column; }
+.me-menu > button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #334155;
+    text-align: left;
+    cursor: pointer;
+}
+.me-menu > button i { width: 16px; text-align: center; font-size: 12.5px; color: #94a3b8; }
+.me-menu > button:hover { background: #f1f5f9; }
+.dark .me-menu > button { color: #e2e8f0; }
+.dark .me-menu > button:hover { background: rgba(255, 255, 255, 0.06); }
+.me-menu-sep { height: 1px; margin: 4px 6px; background: #f1f5f9; }
+.dark .me-menu-sep { background: rgba(255, 255, 255, 0.06); }
+.me-menu-caption { padding: 4px 10px 2px; font-size: 11px; color: #94a3b8; }
+.me-pop-empty { padding: 14px 10px; font-size: 12.5px; color: #94a3b8; text-align: center; }
+.me-icon-grid { display: grid; grid-template-columns: repeat(8, 32px); gap: 4px; }
+.me-icon-cell {
+    width: 32px;
+    height: 32px;
+    border-radius: 7px;
+    font-size: 13px;
+    color: #475569;
+    cursor: pointer;
+}
+.me-icon-cell:hover { background: #f1f5f9; }
+.me-icon-cell.active { background: rgba(74, 190, 110, 0.14); color: #35A85B; }
+.me-icon-default { grid-column: span 8; width: auto; font-size: 12px; }
+.dark .me-icon-cell { color: #cbd5e1; }
+.dark .me-icon-cell:hover { background: rgba(255, 255, 255, 0.06); }
+.dark .me-icon-cell.active { color: #4ABE6E; }
+.me-art-pick { width: 340px; }
+.me-art-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 10px;
+    margin-bottom: 4px;
+    border-radius: 8px;
+    background: #f1f5f9;
+    font-size: 12px;
+    color: #94a3b8;
+}
+.me-art-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font-size: 13px; color: #1e293b; }
+.dark .me-art-search { background: rgba(255, 255, 255, 0.06); }
+.dark .me-art-search input { color: #f1f5f9; }
+.me-art-list { max-height: 300px; overflow-y: auto; }
+.me-art-list > button {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 18px 1fr;
+    grid-template-rows: auto auto;
+    column-gap: 8px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    text-align: left;
+    cursor: pointer;
+}
+.me-art-list > button > i { grid-row: span 2; align-self: center; text-align: center; font-size: 13px; }
+.me-art-list > button:hover { background: #f1f5f9; }
+.me-art-list > button:disabled { opacity: .45; cursor: default; background: transparent; }
+.dark .me-art-list > button:hover { background: rgba(255, 255, 255, 0.06); }
+.me-art-name { font-size: 13px; color: #1e293b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.me-art-path { font-size: 11px; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dark .me-art-name { color: #f1f5f9; }

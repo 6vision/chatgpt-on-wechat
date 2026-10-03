@@ -40,6 +40,8 @@ import type {
   ProjectState,
   ChannelsResponse,
   RosterSnapshot,
+  MenuDoc,
+  ArtifactListItem,
 } from '../types'
 import { getLang, t } from '../i18n'
 
@@ -671,6 +673,25 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ updates }),
     })
+  }
+
+  // ---------------------------------------------------------
+  // Menu (shared with the web console) and the artifacts it can hold
+  // ---------------------------------------------------------
+
+  /** The menu the user arranged, or null while they keep the built-in one. */
+  async getMenu(): Promise<ApiResult & { menu: MenuDoc | null }> {
+    return this.request('/api/menu')
+  }
+
+  /** Save the whole menu; null goes back to the built-in one. */
+  async saveMenu(menu: MenuDoc | null): Promise<ApiResult & { menu: MenuDoc | null }> {
+    return this.request('/api/menu', { method: 'POST', body: JSON.stringify({ menu }) })
+  }
+
+  /** Web pages and markdown documents produced across every Agent's conversations, newest first. */
+  async listPageArtifacts(query: string, limit = 40): Promise<ApiResult & { items: ArtifactListItem[] }> {
+    return this.request(`/api/artifacts?scope=all&kind=page&limit=${limit}&q=${encodeURIComponent(query)}&agent_id=`)
   }
 
   // ---------------------------------------------------------

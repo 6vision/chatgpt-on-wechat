@@ -19,6 +19,10 @@ const ART_TEXT_THUMB_MAX = 512 * 1024;
 const ART_TEXT_THUMB_CHARS = 2400;
 // Matches TITLE_MAX in api/artifacts.py.
 const ART_TITLE_MAX = 120;
+const ART_PREVIEW_WIDTH_KEY = 'cow_artifacts_preview_width';
+const ART_PREVIEW_MIN_WIDTH = 340;
+// Room the timeline keeps beside a widened preview pane.
+const ART_LIST_MIN_WIDTH = 360;
 
 let artItems = [];
 let artHasMore = false;
@@ -157,6 +161,14 @@ function _artInit() {
     // Page and document thumbnails are a full-size render scaled down to the
     // card, so they need the card's width in px.
     new ResizeObserver(_artSyncThumbWidth).observe(list);
+
+    const pane = document.getElementById('art-preview');
+    wsBindResizer(document.getElementById('art-resizer'), pane, {
+        key: ART_PREVIEW_WIDTH_KEY,
+        min: ART_PREVIEW_MIN_WIDTH,
+        max: _artPreviewMaxWidth,
+        content: document.getElementById('art-preview-body'),
+    });
 
     document.addEventListener('keydown', _artOnKey);
 
@@ -662,9 +674,17 @@ function artSelect(item, opts) {
     if (!sameFile) _artRenderPreviewBody(item);
 }
 
+function _artPreviewMaxWidth() {
+    const shell = document.getElementById('art-preview').parentElement;
+    return Math.max(ART_PREVIEW_MIN_WIDTH, shell.clientWidth - ART_LIST_MIN_WIDTH);
+}
+
 function _artOpenPane() {
     const pane = document.getElementById('art-preview');
     const shell = pane.parentElement;
+    // A width the user dragged to; without one the stylesheet's default applies.
+    const width = parseInt(localStorage.getItem(ART_PREVIEW_WIDTH_KEY), 10);
+    if (width >= ART_PREVIEW_MIN_WIDTH) pane.style.width = `${Math.min(width, _artPreviewMaxWidth())}px`;
     pane.classList.remove('hidden');
     pane.setAttribute('aria-hidden', 'false');
     shell.classList.add('has-preview');
@@ -738,6 +758,7 @@ function _artRenderPreviewChrome(item) {
     // or never picked up) can be put back from here.
     document.getElementById('art-btn-add').classList.toggle('hidden',
         !(item.id == null && item.exists && item.origin && item.origin.session_id));
+    document.getElementById('art-btn-menu').classList.toggle('hidden', !item.exists || !MENU_KINDS.includes(item.kind));
     document.getElementById('art-btn-external').classList.toggle('hidden', !item.exists);
     document.getElementById('art-btn-reveal').classList.toggle('hidden', !item.exists || !wsCanReveal());
     document.getElementById('art-btn-download').classList.toggle('hidden', !item.exists);
@@ -788,6 +809,28 @@ function _artRenderPreviewBody(item) {
 function artOpenSelectedExternally() {
     const item = artSelected;
     if (item && item.exists) window.open(item.preview_url || item.raw_url, '_blank', 'noopener');
+}
+
+/** Open the menu editor with this file placed in it, or pointed out if it is there already. */
+function artAddSelectedToMenu() {
+    const item = artSelected;
+    if (!item || !item.exists || !MENU_KINDS.includes(item.kind)) return;
+    let existing = null;
+    menuDoc.groups.forEach(g => g.items.forEach(i => {
+        if (i.type === 'artifact' && i.path === item.abs_path) existing = i;
+    }));
+    if (existing) {
+        menuEditorOpen({ focus: existing.id });
+        return;
+    }
+    menuEditorOpen({
+        add: {
+            type: 'artifact',
+            path: item.abs_path,
+            title: _artName(item).slice(0, 40),
+            file: { kind: item.kind, exists: true, file_name: item.file_name, preview_url: item.preview_url, raw_url: item.raw_url },
+        },
+    });
 }
 
 function artRevealSelected() {

@@ -35,6 +35,11 @@
                     <span id="breadcrumb-group" class="text-slate-400 dark:text-slate-500 truncate" data-i18n="nav_chat">对话</span>
                     <i class="fas fa-chevron-right text-[10px] text-slate-300 dark:text-slate-600"></i>
                     <span id="breadcrumb-page" class="font-medium text-slate-700 dark:text-slate-200 truncate" data-i18n="menu_chat">对话</span>
+                    <!-- A page from the menu (custom view only): open it outside the console -->
+                    <button id="breadcrumb-external" class="breadcrumb-external hidden" onclick="menuOpenPageExternally()"
+                            data-tip-key="menu_open_external" data-tip-float data-tooltip-pos="bottom">
+                        <i class="fas fa-arrow-up-right-from-square"></i>
+                    </button>
                 </div>
 
                 <div class="flex-1"></div>
