@@ -571,15 +571,23 @@ SAFETY:
         for i, tok in enumerate(tokens):
             if tok != "rm":
                 continue
-            has_rf = False
+            has_r = False
+            has_f = False
             for j in range(i + 1, len(tokens)):
                 t = tokens[j]
-                if t.startswith("-") and "r" in t and "f" in t:
-                    has_rf = True
-                elif t in ("--recursive", "--force"):
+                if t in ("--recursive",):
+                    has_r = True
+                elif t in ("--force",):
+                    has_f = True
+                elif t.startswith("--"):
                     continue
+                elif t.startswith("-"):
+                    if "r" in t:
+                        has_r = True
+                    if "f" in t:
+                        has_f = True
                 elif t in ("/", "/*"):
-                    if has_rf:
+                    if has_r and has_f:
                         return "This command will delete the entire filesystem"
                     break
                 else:
