@@ -5,7 +5,7 @@ import time
 from typing import Optional
 
 import requests
-from models.bot import Bot
+from models.bot import Bot, read_error_body
 from models.session_manager import SessionManager
 from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
@@ -161,8 +161,7 @@ class MoonshotBot(Bot):
                     "content": response["choices"][0]["message"]["content"]
                 }
             else:
-                response = res.json()
-                error = response.get("error")
+                error = read_error_body(res)
                 logger.error(f"[MOONSHOT] chat failed, status_code={res.status_code}, "
                              f"msg={error.get('message')}, type={error.get('type')}")
 

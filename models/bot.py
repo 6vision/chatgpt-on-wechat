@@ -6,6 +6,22 @@ from bridge.context import Context
 from bridge.reply import Reply
 
 
+def read_error_body(response) -> dict:
+    """Return the ``error`` object of a failed HTTP response as a dict.
+
+    Never raises: a non-JSON body or a missing / non-object ``error`` becomes
+    ``{"message": ...}``.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict):
+        error = {"message": error or response.text[:300]}
+    return error
+
+
 class Bot(object):
     """
     Base class for all chat-bot implementations.
