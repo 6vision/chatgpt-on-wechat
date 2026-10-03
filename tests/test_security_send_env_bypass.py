@@ -1,14 +1,5 @@
 # encoding:utf-8
-"""
-Unit tests for the Send tool's credential-path guard.
-
-The shared guard in ``agent.tools.utils.credentials`` is applied by read, write,
-edit, ls and search_files -- but not by send. That omission matters more than
-the others: send is the one tool that hands a local file straight to the
-channel, so ``send(path="~/.cow/.env")`` delivered the keyring file itself (and
-on a cloud deployment ``copy_send_file`` copied it to a public URL). The guard
-also runs ahead of the existence check so a missing credential path is refused
-rather than reported as a missing file.
+"""The Send tool refuses credential paths, like the other file tools.
 
 HOME is redirected to a temp dir so the real credential file is never touched.
 """

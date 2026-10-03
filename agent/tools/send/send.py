@@ -63,13 +63,7 @@ class Send(BaseTool):
         # Resolve path
         absolute_path = self._resolve_path(path)
 
-        # Credential files live outside the workspace and must only ever be
-        # reached through the env_config tool. read/write/edit/ls/search_files
-        # all apply this same guard; send is the one tool that hands a local
-        # file to the channel, so leaving it out shipped ~/.cow/.env verbatim
-        # (and copied it to a public URL on a cloud deployment). Checked ahead
-        # of exists() so a missing credential path is refused, not reported as
-        # a missing file.
+        # Same credential guard as the other file tools, checked before exists().
         if is_credential_path(absolute_path):
             return ToolResult.fail(DENIED_MESSAGE)
 
