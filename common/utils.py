@@ -367,3 +367,16 @@ def tail_lines(path, limit):
         line.decode("utf-8", errors="replace")
         for line in data.splitlines(keepends=True)[-limit:]
     ]
+
+
+# requests quotes the full URL, query included, in the exceptions it raises.
+_SECRET_QUERY_RE = re.compile(
+    r"((?:access_token|refresh_token|api_key|apikey|client_secret|client_id"
+    r"|app_secret|app_key|secret|token|password)=)[^&\s\"')\]]+",
+    re.IGNORECASE,
+)
+
+
+def scrub_secrets(text) -> str:
+    """Mask credential query values in *text* before it is logged or shown."""
+    return _SECRET_QUERY_RE.sub(r"\1***", str(text))

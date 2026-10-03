@@ -15,7 +15,6 @@ Differences from `channel/wechatcom/` (企微自建应用):
 """
 import io
 import os
-import re
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -43,6 +42,7 @@ from common.utils import (
     compress_imgfile,
     fsize,
     remove_markdown_symbol,
+    scrub_secrets,
     split_string_by_utf8_length,
 )
 from config import conf
@@ -60,19 +60,6 @@ SYNC_MSG_LIMIT = 1000
 _MAX_REMOTE_IMAGE_BYTES = 20 * 1024 * 1024
 _MAX_REMOTE_VIDEO_BYTES = 10 * 1024 * 1024
 _MAX_REMOTE_MEDIA_SECONDS = 60
-
-# Both kf endpoints carry the token in the query string, and requests puts the
-# full URL -- query included -- into the message of the exception it raises
-# when a call fails ("Max retries exceeded with url: ..."). Logging that raw
-# writes a live credential into run.log, which the web console serves as a
-# complete file download.
-_TOKEN_QUERY_RE = re.compile(r"(access_token=)[^&\s\"')\]]+")
-
-
-def _scrub_secrets(text) -> str:
-    """Replace any ``access_token=...`` value in *text* before it is logged."""
-    return _TOKEN_QUERY_RE.sub(r"\1***", str(text))
-
 
 @singleton
 class WechatKfChannel(ChatChannel):
@@ -499,7 +486,7 @@ class WechatKfChannel(ChatChannel):
         try:
             resp = requests.post(url, json=payload, timeout=10).json()
         except Exception as e:
-            logger.error(f"[wechat_kf] sync_msg request failed: {_scrub_secrets(e)}")
+            logger.error(f"[wechat_kf] sync_msg request failed: {scrub_secrets(e)}")
             return None
 
         if resp.get("errcode") != 0:
@@ -518,8 +505,8 @@ class WechatKfChannel(ChatChannel):
         try:
             resp = requests.post(url, json=payload, timeout=10).json()
         except Exception as e:
-            logger.error(f"[wechat_kf] send_msg request failed: {_scrub_secrets(e)}")
-            return {"errcode": -1, "errmsg": _scrub_secrets(e)}
+            logger.error(f"[wechat_kf] send_msg request failed: {scrub_secrets(e)}")
+            return {"errcode": -1, "errmsg": scrub_secrets(e)}
         if resp.get("errcode") != 0:
             logger.error(f"[wechat_kf] send_msg failed, payload={payload}, resp={resp}")
         return resp
