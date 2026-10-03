@@ -166,6 +166,36 @@ def test_the_table_carries_no_constraint_that_would_force_a_rebuild(tmp_path):
     assert auto_indexes == []
 
 
+def test_a_table_from_before_pin_and_title_gained_them(tmp_path):
+    import sqlite3
+
+    # The shape the artifacts table had before pin/rename shipped: created by an
+    # install that ran the console in between, then reopened on the newer code.
+    conn = sqlite3.connect(tmp_path / "index.db")
+    conn.execute(
+        "CREATE TABLE artifacts (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT, "
+        "session_id TEXT, turn_seq INTEGER, path TEXT, kind TEXT, size INTEGER, "
+        "source TEXT, created_at INTEGER, updated_at INTEGER, extras TEXT)"
+    )
+    conn.commit()
+    conn.close()
+
+    store = _store(tmp_path)
+    store.record_artifacts("s1", [{"path": "/ws/a.md", "kind": "markdown"}])
+    conn = sqlite3.connect(tmp_path / "index.db")
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(artifacts)")}
+    finally:
+        conn.close()
+    assert {"pinned_at", "title"} <= cols
+
+    item = store.list_artifacts()["items"][0]
+    assert item["pinned_at"] == 0 and item["title"] == ""
+    assert store.set_artifact_pinned(item["id"], True) > 0
+    assert store.set_artifact_title(item["id"], "release notes") is True
+    assert store.list_artifacts(query="release")["items"][0]["path"] == "/ws/a.md"
+
+
 def test_pinned_artifacts_lead_the_timeline(tmp_path, monkeypatch):
     import agent.memory.conversation_store as cs
 
