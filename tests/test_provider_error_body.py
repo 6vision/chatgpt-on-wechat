@@ -1,42 +1,6 @@
 # encoding:utf-8
-"""A refused call must be answered, not re-sent.
-
-``DeepSeekBot.reply_text``, ``DoubaoBot.reply_text`` and
-``MoonshotBot.reply_text`` all read the failure body the same way:
-
-    response = res.json()
-    error = response.get("error", {})
-    logger.error(f"... status_code={res.status_code}, msg={error.get('message')}")
-
-and two of the assumptions in there are not the caller's to make.
-
-The body is not always JSON. A gateway in front of the API -- Cloudflare, an
-nginx error page -- answers a refusal with HTML, and ``res.json()`` raises
-``ValueError``. (Qianfan reads the same shape through ``_error_result``, which
-already guards it, and ``models/openai/openai_http_client._parse_response``
-falls back to ``{"raw": resp.text}``; these three were missed.)
-
-The body does not always carry an ``error`` key. ``MoonshotBot`` reads
-``response.get("error")`` with no default, so a FastAPI-style
-``{"detail": "..."}`` makes ``error`` ``None`` and ``error.get("message")``
-raises ``AttributeError``.
-
-Either exception is caught by the method's *own* ``except Exception``, which
-does ``time.sleep(3)`` and calls ``reply_text`` again -- re-sending the request
-that was just refused, twice, and then answering 我现在有点累了，等会再来吧
-instead of the 401/429 wording the branch exists to produce.
-
-``DoubaoBot`` additionally dereferences ``args`` unconditionally::
-
-    body = args.copy()
-
-while ``agent.chat.session_service.generate_session_title`` and
-``optimize_prompt`` call ``bot.reply_text(session)`` with no args at all. Every
-other provider guards it -- ``dict(args) if args else dict(self.args)``,
-``if args is None: args = self.args``, ``args.copy() if args else {}`` -- so a
-Doubao-configured install never generates a session title and never optimizes a
-prompt: both retry twice, sleep 3s each time, log a traceback and fall back.
-"""
+"""A refused reply_text call is answered, not re-sent: a non-JSON or
+error-less failure body must not raise, and Doubao must accept missing args."""
 
 import contextlib
 import importlib

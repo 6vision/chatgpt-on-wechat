@@ -25,7 +25,7 @@ import time
 from typing import Optional
 
 import requests
-from models.bot import Bot
+from models.bot import Bot, read_error_body
 from models.openai_compatible_bot import OpenAICompatibleBot
 from models.session_manager import SessionManager
 from bridge.context import ContextType
@@ -194,18 +194,7 @@ class DeepSeekBot(Bot, OpenAICompatibleBot):
                     "content": response["choices"][0]["message"]["content"],
                 }
             else:
-                # The body of a refusal is not always JSON -- a gateway in front
-                # of the API answers with an HTML page -- and it does not always
-                # carry an `error` key. Reading it must not raise: the `except`
-                # at the bottom of this method re-sends the request that was
-                # just refused.
-                try:
-                    response = res.json()
-                except ValueError:
-                    response = {}
-                error = response.get("error") if isinstance(response, dict) else None
-                if not isinstance(error, dict):
-                    error = {"message": error or res.text[:300]}
+                error = read_error_body(res)
                 logger.error(
                     f"[DEEPSEEK] chat failed, status_code={res.status_code}, "
                     f"msg={error.get('message')}, type={error.get('type')}"
