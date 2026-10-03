@@ -592,10 +592,14 @@ def load_config():
                 # strings, but also TypeError/RecursionError on malformed input
                 # (e.g. unhashable dict keys); catch broadly to avoid crashing
                 # startup, and fall back to treating the value as a plain string.
+                # Numeric keys reject it instead: a string there fails much later.
                 if value.lower() == "false":
                     config[name] = False
                 elif value.lower() == "true":
                     config[name] = True
+                elif type(available_setting[name]) in (int, float):
+                    logger.warning("[INIT] ignoring environment override {}: not a {}".format(
+                        name, type(available_setting[name]).__name__))
                 else:
                     config[name] = value
 
