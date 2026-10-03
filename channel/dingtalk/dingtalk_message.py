@@ -298,8 +298,15 @@ def download_image_file(image_url, temp_dir, file_name=None, default_ext=".png")
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36'
         }
         
-        dest_name = safe_filename(file_name or image_url.split("/")[-1].split("?")[0])
-        dest_name = dest_name or f"download{default_ext or '.bin'}"
+        # The remote basename is not unique: two people in one group can each
+        # send "photo.jpg" and both land in the same tmp_dir, where the second
+        # download os.replace()s the first. Discriminate per message the way
+        # the dingtalk:// branch does, hashing the signed URL, which is what
+        # actually identifies this particular image.
+        file_hash = hashlib.md5(image_url.encode()).hexdigest()[:16]
+        dest_name = _media_filename(
+            file_hash, file_name or image_url.split("/")[-1].split("?")[0], default_ext,
+        )
         file_path = os.path.join(temp_dir, dest_name)
         try:
             download_to_file(image_url, file_path, MAX_FILE_BYTES, headers=headers, timeout=60 * 5)
