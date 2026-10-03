@@ -850,9 +850,13 @@ class MemoryStorage:
             if trigram_results:
                 return trigram_results
 
-        # Step 3: LIKE fallback — last resort (FTS5 unavailable, or CJK tokens
-        # shorter than 3 characters that trigram cannot match, e.g. a single-char query).
-        if not self.fts5_available or MemoryStorage._contains_cjk(query):
+        # Step 3: LIKE fallback — last resort (FTS5 unavailable, CJK tokens shorter
+        # than 3 characters that trigram cannot match, e.g. a single-char query, or
+        # an FTS5 stage that ran and found nothing: a damaged chunks_fts answers
+        # with no rows instead of raising, and must not silence keyword search).
+        if (not self.fts5_available
+                or MemoryStorage._contains_cjk(query)
+                or fts1_attempted):
             return self._search_like(query, user_id, scopes, limit)
 
         return []
