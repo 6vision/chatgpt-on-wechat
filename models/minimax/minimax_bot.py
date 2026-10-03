@@ -344,7 +344,7 @@ class MinimaxBot(Bot):
                                 elif block.get("type") == "tool_result":
                                     tool_call_id = block.get("tool_use_id") or ""
                                     if not tool_call_id:
-                                        logger.warning(f"[MINIMAX] tool_result missing tool_use_id")
+                                        logger.warning("[MINIMAX] tool_result missing tool_use_id")
                                     result_content = block.get("content", "")
                                     if not isinstance(result_content, str):
                                         result_content = json.dumps(result_content, ensure_ascii=False)
@@ -587,7 +587,7 @@ class MinimaxBot(Bot):
                     yield {
                         "error": True,
                         "message": error_msg,
-                        "status_code": int(http_code) if http_code.isdigit() else 500
+                        "status_code": int(http_code) if str(http_code).isdigit() else 500
                     }
                     return
 
@@ -682,12 +682,12 @@ class MinimaxBot(Bot):
 
             # Log complete reasoning_details for debugging
             if current_reasoning:
-                logger.debug(f"[MINIMAX] ===== Complete Reasoning Details =====")
+                logger.debug("[MINIMAX] ===== Complete Reasoning Details =====")
                 for i, reasoning in enumerate(current_reasoning):
                     reasoning_text = reasoning.get("text", "")
                     logger.debug(f"[MINIMAX] Reasoning {i+1} (length={len(reasoning_text)}):")
                     logger.debug(f"[MINIMAX] {reasoning_text}")
-                logger.debug(f"[MINIMAX] ===== End Reasoning Details =====")
+                logger.debug("[MINIMAX] ===== End Reasoning Details =====")
 
             # Yield final chunk with finish_reason (+ usage when reported)
             final_chunk = {
