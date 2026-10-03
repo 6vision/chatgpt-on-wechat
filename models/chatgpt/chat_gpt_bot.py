@@ -403,12 +403,12 @@ class AzureChatGPTBot(ChatGPTBot):
         text_to_image_model = conf().get("text_to_image")
         if text_to_image_model == "dall-e-2":
             api_version = "2023-06-01-preview"
-            endpoint = conf().get("azure_openai_dalle_api_base","open_ai_api_base")
+            endpoint = conf().get("azure_openai_dalle_api_base") or conf().get("open_ai_api_base")
             # 检查endpoint是否以/结尾
             if not endpoint.endswith("/"):
                 endpoint = endpoint + "/"
             url = "{}openai/images/generations:submit?api-version={}".format(endpoint, api_version)
-            api_key = conf().get("azure_openai_dalle_api_key","open_ai_api_key")
+            api_key = conf().get("azure_openai_dalle_api_key") or conf().get("open_ai_api_key")
             headers = {"api-key": api_key, "Content-Type": "application/json"}
             try:
                 body = {"prompt": query, "size": conf().get("image_create_size", "256x256"),"n": 1}
@@ -428,12 +428,12 @@ class AzureChatGPTBot(ChatGPTBot):
                 return False, _t("图片生成失败", "Image generation failed")
         elif text_to_image_model == "dall-e-3":
             api_version = conf().get("azure_api_version", "2024-02-15-preview")
-            endpoint = conf().get("azure_openai_dalle_api_base","open_ai_api_base")
+            endpoint = conf().get("azure_openai_dalle_api_base") or conf().get("open_ai_api_base")
             # 检查endpoint是否以/结尾
             if not endpoint.endswith("/"):
                 endpoint = endpoint + "/"
             url = "{}openai/deployments/{}/images/generations?api-version={}".format(endpoint, conf().get("azure_openai_dalle_deployment_id","text_to_image"),api_version)
-            api_key = conf().get("azure_openai_dalle_api_key","open_ai_api_key")
+            api_key = conf().get("azure_openai_dalle_api_key") or conf().get("open_ai_api_key")
             headers = {"api-key": api_key, "Content-Type": "application/json"}
             try:
                 body = {"prompt": query, "size": conf().get("image_create_size", "1024x1024"), "quality": conf().get("dalle3_image_quality", "standard")}
