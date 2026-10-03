@@ -796,10 +796,28 @@ class McpClient:
                     f"[MCP:{self.name}] failed to reinitialize expired HTTP session"
                 )
 
-    def _read_sse_response(self, resp, expected_id) -> dict:
-        """Read an SSE stream and return the first JSON-RPC response with matching id."""
+    def _read_sse_response(self, resp, expected_id, timeout: Optional[float] = None) -> dict:
+        """Read an SSE stream and return the first JSON-RPC response with matching id.
+
+        urlopen()'s timeout only bounds a single socket read and every arriving
+        byte resets it, so a server that holds the stream open with keepalive
+        comments (": keepalive", which servers send every few seconds) while
+        withholding its response would keep this loop running forever, hanging
+        the tool call and leaking the connection. The loop therefore carries a
+        total deadline of its own.
+
+        Uses the per-server timeout from mcp.json config when no explicit
+        timeout is provided.
+        """
+        effective = timeout if timeout is not None else self._timeout
+        deadline = time.monotonic() + effective
         data_buf: list = []
         for raw_line in resp:
+            if time.monotonic() > deadline:
+                raise TimeoutError(
+                    f"[MCP:{self.name}] streamable-http SSE response read "
+                    f"timed out after {effective}s"
+                )
             line = raw_line.decode("utf-8").rstrip("\n\r")
             if line == "":
                 # End of an SSE event, attempt to parse accumulated data
