@@ -90,6 +90,14 @@ class BackupRestoreContainmentTest(unittest.TestCase):
             "undo wrote outside the workspace from a traversal manifest entry",
         )
 
+    def test_a_payload_outside_the_snapshot_is_refused(self):
+        backup_id = self._snapshot([{"bak": "../../../../other.txt", "rel": "notes.md"}], {})
+        self.assertFalse(restore_backup(self.ws, backup_id))
+        self.assertFalse(os.path.exists(os.path.join(self.ws, "notes.md")))
+
+    def test_a_malformed_backup_id_is_refused(self):
+        self.assertFalse(restore_backup(self.ws, "../../.."))
+
     def test_a_deeper_escape_does_not_overwrite_a_file_outside(self):
         """A longer ``..`` chain is refused the same way."""
         backup_id = self._snapshot(
