@@ -87,7 +87,7 @@ class TaskStore:
             Dictionary of task_id -> task_data
         """
         with self.lock:
-            if not os.path.exists(self.store_path):
+            if not os.path.exists(self.store_path) and not os.path.exists(f"{self.store_path}.bak"):
                 return {}
             
             try:
