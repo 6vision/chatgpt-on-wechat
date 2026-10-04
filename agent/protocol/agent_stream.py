@@ -146,6 +146,13 @@ def _cache_hit_tokens(usage: Dict[str, Any]) -> int:
 RATE_LIMIT_MAX_WAIT = 60  # seconds
 
 
+# Once a trim is due, history is cut to this share of the token budget and of
+# the turn cap. Trimming to the exact limit would drop the oldest turn on every
+# new message, changing the start of the history each request so the
+# provider's prefix cache never hits for a long session.
+TRIM_TARGET_RATIO = 0.8
+
+
 # Appended only for the file-writing tools, where "send less" needs to say how.
 _SPLIT_WRITE_ADVICE = (
     "To change an existing file, use edit rather than rewriting the whole file. "
@@ -2636,9 +2643,11 @@ class AgentStreamExecutor:
             return
 
         # Primary: token-budget-first trim. Walk turns newest -> oldest and keep
-        # the longest suffix that fits the budget (removes only the minimum
-        # turns needed, not a blind "remove half").
-        kept_turns, discarded_turns = self._token_budget_trim(turns, budget)
+        # the longest suffix that fits the target, which leaves headroom below
+        # the budget so the next turns append without another trim.
+        target_budget = int(budget * TRIM_TARGET_RATIO)
+        target_turns = max(1, int(self.max_context_turns * TRIM_TARGET_RATIO))
+        kept_turns, discarded_turns = self._token_budget_trim(turns, target_budget)
 
         if budget <= 0:
             logger.warning(
@@ -2660,12 +2669,11 @@ class AgentStreamExecutor:
             discarded_turns = turns[:-2]
 
         # Secondary: turn-count cap acts as an explicit cost safety net. Even
-        # when the kept turns fit the token budget, never keep more than
-        # max_context_turns of them.
-        if len(kept_turns) > self.max_context_turns:
-            extra = kept_turns[:len(kept_turns) - self.max_context_turns]
+        # when the kept turns fit the token budget, cut them to the turn target.
+        if len(kept_turns) > target_turns:
+            extra = kept_turns[:len(kept_turns) - target_turns]
             discarded_turns = extra + discarded_turns
-            kept_turns = kept_turns[-self.max_context_turns:]
+            kept_turns = kept_turns[-target_turns:]
 
         if not discarded_turns and not kept_previous:
             # Nothing needed discarding (a single oversized newest turn is kept
