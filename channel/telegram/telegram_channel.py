@@ -495,7 +495,9 @@ class TelegramChannel(ChatChannel):
         if bot_at in text:
             return True
         # Also check entities strictly to support text_mention (no-username @)
-        for ent in (message.entities or []) + (message.caption_entities or []):
+        # PTB 22.x: entities is a tuple, caption_entities a list (or None) —
+        # concatenating them raises TypeError and aborts the whole handler.
+        for ent in list(message.entities or []) + list(message.caption_entities or []):
             if ent.type == "mention":
                 src = message.text or message.caption or ""
                 if src[ent.offset: ent.offset + ent.length].lower() == bot_at:
