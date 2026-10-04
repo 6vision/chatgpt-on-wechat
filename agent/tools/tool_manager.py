@@ -332,7 +332,17 @@ class ToolManager:
             try:
                 with open(mcp_json_path, "r", encoding="utf-8") as f:
                     data = _json.load(f)
-                raw = data.get("mcpServers") or data.get("mcp_servers") or data
+                # Same resolution the console uses in service.load_servers,
+                # and it has to match: `or` would treat an empty server map as
+                # absent and fall through to `data`, so a file saved with no
+                # servers at all ({"mcpServers": {}}, what the editor writes when
+                # the last one is removed) would be read as one server named
+                # "mcpServers" -- which then fails to boot and sticks in
+                # _mcp_status as "failed" for good. Test for the key being
+                # absent, not for the map being truthy.
+                raw = data.get("mcpServers")
+                if raw is None:
+                    raw = data.get("mcp_servers", data)
                 # DEBUG: with N agents this fires N times for the same shared
                 # mcp.json; the real boot is logged once at INFO further below.
                 logger.debug(f"[ToolManager] Loading MCP config from {mcp_json_path}")
