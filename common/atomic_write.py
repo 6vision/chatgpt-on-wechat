@@ -41,7 +41,12 @@ def _replace(path, write, encoding: str = "utf-8", newline=None) -> None:
     directory, name = os.path.split(target)
     tmp_path = os.path.join(directory, f".{name}.{uuid.uuid4().hex[:12]}.tmp")
     try:
-        f = open(tmp_path, "w", encoding=encoding, newline=newline)
+        # Keep a private target's contents private throughout staging. The
+        # exclusive opener also refuses an existing temporary path.
+        f = open(
+            tmp_path, "w", encoding=encoding, newline=newline,
+            opener=lambda name, flags: os.open(name, flags | os.O_EXCL, 0o600),
+        )
     except OSError as e:
         if not _can_write_in_place(e, target):
             raise
