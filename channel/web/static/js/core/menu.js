@@ -28,6 +28,8 @@ const MENU_DEFAULT = [
     { id: 'manage',  views: ['agents', 'config', 'skills', 'memory', 'knowledge', 'channels', 'tasks'] },
     { id: 'monitor', views: ['logs'] },
 ];
+// Built-in pages that start hidden, so only the menu editor offers them.
+const MENU_DEFAULT_HIDDEN = new Set(['artifacts']);
 const MENU_GROUP_LABELS = { chat: 'nav_chat', manage: 'nav_manage', monitor: 'nav_monitor' };
 // Pages a menu must always lead to; mirrors REQUIRED_VIEWS in api/menu.py.
 const MENU_REQUIRED = ['chat', 'config'];
@@ -61,10 +63,14 @@ function menuBuiltinItem(view) {
     return { id: view, type: 'builtin', view: view, title: '', icon: '', hidden: false };
 }
 
+function _menuDefaultItem(view) {
+    return Object.assign(menuBuiltinItem(view), { hidden: MENU_DEFAULT_HIDDEN.has(view) });
+}
+
 /** The menu to draw: the saved one, plus any page this version added since. */
 function menuMerge(saved) {
     if (!saved || !Array.isArray(saved.groups) || !saved.groups.length) {
-        return { groups: MENU_DEFAULT.map(g => ({ id: g.id, title: '', items: g.views.map(menuBuiltinItem) })) };
+        return { groups: MENU_DEFAULT.map(g => ({ id: g.id, title: '', items: g.views.map(_menuDefaultItem) })) };
     }
     const doc = {
         groups: saved.groups.map(g => ({
@@ -77,7 +83,7 @@ function menuMerge(saved) {
     MENU_DEFAULT.forEach(def => def.views.forEach(view => {
         if (present.has(view)) return;
         const home = doc.groups.find(g => g.id === def.id) || doc.groups[doc.groups.length - 1];
-        home.items.push(menuBuiltinItem(view));
+        home.items.push(_menuDefaultItem(view));
     }));
     return doc;
 }

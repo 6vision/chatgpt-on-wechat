@@ -83,6 +83,9 @@ export const MENU_KINDS: ReadonlySet<FileKind> = new Set<FileKind>(['html', 'mar
 /** Pages the built-in menu carries: they can be hidden, never removed. */
 export const MENU_DEFAULT_VIEWS = new Set(MENU_DEFAULT.flatMap((g) => g.views))
 
+/** Built-in pages that start hidden; mirrors MENU_DEFAULT_HIDDEN in the web console. */
+const MENU_DEFAULT_HIDDEN: ReadonlySet<string> = new Set(['artifacts'])
+
 /**
  * Pages this app keeps in the rail's footer menu rather than in the menu. The
  * entry stays in the document, untouched, for the web console; here neither
@@ -135,9 +138,13 @@ export function builtinItem(view: string): MenuItem {
   return { id: view, type: 'builtin', view, title: '', icon: '', hidden: false }
 }
 
+function defaultItem(view: string): MenuItem {
+  return { ...builtinItem(view), hidden: MENU_DEFAULT_HIDDEN.has(view) }
+}
+
 /** The built-in menu as a document. */
 export function defaultMenu(): MenuDoc {
-  return { groups: MENU_DEFAULT.map((g) => ({ id: g.id, title: '', items: g.views.map(builtinItem) })) }
+  return { groups: MENU_DEFAULT.map((g) => ({ id: g.id, title: '', items: g.views.map(defaultItem) })) }
 }
 
 /** The menu to draw: the saved one, plus any built-in page this version added since. */
@@ -156,7 +163,7 @@ export function mergeMenu(saved: MenuDoc | null): MenuDoc {
     for (const view of def.views) {
       if (present.has(view)) continue
       const home = doc.groups.find((g) => g.id === def.id) || doc.groups[doc.groups.length - 1]
-      home.items.push(builtinItem(view))
+      home.items.push(defaultItem(view))
     }
   }
   return doc
