@@ -27,6 +27,9 @@ available_setting = {
     # openai api protocol: "auto" (Responses only for models that require it), "chat" (/chat/completions) or "responses" (/responses)
     "open_ai_api_type": "auto",
     "claude_api_base": "https://api.anthropic.com/v1",  # claude api base
+    # Prompt cache TTL for the system prompt + tools in agent mode: "1h" or "5m".
+    # Use "5m" if the endpoint rejects the 1h TTL; the conversation always uses 5m.
+    "claude_cache_ttl": "1h",
     "gemini_api_base": "https://generativelanguage.googleapis.com",  # gemini api base
     "custom_api_key": "",  # custom OpenAI-compatible provider api key (used when bot_type is "custom"); legacy single-provider field
     "custom_api_base": "",  # custom OpenAI-compatible provider api base (used when bot_type is "custom"); legacy single-provider field

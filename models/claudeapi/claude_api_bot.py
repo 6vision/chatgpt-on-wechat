@@ -57,6 +57,15 @@ BUDGET_THINKING_MODELS = (
 # unbounded thinking pass.
 MAX_THINKING_BUDGET = 16000
 
+# Prompt caching uses explicit block-level breakpoints: the top-level
+# ``cache_control`` shorthand is not accepted by every Anthropic-compatible
+# endpoint. The API rejects a request carrying more than 4 breakpoints.
+CACHE_CONTROL = {"type": "ephemeral"}
+# A 1h entry must precede every 5m entry in the prompt.
+CACHE_TTL_1H = "1h"
+MAX_CACHE_BREAKPOINTS = 4
+UNCACHEABLE_BLOCK_TYPES = ("thinking", "redacted_thinking")
+
 
 # OpenAI对话模型API (可用)
 class ClaudeAPIBot(Bot, OpenAIImage):
@@ -411,6 +420,13 @@ class ClaudeAPIBot(Bot, OpenAIImage):
 
         if tools:
             request_params["tools"] = tools
+            # Agent turns resend the same long prefix on every step of the tool
+            # loop, so cache it; one-off calls without tools are left alone.
+            system, request_params["messages"] = self._apply_prompt_cache(
+                request_params.get("system"), claude_messages, tools,
+                system_ttl=conf().get("claude_cache_ttl", CACHE_TTL_1H))
+            if system:
+                request_params["system"] = system
 
         # Claude exposes effort under output_config rather than the generic
         # reasoning_effort field used by OpenAI-compatible providers.
@@ -452,6 +468,96 @@ class ClaudeAPIBot(Bot, OpenAIImage):
                     "message": str(e),
                     "status_code": 500
                 }
+
+    @staticmethod
+    def _can_mark_cache(block) -> bool:
+        if not isinstance(block, dict) or block.get("cache_control"):
+            return False
+        if block.get("type") in UNCACHEABLE_BLOCK_TYPES:
+            return False
+        # An empty text block cannot carry cache_control.
+        return block.get("type") != "text" or bool(block.get("text"))
+
+    @staticmethod
+    def _count_cache_breakpoints(system, messages, tools) -> int:
+        blocks = list(tools or [])
+        if isinstance(system, list):
+            blocks.extend(system)
+        for msg in messages or []:
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            blocks.extend(content)
+            for blk in content:
+                if isinstance(blk, dict) and isinstance(blk.get("content"), list):
+                    blocks.extend(blk["content"])
+        return sum(1 for blk in blocks if isinstance(blk, dict) and blk.get("cache_control"))
+
+    @staticmethod
+    def _system_cache_control(system, tools, system_ttl) -> dict:
+        """cache_control for the system breakpoint.
+
+        Tools + system are shared by every session and turn of an agent, and users
+        often come back after more than 5 minutes, so they get the 1h TTL by default.
+        It is skipped when an earlier block already carries a shorter-lived
+        breakpoint, since the API rejects a 1h entry placed after a 5m one.
+        """
+        if system_ttl != CACHE_TTL_1H:
+            return CACHE_CONTROL
+        earlier = list(tools or []) + (list(system) if isinstance(system, list) else [])
+        for blk in earlier:
+            cc = blk.get("cache_control") if isinstance(blk, dict) else None
+            if cc and cc.get("ttl") != CACHE_TTL_1H:
+                return CACHE_CONTROL
+        return dict(CACHE_CONTROL, ttl=CACHE_TTL_1H)
+
+    @classmethod
+    def _apply_prompt_cache(cls, system, messages: list, tools, system_ttl=None):
+        """Place cache breakpoints at the end of the system prompt and of the conversation.
+
+        Tools render before system, so the system breakpoint caches tools + system,
+        which stay identical across turns even when the history does not. The
+        message breakpoint follows the growing history; the next step of the tool
+        loop finds it through the API's 20-block lookback, so it keeps the cheaper
+        5m TTL. Breakpoints already present count against the limit of 4. Returns
+        new (system, messages) without mutating the inputs, which are shared with
+        the agent's history.
+        """
+        budget = MAX_CACHE_BREAKPOINTS - cls._count_cache_breakpoints(system, messages, tools)
+        if budget > 0 and system:
+            system_cc = cls._system_cache_control(system, tools, system_ttl)
+            blocks = [{"type": "text", "text": system}] if isinstance(system, str) else list(system)
+            if cls._can_mark_cache(blocks[-1]):
+                blocks[-1] = dict(blocks[-1], cache_control=system_cc)
+                system = blocks
+                budget -= 1
+        if budget > 0 and messages:
+            last = messages[-1]
+            content = last.get("content")
+            if isinstance(content, str):
+                content = [{"type": "text", "text": content}]
+            if isinstance(content, list) and content and cls._can_mark_cache(content[-1]):
+                content = content[:-1] + [dict(content[-1], cache_control=CACHE_CONTROL)]
+                messages = messages[:-1] + [dict(last, content=content)]
+        return system, messages
+
+    @staticmethod
+    def _build_usage(input_tokens, output_tokens, cache_write, cache_read) -> dict:
+        """OpenAI-shaped usage whose prompt_tokens is the whole prompt.
+
+        Anthropic's ``input_tokens`` excludes cached tokens, but the agent reads
+        prompt_tokens as everything the model saw this turn (context indicator,
+        trimming decisions), so cache writes and reads are added back. The cache
+        fields are passed through for the agent's hit-rate logging.
+        """
+        prompt_tokens = (input_tokens or 0) + (cache_write or 0) + (cache_read or 0)
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": output_tokens or 0,
+            "total_tokens": prompt_tokens + (output_tokens or 0),
+            "cache_creation_input_tokens": cache_write or 0,
+            "cache_read_input_tokens": cache_read or 0,
+        }
 
     @staticmethod
     def _sanitize_message(msg: dict) -> dict:
@@ -546,11 +652,9 @@ class ClaudeAPIBot(Bot, OpenAIImage):
                     "finish_reason": claude_response.get("stop_reason", "stop")
                 }
             ],
-            "usage": {
-                "prompt_tokens": usage.get("input_tokens", 0),
-                "completion_tokens": usage.get("output_tokens", 0),
-                "total_tokens": usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
-            }
+            "usage": self._build_usage(
+                usage.get("input_tokens"), usage.get("output_tokens"),
+                usage.get("cache_creation_input_tokens"), usage.get("cache_read_input_tokens"))
         }
 
         return formatted_response
@@ -576,6 +680,8 @@ class ClaudeAPIBot(Bot, OpenAIImage):
         # Surfaced as a final usage chunk so the agent can show a real count.
         usage_input_tokens = 0
         usage_output_tokens = 0
+        usage_cache_write = 0
+        usage_cache_read = 0
 
         try:
             # Make streaming HTTP request
@@ -621,6 +727,8 @@ class ClaudeAPIBot(Bot, OpenAIImage):
                                 msg_usage = (event.get("message", {}) or {}).get("usage", {}) or {}
                                 usage_input_tokens = msg_usage.get("input_tokens", 0) or 0
                                 usage_output_tokens = msg_usage.get("output_tokens", 0) or usage_output_tokens
+                                usage_cache_write = msg_usage.get("cache_creation_input_tokens", 0) or 0
+                                usage_cache_read = msg_usage.get("cache_read_input_tokens", 0) or 0
 
                             elif event_type == "content_block_start":
                                 # New content block
@@ -681,6 +789,8 @@ class ClaudeAPIBot(Bot, OpenAIImage):
                                 md_usage = event.get("usage", {}) or {}
                                 if md_usage.get("output_tokens"):
                                     usage_output_tokens = md_usage.get("output_tokens")
+                                usage_cache_write = md_usage.get("cache_creation_input_tokens") or usage_cache_write
+                                usage_cache_read = md_usage.get("cache_read_input_tokens") or usage_cache_read
                                 
                                 # Message complete - yield tool calls if any
                                 if tool_uses_map:
@@ -721,11 +831,9 @@ class ClaudeAPIBot(Bot, OpenAIImage):
                                         "created": int(time.time()),
                                         "model": request_params["model"],
                                         "choices": [],
-                                        "usage": {
-                                            "prompt_tokens": usage_input_tokens,
-                                            "completion_tokens": usage_output_tokens,
-                                            "total_tokens": usage_input_tokens + usage_output_tokens,
-                                        },
+                                        "usage": self._build_usage(
+                                            usage_input_tokens, usage_output_tokens,
+                                            usage_cache_write, usage_cache_read),
                                     }
 
                         except json.JSONDecodeError:
