@@ -192,7 +192,10 @@ class SearchFiles(BaseTool):
         Results are ordered most-recently-modified first - when several files
         match, the one just worked on is almost always the one wanted.
         """
-        matcher = fnmatch.fnmatch if ignore_case else fnmatch.fnmatchcase
+        # fnmatch.fnmatch normalizes case only on Windows. Honor the explicit
+        # option on every platform while keeping the default case-sensitive.
+        if ignore_case:
+            pattern = pattern.casefold()
         # A bare "report" is far more likely to mean "name contains report"
         # than an exact filename; a pattern with no wildcard would otherwise
         # match nothing and look like the file does not exist.
@@ -224,7 +227,8 @@ class SearchFiles(BaseTool):
             for filename in filenames:
                 if only and filename != only:
                     continue
-                if not matcher(filename, pattern):
+                candidate = filename.casefold() if ignore_case else filename
+                if not fnmatch.fnmatchcase(candidate, pattern):
                     continue
                 full = os.path.join(dirpath, filename)
                 if self._is_credential_path(full):
