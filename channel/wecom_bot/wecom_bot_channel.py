@@ -1203,8 +1203,13 @@ class WecomBotChannel(ChatChannel):
             logger.info(f"[WecomBot] Image converted from {fmt} -> {out_path}")
             return out_path
         except Exception as e:
+            # Nothing was converted, so the caller must not treat the original as
+            # ready to send -- WeCom only accepts JPG/PNG here. Returning
+            # file_path looked like success and left both callers' `if not
+            # formatted` guards unreachable, so an image the agent produced was
+            # uploaded or embedded as-is and rejected platform-side.
             logger.error(f"[WecomBot] Image format check failed: {e}")
-            return file_path
+            return ""
 
     @staticmethod
     def _compress_image(file_path: str, max_bytes: int) -> str:
