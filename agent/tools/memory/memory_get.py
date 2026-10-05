@@ -7,6 +7,7 @@ Allows agents to read specific sections from memory files
 import os
 
 from agent.tools.base_tool import BaseTool
+from agent.tools.utils.credentials import DENIED_MESSAGE, is_credential_path
 
 
 class MemoryGetTool(BaseTool):
@@ -114,8 +115,11 @@ class MemoryGetTool(BaseTool):
 
             real_file = os.path.realpath(str(file_path))
             if not any(_contained(real_file, root) for root in allowed_roots):
-                return ToolResult.fail(f"Error: Access denied: path outside workspace")
+                return ToolResult.fail("Error: Access denied: path outside workspace")
             
+            if is_credential_path(str(file_path)):
+                return ToolResult.fail(DENIED_MESSAGE)
+
             if not file_path.exists():
                 return ToolResult.fail(f"Error: File not found: {path}")
             
