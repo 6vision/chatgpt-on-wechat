@@ -571,14 +571,8 @@ class BrowserService:
         except Exception as e:
             logger.error(f"[Browser] Failed to launch browser: {e}")
             self._alive = False
-            # A launch that throws can already have started the Playwright
-            # driver and spawned a Chrome for it, and this path returns before
-            # the _shutdown_browser() below. Leaving them alone would keep both
-            # resident for the life of the process -- invisible to the user,
-            # who only sees "Browser is not available" -- and the Chrome holds
-            # the profile's lock, so the next launch walks into the same failure.
-            # close() cannot reclaim them either: it returns on `not _alive`,
-            # which was just set above.
+            # The driver and Chrome may already be running; a leftover Chrome
+            # holds the profile lock and makes the next launch fail too.
             try:
                 self._shutdown_browser()
             except Exception as cleanup_error:

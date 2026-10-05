@@ -1,21 +1,4 @@
-"""A browser launch that fails must not leave its driver and Chrome behind.
-
-``_launch_browser`` starts the Playwright driver and *then* dispatches to the
-mode-specific launcher, so a launcher that throws leaves both handles live on
-the service. ``_run_loop``'s failure path returned straight away, skipping the
-``_shutdown_browser()`` further down -- the only place ``_playwright.stop()``
-and ``_chrome_launcher.close()`` happen.
-
-Nothing else covers it: ``_start_thread``'s timeout calls ``close()``, but
-``_ready`` is set on the way out so it never waits; and ``close()`` itself
-returns on ``if not self._alive``, which the failure path had just set to
-False. The comment above ``close()``'s stuck-thread branch already describes
-this exact hazard ("would stay resident for the rest of the process's life"),
-so the gap is in the launch that *throws* rather than the one that hangs.
-
-The mode-specific launchers are replaced with recorders here: what matters is
-that the handles set before the throw get reclaimed, not how Chrome is spawned.
-"""
+"""A browser launch that fails must not leave its driver and Chrome behind."""
 
 import queue
 import threading
@@ -25,8 +8,6 @@ from agent.tools.browser.browser_service import BrowserService
 
 
 class _Recorder:
-    """Stands in for the driver / launcher and records whether it was reclaimed."""
-
     def __init__(self):
         self.stopped = False
         self.closed = False
@@ -53,7 +34,6 @@ class _FakePlaywright:
 class BrowserLaunchFailureCleanupTest(unittest.TestCase):
 
     def _service(self, launcher_error):
-        """A BrowserService with just the attributes the launch path touches."""
         service = BrowserService.__new__(BrowserService)
         service._lock = threading.RLock()
         service._task_queue = queue.Queue()
@@ -78,8 +58,7 @@ class BrowserLaunchFailureCleanupTest(unittest.TestCase):
         service._launcher = launcher
 
         def launcher_impl(launch_args, viewport):
-            # What the real system-cdp launcher does: spawn first, attach
-            # second. The attach is what fails.
+            # Chrome is spawned, then attaching to it fails.
             service._chrome_launcher = launcher
             raise launcher_error
 
@@ -97,18 +76,11 @@ class BrowserLaunchFailureCleanupTest(unittest.TestCase):
 
         service._run_loop()
 
-        self.assertTrue(
-            driver.stopped,
-            "the Playwright driver outlived the failed launch",
-        )
-        self.assertTrue(
-            launcher.closed,
-            "the Chrome spawned for the failed launch was never closed",
-        )
+        self.assertTrue(driver.stopped)
+        self.assertTrue(launcher.closed)
 
     @staticmethod
     def _pending_call(service):
-        """A request already queued, as _submit would leave it."""
         slot = {"value": None, "error": None, "event": threading.Event()}
         service._task_queue.put((lambda: None, (), {}, slot))
         return slot
@@ -119,10 +91,7 @@ class BrowserLaunchFailureCleanupTest(unittest.TestCase):
 
         service._run_loop()
 
-        # The waiting caller must be released with the launch error, and the
-        # manager must not be left looking usable.
-        self.assertTrue(slot["event"].is_set(),
-                        "the waiting request was never completed")
+        self.assertTrue(slot["event"].is_set())
         self.assertIsInstance(slot["error"], RuntimeError)
         self.assertIn("cdp refused", str(slot["error"]))
         self.assertFalse(service._alive)
@@ -138,18 +107,8 @@ class BrowserLaunchFailureCleanupTest(unittest.TestCase):
 
         service._run_loop()  # must not raise
 
-        self.assertTrue(slot["event"].is_set(),
-                        "the launch error was swallowed by the cleanup error")
+        self.assertTrue(slot["event"].is_set())
         self.assertIn("cdp refused", str(slot["error"]))
-        self.assertTrue(service._ready.is_set())
-
-    def test_the_ready_event_is_set_even_when_cleanup_fails(self):
-        # A caller blocked in ready.wait() has to be released either way.
-        service, _, _ = self._service(RuntimeError("cdp refused"))
-        service._shutdown_browser = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
-
-        service._run_loop()
-
         self.assertTrue(service._ready.is_set())
 
 

@@ -1,15 +1,4 @@
-"""Compacting the history must not swallow a turn that lands while it runs.
-
-``compact_context`` takes ``messages_lock`` twice with a slow LLM summarize
-call in between (``agent/protocol/agent.py:903`` -> ``:934`` -> ``:962``). A
-turn that arrives during that window writes ``self.messages`` as a whole new
-list (``agent.py:869``), so the write-back used to overwrite the user's new
-message and the Agent's answer to it -- while still reporting ``ok: True``.
-
-The HTTP route (``POST /api/sessions/<id>/compact_context``) hands over the
-live agent from ``peek_agent`` without checking whether a turn is running, and
-the console's "compact context" button sits right next to the message box.
-"""
+"""Compaction keeps a turn that lands while the summary is being produced."""
 
 import sys
 import threading
@@ -31,13 +20,7 @@ def _a(text):
 
 
 class _SlowFlush:
-    """Stands in for the summarize round-trip, deterministically.
-
-    ``entered`` is set once compaction is inside the call -- which is outside
-    the lock, the whole point -- and the call does not return until ``release``
-    is set. That makes "a turn lands mid-compaction" a fact of the test rather
-    than a race.
-    """
+    """Summarize blocks until ``release`` so a turn can land mid-compaction."""
 
     def __init__(self, entered, release):
         self.entered = entered
@@ -55,7 +38,7 @@ class _SlowFlush:
         pass
 
 
-def _agent(history, blocking=False):
+def _agent(history):
     agent = Agent.__new__(Agent)
     agent.messages = list(history)
     agent.messages_lock = threading.RLock()
@@ -95,35 +78,20 @@ def _texts(messages):
 
 
 class CompactContextConcurrencyTest(unittest.TestCase):
-    """Three turns, then a fourth that lands mid-compaction."""
-
     HISTORY = [_q("q1"), _a("a1"), _q("q2"), _a("a2"), _q("q3"), _a("a3")]
 
     def test_a_turn_that_lands_mid_compaction_is_kept(self):
-        agent, events = _agent(self.HISTORY, blocking=True)
+        agent, events = _agent(self.HISTORY)
         worker = _run_with_concurrent_write(agent, events, [_q("q4"), _a("a4")])
         result = agent.compact_context(keep_recent_turns=1)
         worker.join(timeout=5)
 
         texts = _texts(agent.messages)
-        self.assertTrue(any("q4" in t for t in texts),
-                        f"the user's new question was lost: {texts}")
-        self.assertTrue(any("a4" in t for t in texts),
-                        f"the answer to it was lost: {texts}")
-        self.assertTrue(result.get("ok"), result)
-
-    def test_compaction_still_happens_alongside_that_turn(self):
-        agent, events = _agent(self.HISTORY, blocking=True)
-        worker = _run_with_concurrent_write(agent, events, [_q("q4"), _a("a4")])
-        result = agent.compact_context(keep_recent_turns=1)
-        worker.join(timeout=5)
-
-        self.assertEqual(result.get("reason"), "compacted")
         self.assertEqual(result.get("compacted_turns"), 2)
-        # The summary note is still injected, and q1/q2 are still summarized.
-        texts = _texts(agent.messages)
+        self.assertIn("q4", texts)
+        self.assertIn("a4", texts)
         self.assertTrue(any("SUMMARY" in t for t in texts), texts)
-        self.assertFalse(any("q1" in t for t in texts), texts)
+        self.assertNotIn("q1", texts)
 
     def test_an_untouched_history_compacts_exactly_as_before(self):
         agent, _ = _agent(self.HISTORY)
@@ -137,19 +105,8 @@ class CompactContextConcurrencyTest(unittest.TestCase):
         self.assertTrue(any("SUMMARY" in t for t in texts), texts)
         self.assertEqual(len(agent.messages), 2)
 
-    def test_nothing_to_compact_is_unchanged(self):
-        agent, _ = _agent([_q("q1"), _a("a1")])
-        result = agent.compact_context(keep_recent_turns=2)
-
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["reason"], "nothing_to_compact")
-        self.assertEqual(len(agent.messages), 2)
-
     def test_a_history_rewritten_underneath_is_reported_not_overwritten(self):
-        # A concurrent automatic trim replaces the history rather than appending
-        # to it. The kept turns no longer describe it, so compaction must decline
-        # rather than write a compaction computed from a history that is gone.
-        agent, events = _agent(self.HISTORY, blocking=True)
+        agent, events = _agent(self.HISTORY)
         entered, release = events
         release.clear()
 

@@ -159,13 +159,7 @@ def _unwrap_metadata_namespace(metadata_raw: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _normalize_kind(value: Any) -> str:
-    """Normalize a value to a lower-cased kind string.
-
-    A skill file is hand-written YAML, so ``kind:`` with nothing after it
-    arrives as None and ``kind: 1`` as an int. Calling ``.lower()`` on either
-    raises before the caller's empty check can skip the entry, which takes the
-    whole skill library down with it.
-    """
+    """Lower-cased kind string; "" for a missing or non-string YAML value."""
     if not isinstance(value, str):
         return ""
     return value.strip().lower()

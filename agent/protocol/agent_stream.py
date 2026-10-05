@@ -595,27 +595,16 @@ class AgentStreamExecutor:
         channel_type = getattr(self.model, 'channel_type', '') or ''
         return conf().get("enable_thinking", False) and channel_type == 'web'
 
-    def _filter_think_tags(self, text: str, streaming: bool = False) -> str:
+    def _filter_think_tags(self, text: str) -> str:
         """
         Handle <think>...</think> blocks in content returned by some LLM providers
         (e.g., MiniMax).
 
         - When inline thinking rendering is allowed (Web + thinking enabled):
           remove only the tags, keep the content inside.
-        - Otherwise (IM channels, or thinking disabled globally): remove both
-          the tags and the content entirely.
-
-        An unclosed literal ``<think>`` must never swallow the reply.
-        ``streaming`` picks between the two call sites:
-
-        - ``streaming=True`` (streaming deltas): an unclosed tag keeps being
-          swallowed to the end, so a half-written reasoning block never leaks.
-        - ``streaming=False`` (final text): only paired blocks are stripped; an
-          unclosed literal tag is rewritten to its full-width form (``＜think＞``)
-          and kept, so the reply is never truncated.
-
-        The final-text path is the one users hit: a reply that merely mentions
-        the tag used to lose everything from the tag onwards.
+        - Otherwise (IM channels, or thinking disabled globally): remove paired
+          blocks entirely. A tag without a partner is literal text, so it is kept
+          in full-width form (``＜think＞``) instead of swallowing the reply.
         """
         if not text:
             return text
@@ -625,86 +614,49 @@ class AgentStreamExecutor:
             text = re.sub(r'</think>', '', text)
         else:
             text = re.sub(r'<think>[\s\S]*?</think>', '', text)
-            # Orphan closing tags. Paired blocks were removed above, so whatever
-            # closing tag is left has no opening counterpart. Rewrite it to
-            # full-width instead of deleting it: a literal ``</think>`` in the
-            # visible text is content, not markup, and deleting it would eat the
-            # user's own words.
-            text = re.sub(r'</think>', '＜/think＞', text)
-            if streaming:
-                # Streaming: an unclosed opening tag means the rest is very
-                # likely reasoning, so keep swallowing it.
-                text = re.sub(r'<think>[\s\S]*$', '', text)
-            elif re.search(r'<think>[\s\S]*$', text):
-                # Final text: an unclosed literal tag is content (typically the
-                # user quoting the tag), so keep it in full-width form and leave
-                # a log line instead of silently truncating the reply.
-                logger.warning(
-                    "[Agent] unclosed literal <think> tag in final text; kept as full-width"
-                )
-                text = re.sub(r'<think>', '＜think＞', text)
+            text = text.replace('</think>', '＜/think＞')
+            if '<think>' in text:
+                logger.warning("[Agent] unclosed literal <think> tag in final text; kept as full-width")
+                text = text.replace('<think>', '＜think＞')
         return text
 
-    # Streaming think-tag filtering has to be stateful. A per-delta regex misses
-    # tags split across chunks: a half opening tag (``<thi``) is emitted as-is,
-    # and a closing tag arriving on its own leaks as an orphan ``</think>``.
-    # Channels that accumulate deltas as the final text (wecom_bot, terminal)
-    # have no final-text pass to clean that up, so it must be caught before the
-    # delta is emitted. Design: a small tail buffer + a two-state machine.
+    # Streaming needs state: a per-delta regex leaks tags split across chunks,
+    # and channels that use the accumulated deltas as the final text (wecom_bot,
+    # terminal) never get a final-text pass to clean them up.
     _THINK_OPEN = "<think>"
     _THINK_CLOSE = "</think>"
 
     @staticmethod
     def _partial_tag_suffix_len(text: str, tag: str) -> int:
-        """Length of the suffix of ``text`` that is a proper prefix of ``tag``.
-
-        0 when it is not a prefix at all. Only prefixes starting at ``<`` count,
-        and a complete tag is excluded (the state machine consumes it directly),
-        so ordinary trailing characters (e.g. ``b``) are never held back.
-        """
+        """Length of the suffix of ``text`` that is a proper prefix of ``tag``."""
         for k in range(min(len(text), len(tag) - 1), 0, -1):
             if text.endswith(tag[:k]):
                 return k
         return 0
 
     def _reset_think_stream(self) -> None:
-        """Reset before each LLM stream.
-
-        One turn may run several tool calls, hence several LLM streams.
-        """
+        """Reset before each LLM stream; one turn may run several."""
         self._think_stream_state = "normal"
         self._think_stream_tail = ""
-        self._think_buf = ""  # reasoning buffer, handed back on flush if unclosed
-        # Inline mode (web + thinking enabled) removes only the tags and keeps the
-        # reasoning text for the collapsible panel, so the swallow-inside-thinking
-        # path must not apply. Resolved once per stream instead of per delta.
+        self._think_buf = ""  # reasoning so far, handed back if never closed
+        # Inline mode keeps the reasoning text, so it never swallows a block.
         self._think_inline = self._should_render_thinking_inline()
 
     def _filter_think_stream(self, delta: str) -> str:
-        """Stateful streaming filter: the part of this delta that is safe to emit.
+        """Return the part of this delta that is safe to emit.
 
-        State = ``_think_stream_state`` (normal / in_think) plus
-        ``_think_stream_tail`` (tail buffer). When the end of ``tail + delta``
-        could be the start of a tag (``<`` / ``</`` / ``<thi`` ...) it is held
-        back until the next delta, so a tag split across chunks never reaches the
-        user in half.
+        A trailing fragment that could start a tag (``<``, ``</th``...) is held
+        back until the next delta, so a split tag never reaches the user in half.
         """
         buf = getattr(self, "_think_stream_tail", "") + (delta or "")
         state = getattr(self, "_think_stream_state", "normal")
-        # Inline mode keeps reasoning text (tags only), so never enter in_think.
-        _swallow = not getattr(self, "_think_inline", False)
+        swallow = not getattr(self, "_think_inline", False)
         out = []
         i, n = 0, len(buf)
         while i < n:
             if state == "in_think":
                 j = buf.find(self._THINK_CLOSE, i)
                 if j == -1:
-                    # The closing tag has not arrived yet (or is being split), so
-                    # buffer the reasoning segment rather than emitting or dropping
-                    # it, holding back only the suspicious prefix. Dropping it here
-                    # would swallow an unclosed literal tag down to the end of the
-                    # stream and leave ``full_content`` permanently incomplete;
-                    # buffering lets the flush path hand the text back.
                     hold = self._partial_tag_suffix_len(buf[i:], self._THINK_CLOSE)
                     seg_end = n - hold
                     if seg_end > i:
@@ -712,7 +664,6 @@ class AgentStreamExecutor:
                     self._think_stream_tail = buf[seg_end:]
                     self._think_stream_state = "in_think"
                     return "".join(out)
-                # Closing tag found ⇒ this really is a reasoning block ⇒ drop the buffer.
                 self._think_buf = ""
                 i = j + len(self._THINK_CLOSE)
                 state = "normal"
@@ -721,7 +672,6 @@ class AgentStreamExecutor:
             j_close = buf.find(self._THINK_CLOSE, i)
             hits = [x for x in (j_open, j_close) if x != -1]
             if not hits:
-                # No complete tag: let the shared prefix handling finish the rest.
                 hold = max(
                     self._partial_tag_suffix_len(buf[i:], self._THINK_OPEN),
                     self._partial_tag_suffix_len(buf[i:], self._THINK_CLOSE),
@@ -736,14 +686,11 @@ class AgentStreamExecutor:
             if j > i:
                 out.append(buf[i:j])
             if j == j_open:
-                i = j + len(self._THINK_OPEN)  # complete opening tag ⇒ drop it
-                state = "in_think" if _swallow else "normal"  # inline keeps content
+                i = j + len(self._THINK_OPEN)
+                state = "in_think" if swallow else "normal"
             else:
-                # Orphan closing tag: a real one is consumed by the in_think branch,
-                # so anything seen in the normal state has no opening counterpart.
-                # Outside inline mode, rewrite it to full-width to keep the text,
-                # matching the final-text path; inline mode removes tags only.
-                if _swallow:
+                # An orphan closing tag is literal text, as in the final-text pass.
+                if swallow:
                     out.append('＜/think＞')
                 i = j + len(self._THINK_CLOSE)
         self._think_stream_tail = ""
@@ -751,29 +698,20 @@ class AgentStreamExecutor:
         return "".join(out)
 
     def _flush_think_stream(self) -> str:
-        """End of stream: emit whatever the buffer still holds.
+        """End of stream: emit whatever is still buffered.
 
-        Channels that accumulate deltas as the final text (wecom_bot, terminal)
-        have no final-text pass, so without this the tail of the reply is lost.
-        Call it right after the ``for chunk in stream`` loop. The tail is usually
-        empty on a clean finish; when it is not, it goes through the stateless
-        filter as a last defence.
+        A block still open here was never closed, so it was a literal tag and its
+        text is handed back rather than lost.
         """
         state = getattr(self, "_think_stream_state", "normal")
         think_buf = getattr(self, "_think_buf", "")
         tail = getattr(self, "_think_stream_tail", "")
         self._reset_think_stream()
         if state == "in_think":
-            # Still inside a block at end of stream ⇒ the tag was never closed,
-            # i.e. a literal tag rather than a real reasoning block. Keep the text
-            # (full-width) instead of swallowing it. In this state the tail can
-            # only be a closing-tag prefix, so it is handed back as text too.
-            return self._filter_think_tags(
-                self._THINK_OPEN + think_buf + tail, streaming=False
-            )
+            return self._filter_think_tags(self._THINK_OPEN + think_buf + tail)
         if not tail:
             return ""
-        return self._filter_think_tags(tail, streaming=False)
+        return self._filter_think_tags(tail)
 
     @staticmethod
     def _split_content_blocks(content) -> Tuple[str, str]:
@@ -1656,8 +1594,6 @@ class AgentStreamExecutor:
 
         # Streaming response
         full_content = ""
-        # Reset the streaming think-tag state machine before this stream starts
-        # (an executor instance is built per stream, so state never leaks across).
         self._reset_think_stream()
         full_reasoning = ""
         tool_calls_buffer = {}  # {index: {id, name, arguments}}
@@ -1786,8 +1722,7 @@ class AgentStreamExecutor:
                             if self._is_thinking_enabled():
                                 self._emit_event("reasoning_update", {"delta": thinking_text})
                     if content_delta:
-                        # Filter out <think> tags from content.
-                        # Stateful, so a tag split across deltas cannot leak in half.
+                        # Filter out <think> tags from content
                         filtered_delta = self._filter_think_stream(content_delta)
                         full_content += filtered_delta
                         if filtered_delta:  # Only emit if there's content after filtering
@@ -1822,9 +1757,6 @@ class AgentStreamExecutor:
                     elif isinstance(choice, dict) and choice.get("_gemini_raw_parts"):
                         gemini_raw_parts = choice["_gemini_raw_parts"]
 
-            # Stream finished ⇒ flush anything still buffered. Channels that
-            # accumulate deltas as the final text (wecom_bot, terminal) have no
-            # final-text pass, so an unflushed tail would lose the reply ending.
             _think_tail_out = self._flush_think_stream()
             if _think_tail_out:
                 full_content += _think_tail_out
@@ -2117,9 +2049,7 @@ class AgentStreamExecutor:
                 _exhausted=_exhausted,
             )
 
-        # Filter full_content one more time (in case tags were split across chunks).
-        # This is the final-text pass: an unclosed literal tag is kept in full-width
-        # form instead of swallowing the rest of the reply.
+        # Filter full_content one more time (in case tags were split across chunks)
         full_content = self._filter_think_tags(full_content)
         
         # Add assistant message to history (Claude format uses content blocks)

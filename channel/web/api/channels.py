@@ -20,6 +20,7 @@ from channel.web.core._common import (
     _require_auth,
     _write_config_file_for_write,
 )
+from channel.web.core.providers import mask_key
 from common.log import logger
 from config import conf, get_data_root, get_weixin_credentials_path
 
@@ -174,30 +175,19 @@ class ChannelsHandler:
 
     @staticmethod
     def _mask_secret(value: str) -> str:
-        if not value or len(value) <= 8:
-            return value
-        return value[:4] + "*" * (len(value) - 8) + value[-4:]
+        return mask_key(value)
 
     @staticmethod
     def _is_masked_secret(value) -> bool:
-        """True for an empty value or one this handler already masked.
+        """True for an empty value or one shaped like ``_mask_secret`` output.
 
-        The console renders a masked credential and posts it straight back, so
-        every save path has to recognise its own mask and leave the stored
-        secret alone. The shape is decided by ``_mask_secret`` rather than by a
-        star count of its own: that mask emits one star per hidden character,
-        so a 9-character credential comes back as a single star and a guard
-        that insists on four would store that mask over the real secret.
-
-        A masked value is four characters, then nothing but stars, then four
-        characters - which is what makes "every save path" one shared predicate
-        instead of three copies of a star count.
+        The console posts a masked credential back unchanged; one star per
+        hidden character means a 9-character secret has just one.
         """
         if value is None or value == "":
             return True
         text = str(value)
-        middle = text[4:-4]
-        return len(text) > 8 and middle and set(middle) == {"*"}
+        return len(text) > 8 and set(text[4:-4]) == {"*"}
 
     @staticmethod
     def _parse_channel_list(raw) -> list:

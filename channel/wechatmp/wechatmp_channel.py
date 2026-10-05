@@ -410,12 +410,7 @@ class WechatMPChannel(ChatChannel):
             self.running.discard(self._passive_reply_key(session_id, context))
 
     def _discard_cached_reply(self, key):
-        """Release everything cached for one user and drop the entry.
-
-        Mirrors what passive_reply does with a segment it cannot render, so
-        a permanent media item is deleted rather than left in the material
-        store. Safe to call when the entry is already gone.
-        """
+        """Drop one user's cached reply and delete any media it uploaded."""
         for reply_type, content in self.cache_dict.pop(key, []):
             if reply_type != "text" and content:
                 asyncio.run_coroutine_threadsafe(
@@ -427,14 +422,8 @@ class WechatMPChannel(ChatChannel):
         if self.passive_reply:
             key = self._passive_reply_key(session_id, context)
             if key in self.cache_dict:
-                # Actually drop it. The entry gate in passive_reply only
-                # starts a task when the cache is empty *and* the user is not
-                # running, so a segment left here after `running` is discarded
-                # closes the gate: the user's next message skips the agent and
-                # drains this stale text instead, answering the question that
-                # just failed and dropping the new one. The wait loop breaks
-                # out early on an empty `running`, so the timeout branch that
-                # would have papered over it is skipped as well.
+                # A leftover entry would make the user's next message drain this
+                # stale reply instead of starting a new task.
                 logger.warning("[wechatmp] Undrained reply cached for {}, dropping".format(key))
                 self._discard_cached_reply(key)
             self.running.discard(key)
