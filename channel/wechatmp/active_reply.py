@@ -1,5 +1,3 @@
-import time
-
 import web
 from wechatpy import parse_message
 from wechatpy.replies import create_reply
@@ -35,7 +33,7 @@ class Query:
             else:
                 logger.debug("[wechatmp] Receive post data:\n" + message.decode("utf-8"))
             msg = parse_message(message)
-            if msg.type in ["text", "voice", "image"]:
+            if msg.type in WeChatMPMessage.SUPPORTED_TYPES:
                 wechatmp_msg = WeChatMPMessage(msg, client=channel.client)
                 from_user = wechatmp_msg.from_user_id
                 content = wechatmp_msg.content
@@ -68,7 +66,15 @@ class Query:
                 else:
                     return "success"
             else:
-                logger.info("暂且不处理")
+                # WeChat MP delivers more than text/voice/image: a shared link, a
+                # location, a video clip or a mini-program page all arrive here.
+                # There is nothing to answer with, but say which type and whose
+                # message it was -- "not handled" on its own leaves no way to tell
+                # an unsupported message from a mis-parsed one.
+                logger.info(
+                    f"[wechatmp] unsupported message type {msg.type!r} from "
+                    f"{getattr(msg, 'source', '?')}, ignored"
+                )
             return "success"
         except Exception as exc:
             logger.exception(exc)

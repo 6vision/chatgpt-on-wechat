@@ -8,6 +8,11 @@ from common.tmp_dir import TmpDir
 
 
 class WeChatMPMessage(ChatMessage):
+    # Message types __init__ can parse; anything else raises NotImplementedError.
+    # The callbacks gate on this rather than repeating the list, so the two
+    # cannot drift -- a type added here becomes reachable without editing them.
+    SUPPORTED_TYPES = ("text", "voice", "image")
+
     def __init__(self, msg, client=None):
         super().__init__(msg)
         self.msg_id = msg.id
