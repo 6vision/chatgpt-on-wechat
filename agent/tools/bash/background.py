@@ -60,11 +60,23 @@ class _Job:
                 self.cursor = max(0, self.cursor - overflow)
                 self.dropped += overflow
 
-    def take_new_output(self) -> Tuple[str, int]:
+    def take_new_output(self, final: bool = False) -> Tuple[str, int]:
         """Return output printed since the last call, and bytes lost to the cap."""
         with self.lock:
             chunk = bytes(self.buffer[self.cursor:])
-            self.cursor = len(self.buffer)
+            if not final:
+                # A pipe read or UI poll can bisect a UTF-8 character. Retain
+                # only an incomplete trailing sequence for the next poll.
+                start = len(chunk) - 1
+                while start >= 0 and len(chunk) - start <= 4 and chunk[start] & 0xC0 == 0x80:
+                    start -= 1
+                if start >= 0 and chunk[start] >= 0xC2:
+                    try:
+                        chunk[start:].decode("utf-8")
+                    except UnicodeDecodeError as exc:
+                        if exc.reason == "unexpected end of data":
+                            chunk = chunk[:start]
+            self.cursor += len(chunk)
             dropped, self.dropped = self.dropped, 0
         return decode_output(chunk), dropped
 
@@ -149,7 +161,7 @@ def read(job_id: str) -> Optional[dict]:
         # Give the reader a moment to flush whatever was buffered at exit.
         for reader in job.readers:
             reader.join(timeout=1)
-        tail, more_dropped = job.take_new_output()
+        tail, more_dropped = job.take_new_output(final=True)
         output += tail
         dropped += more_dropped
         _cleanup(job)
