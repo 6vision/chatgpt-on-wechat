@@ -64,12 +64,6 @@ def serve_invoke(payload: dict, agent_bridge, send_chunk: Callable[[dict], None]
     except Exception:
         return fail(f"Target Agent '{addressed_id}' is not available")
 
-    if mode == MODE_CLEAR:
-        # Not a turn: no policy, no roster, nothing to stream.
-        return _serve_clear(
-            payload, send_chunk, target=target, request_id=request_id
-        )
-
     try:
         from config import conf
 
@@ -78,6 +72,22 @@ def serve_invoke(payload: dict, agent_bridge, send_chunk: Callable[[dict], None]
         return fail(f"Invalid delegation policy: {exc}", target.id, target.name)
     if not policy.enabled:
         return fail("Agent delegation is disabled", target.id, target.name)
+    # The sending side runs the allowlist before it hands off; re-check it here
+    # so the ACL is a property of this Agent rather than of whoever asked.
+    # A clear drops this Agent's transcript, so it clears the same bar.
+    if not policy.allows(source_id, target.id):
+        return fail(
+            f"Agent '{source_id}' is not allowed to delegate to '{target.id}'",
+            target.id,
+            target.name,
+        )
+
+    if mode == MODE_CLEAR:
+        # Not a turn: no roster, nothing to stream.
+        return _serve_clear(
+            payload, send_chunk, target=target, request_id=request_id
+        )
+
     if len(task) > policy.max_message_chars:
         return fail(
             f"Delegated task exceeds {policy.max_message_chars} characters", target.id, target.name
