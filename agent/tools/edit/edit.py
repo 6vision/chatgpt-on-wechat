@@ -4,6 +4,7 @@ Edit files through exact text replacement
 """
 
 import os
+import threading
 from typing import Dict, Any
 
 from agent.tools.base_tool import BaseTool, ToolResult
@@ -24,6 +25,9 @@ from agent.tools.utils.diff import (
 from agent.tools.utils.file_state import note_write, staleness_warning
 from agent.tools.utils.memory_path import feeds_memory_index
 from agent.tools.utils.syntax_check import review as syntax_review
+
+
+_EDIT_LOCKS = tuple(threading.RLock() for _ in range(256))
 
 
 class Edit(BaseTool):
@@ -61,6 +65,16 @@ class Edit(BaseTool):
         self.memory_manager = self.config.get("memory_manager", None)
     
     def execute(self, args: Dict[str, Any]) -> ToolResult:
+        path = args.get("path", "").strip()
+        if not path:
+            return ToolResult.fail("Error: path parameter is required")
+        key = os.path.normcase(os.path.realpath(self._resolve_path(path)))
+        # Atomic replacement protects file integrity but not two edits made
+        # from the same snapshot. Serialize this process's whole edit cycle.
+        with _EDIT_LOCKS[hash(key) % len(_EDIT_LOCKS)]:
+            return self._execute_locked(args)
+
+    def _execute_locked(self, args: Dict[str, Any]) -> ToolResult:
         """
         Execute file edit operation
         
