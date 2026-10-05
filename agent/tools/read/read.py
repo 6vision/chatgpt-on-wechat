@@ -4,6 +4,7 @@ Supports text files, images (jpg, png, gif, webp), and PDF files
 """
 
 import os
+import stat
 from typing import Dict, Any, Optional
 from pathlib import Path
 
@@ -184,6 +185,15 @@ class Read(BaseTool):
                 f"Use the ls tool to list what is inside it."
             )
         
+        # A FIFO has size zero yet open/read waits indefinitely for a writer.
+        # Inspect the resolved target before dispatching to any content parser.
+        try:
+            mode = os.stat(absolute_path).st_mode
+        except OSError as exc:
+            return ToolResult.fail(f"Error inspecting file: {exc}")
+        if not stat.S_ISREG(mode):
+            return ToolResult.fail(f"Error: {path} is not a regular file")
+
         # Check if readable
         if not os.access(absolute_path, os.R_OK):
             return ToolResult.fail(f"Error: File is not readable: {path}")
