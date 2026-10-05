@@ -130,10 +130,18 @@ def serve_invoke(payload: dict, agent_bridge, send_chunk: Callable[[dict], None]
             root_session_id=root_session_id,
         )
 
+    # The sending side always passes the policy's own timeout, so the wire value
+    # can only ever match it. Applying the same ceiling here is what makes the
+    # bound hold on this side too: the value below is what
+    # ``_relay_lock(...).acquire`` blocks on, and holding that lock is what
+    # serialises hands-off to one relay session, so a payload naming a huge
+    # timeout would otherwise park the serving thread far past the policy's.
+    # A caller may still ask for less than the policy allows.
     try:
-        timeout = float(payload.get("timeout") or policy.timeout_seconds)
+        claimed = float(payload["timeout"]) if "timeout" in payload else policy.timeout_seconds
     except (TypeError, ValueError):
-        timeout = policy.timeout_seconds
+        claimed = policy.timeout_seconds
+    timeout = min(max(claimed, 0.0), policy.timeout_seconds)
 
     session_id = AgentDelegateTool._session_id(source_id, target.id, root_session_id)
     from common.utils import current_agent_run_id
