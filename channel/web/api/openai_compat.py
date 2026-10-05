@@ -372,6 +372,19 @@ def _non_stream_completion(
         else:
             tool_trace.extend(_tool_events(chunk))
 
+    # Register the run the way the streaming path does, so `/cancel` can reach
+    # it. `cancel_session` reads the registry's per-session index, which only
+    # `register` fills, and `stream` is the client's choice and defaults to
+    # False -- so without this the default (non-streaming) call is the one that
+    # cannot be cancelled, and `/cancel` answers "nothing to cancel" while the
+    # agent keeps working. There is no request_id for the client to cancel by
+    # either: this surface only returns one once the reply is complete.
+    from agent.protocol import get_cancel_registry
+
+    registry = get_cancel_registry()
+    cancel_key, scoped_session_key = _request_cancel_scope(completion_id, session_id)
+    registry.register(cancel_key, session_id=scoped_session_key)
+
     try:
         lock = _SESSION_LOCKS[hash(session_id) % len(_SESSION_LOCKS)]
         with lock:
@@ -388,6 +401,8 @@ def _non_stream_completion(
         raise OpenAIAPIError(
             500, "CowAgent failed to complete the request.", "internal_error"
         ) from error
+    finally:
+        registry.unregister(cancel_key)
 
     message = {"role": "assistant", "content": "".join(content)}
     if reasoning:
