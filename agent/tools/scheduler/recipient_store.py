@@ -40,11 +40,13 @@ class RecipientStore:
 
     @staticmethod
     def _key(instance_id: str, receiver: str) -> str:
-        # ``:`` reads cleanly in the on-disk JSON. Both an instance_id and a
-        # receiver id can themselves carry a colon (feishu group ids do), so the
-        # key is only ever a joined form; downstream code uses the structured
-        # fields, never a split of this key.
-        return f"{instance_id}:{receiver}"
+        # Escape the delimiter and the escape marker in each component. Plain
+        # identities retain their existing readable keys; embedded colons cannot
+        # make two different instance/receiver pairs alias the same contact.
+        def escape(component: str) -> str:
+            return component.replace("%", "%25").replace(":", "%3A")
+
+        return f"{escape(instance_id)}:{escape(receiver)}"
 
     def _load_unlocked(self) -> Dict[str, dict]:
         if not self.store_path.exists():
@@ -53,7 +55,21 @@ class RecipientStore:
             with self.store_path.open("r", encoding="utf-8") as handle:
                 value = json.load(handle)
             recipients = value.get("recipients", {})
-            return recipients if isinstance(recipients, dict) else {}
+            if not isinstance(recipients, dict):
+                return {}
+            # Legacy keys joined unescaped components. Rebuild from the stored
+            # structured identity, so an ambiguous old key never routes a lookup
+            # to another instance. Persist the normalized keys on the next save.
+            normalized = {}
+            for key, entry in recipients.items():
+                if isinstance(entry, dict):
+                    identity = self._normalize(entry)
+                    instance_id = identity.get("instance_id")
+                    receiver = identity.get("receiver")
+                    if isinstance(instance_id, str) and isinstance(receiver, str):
+                        key = self._key(instance_id, receiver)
+                normalized[key] = entry
+            return normalized
         except (OSError, ValueError, TypeError):
             return {}
 
