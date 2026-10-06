@@ -430,11 +430,14 @@ class SessionDetailHandler:
 
             # Drop the session's side stores too. Left behind, a stale project
             # binding would keep inflating the "how many spaces are in use"
-            # count that decides how the session list is grouped.
+            # count that decides how the session list is grouped. Both stores
+            # namespace their rows by Agent, so the row to drop is the one
+            # under this session's own Agent — the unscoped key is
+            # ``default::`` and would leave the real row behind.
             try:
                 from agent.workspace import project_store, session_prefs
-                project_store.forget_session(session_id)
-                session_prefs.forget_session(session_id)
+                project_store.forget_session(session_id, agent_id=agent_id)
+                session_prefs.forget_session(session_id, agent_id=agent_id)
             except Exception as e:
                 logger.debug(f"[WebChannel] Session side-store cleanup skipped: {e}")
 
