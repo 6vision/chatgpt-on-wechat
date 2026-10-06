@@ -1054,6 +1054,19 @@ class FeishuRegisterHandler:
             cls._state = {}
 
     @classmethod
+    def _owns_session(cls, cancel_event) -> bool:
+        """Whether ``_state`` is still the session this worker was started for.
+
+        A retry replaces ``_state`` and sets the previous worker's
+        ``cancel_event``, but the SDK call already in flight still returns and
+        still runs its callbacks. Every write below therefore has to confirm it
+        is writing into its own session: a superseded worker that writes anyway
+        hands the console credentials for the app the user just cancelled, and
+        discards whatever the new session had already put there.
+        """
+        return cls._state.get("cancel_event") is cancel_event
+
+    @classmethod
     def _start_register_thread(cls):
         """启动一次新的注册会话。如已有进行中的会话，先取消（通过 cancel_event）。"""
         # 先取消可能存在的上一次会话，避免两个 SDK 线程并发 poll 同一个端点
@@ -1072,11 +1085,15 @@ class FeishuRegisterHandler:
                 from channel.feishu import lark_install
                 if lark_install.needs_download():
                     with cls._lock:
-                        cls._state["status"] = "downloading"
+                        if cls._owns_session(cancel_event):
+                            cls._state["status"] = "downloading"
                 lark_install.ensure(allow_install=True)
                 import lark_oapi as lark
             except ImportError as e:
                 with cls._lock:
+                    if not cls._owns_session(cancel_event):
+                        logger.info("[FeishuRegister] SDK unavailable during a superseded session, ignored")
+                        return
                     cls._state["status"] = "error"
                     cls._state["error"] = (
                         "飞书 SDK 不可用，请联网后重试，"
@@ -1087,6 +1104,9 @@ class FeishuRegisterHandler:
             def _on_qr(info):
                 # SDK 拿到二维码 URL 后立即回调；写入 state 让前端 GET 立刻能拿到
                 with cls._lock:
+                    if not cls._owns_session(cancel_event):
+                        logger.info("[FeishuRegister] QR from a superseded session, ignored")
+                        return
                     cls._state["url"] = info.get("url", "")
                     cls._state["expire_in"] = info.get("expire_in", 600)
                     cls._state["qr_image"] = cls._qr_to_data_uri(info.get("url", ""))
@@ -1109,6 +1129,11 @@ class FeishuRegisterHandler:
                     cancel_event=cancel_event,
                 )
                 with cls._lock:
+                    if not cls._owns_session(cancel_event):
+                        logger.warning(
+                            "[FeishuRegister] App created by a superseded session, discarded"
+                        )
+                        return
                     cls._state["status"] = "done"
                     cls._state["app_id"] = result.get("client_id", "")
                     cls._state["app_secret"] = result.get("client_secret", "")
@@ -1128,7 +1153,7 @@ class FeishuRegisterHandler:
                     status = "error"
                 with cls._lock:
                     # 仅当当前 state 仍属于本次 worker 时才写入，避免覆盖更新的会话
-                    if cls._state.get("cancel_event") is cancel_event:
+                    if cls._owns_session(cancel_event):
                         cls._state["status"] = status
                         cls._state["error"] = err_msg
                 logger.warning(f"[FeishuRegister] Register failed ({err_cls}): {err_msg}")
