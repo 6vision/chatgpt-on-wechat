@@ -258,11 +258,6 @@ class Query:
                 else:
                     return "success"
             else:
-                # WeChat MP delivers more than text/voice/image: a shared link, a
-                # location, a video clip or a mini-program page all arrive here.
-                # There is nothing to answer with, but say which type and whose
-                # message it was -- "not handled" on its own leaves no way to tell
-                # an unsupported message from a mis-parsed one.
                 logger.info(
                     f"[wechatmp] unsupported message type {msg.type!r} from "
                     f"{getattr(msg, 'source', '?')}, ignored"

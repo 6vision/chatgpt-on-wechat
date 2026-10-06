@@ -72,9 +72,8 @@ def serve_invoke(payload: dict, agent_bridge, send_chunk: Callable[[dict], None]
         return fail(f"Invalid delegation policy: {exc}", target.id, target.name)
     if not policy.enabled:
         return fail("Agent delegation is disabled", target.id, target.name)
-    # The sending side runs the allowlist before it hands off; re-check it here
-    # so the ACL is a property of this Agent rather than of whoever asked.
-    # A clear drops this Agent's transcript, so it clears the same bar.
+    # Enforce this side's allowlist too; a clear drops a transcript, so it is
+    # gated the same way.
     if not policy.allows(source_id, target.id):
         return fail(
             f"Agent '{source_id}' is not allowed to delegate to '{target.id}'",
@@ -108,12 +107,7 @@ def serve_invoke(payload: dict, agent_bridge, send_chunk: Callable[[dict], None]
     if target.id in trace[:-1]:
         return fail(f"Delegation cycle rejected: {' -> '.join(trace)}", target.id, target.name)
 
-    # The trace is the chain, so it — not the payload — says how deep this
-    # hand-off is. The sending side derives its depth the same way (it reads
-    # the depth it was handed and adds one), which is what keeps max_depth a
-    # bound on the chain rather than on a field anyone can set. Trusting the
-    # wire value let a negative depth clear the check outright and then, once
-    # stamped into the context, leave every later hop's ``+1`` negative too.
+    # Derived from the chain, never from the payload's own depth field.
     depth = len(trace) - 1
     if depth > policy.max_depth:
         return fail(
@@ -143,13 +137,7 @@ def serve_invoke(payload: dict, agent_bridge, send_chunk: Callable[[dict], None]
             root_session_id=root_session_id,
         )
 
-    # The sending side always passes the policy's own timeout, so the wire value
-    # can only ever match it. Applying the same ceiling here is what makes the
-    # bound hold on this side too: the value below is what
-    # ``_relay_lock(...).acquire`` blocks on, and holding that lock is what
-    # serialises hands-off to one relay session, so a payload naming a huge
-    # timeout would otherwise park the serving thread far past the policy's.
-    # A caller may still ask for less than the policy allows.
+    # A caller may ask for less than the local policy allows, never more.
     try:
         claimed = float(payload["timeout"]) if "timeout" in payload else policy.timeout_seconds
     except (TypeError, ValueError):

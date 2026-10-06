@@ -1385,14 +1385,8 @@ class AgentBridge:
                 else:
                     model.set_session_override(None, None)
             if hasattr(agent, "apply_permission_mode"):
-                # `permission_mode` is for a delegated turn. Its session id is
-                # synthesised per (source, target, root) and never has prefs, so
-                # the lookup above always misses and the target would keep the
-                # global mode -- which would make delegating a way out of the
-                # mode this conversation is under. The delegating tool passes
-                # the mode it saw in force instead, the same way
-                # agent/subagent/runner.py copies it onto a sub agent. Every
-                # other caller leaves it None and reads prefs as before.
+                # A delegated turn's session has no prefs; it carries the
+                # delegating conversation's mode instead.
                 agent.apply_permission_mode(permission_mode or prefs.get("permission"))
         except Exception as e:
             logger.debug(f"[AgentBridge] apply_session_prefs failed: {e}")
@@ -1639,8 +1633,6 @@ class AgentBridge:
                 session_id=session_id,
                 agent_id=speaker_agent_id,
                 host_agent_id=resolved_agent_id,
-                # Set by AgentDelegateTool so the teammate answers under the same
-                # permission mode as the conversation that handed it the work.
                 permission_mode=context.get("delegated_permission_mode"),
             )
             if not agent:

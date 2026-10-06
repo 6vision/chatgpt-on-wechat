@@ -602,11 +602,8 @@ def _session_settings_state(session_id: str, agent_id: Optional[str]) -> dict:
     and ``agent`` carries the Agent's default when it has one, so a fresh chat
     with a specialist Agent shows the model it will really answer with.
 
-    A pin the runtime ignores must not be reported as one in effect, or the
-    console offers a setting that does nothing. ``AgentBridge.apply_session_prefs``
-    drops the override for a conversation with members -- in a team each Agent
-    answers on its own model, the owner included -- so ``source`` falls back the
-    same way here and ``pin_ignored`` says why.
+    A conversation with members ignores the pin, as ``apply_session_prefs``
+    does, and ``pin_ignored`` says so.
     """
     from agent.workspace import session_prefs
 
@@ -634,10 +631,6 @@ def _session_settings_state(session_id: str, agent_id: Optional[str]) -> dict:
     except Exception as e:
         logger.debug(f"[WebChannel] agent default model unavailable: {e}")
 
-    # A conversation with members is a team: every Agent answers on its own
-    # model, so apply_session_prefs passes set_session_override(None, None) and
-    # the stored pin never reaches a request. Reporting it as "session" would
-    # have the console show a check mark on a model nothing answers with.
     is_group = bool(prefs.get("members"))
 
     if prefs.get("model") and not is_group:
@@ -652,8 +645,6 @@ def _session_settings_state(session_id: str, agent_id: Optional[str]) -> dict:
             "model": effective_model,
             "provider": effective_provider or global_provider,
             "source": source,
-            # A stored pin that this conversation cannot use, and why. The
-            # console shows it as a hint rather than pretending the pin is live.
             "pin_ignored": bool(prefs.get("model")) and is_group,
             "global": {"model": global_model, "provider": global_provider},
             "agent": agent_default,

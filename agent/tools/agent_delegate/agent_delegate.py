@@ -277,20 +277,11 @@ class AgentDelegateTool(BaseTool):
         return f"delegate_{source_agent_id}_{target_agent_id}_{digest}"
 
     def _inherited_permission_mode(self, source_agent_id: str) -> str | None:
-        """The mode in force for whoever is delegating, or None to leave it alone.
+        """The delegating Agent's permission mode, or None to leave the target's.
 
-        A delegated run gets a session id of its own, so the target's session
-        prefs miss and `apply_session_prefs` calls `apply_permission_mode(None)`,
-        which leaves the target on the *global* mode. Delegating would then be a
-        way out of whatever the user set for this conversation -- and
-        `agent_delegate` is deliberately not gated on `subagent`'s pattern
-        (see `runner.py`, which is why subagent is in `_KNOWN_TOOLS`): the
-        permission travels with the delegation instead.
-
-        Read with `peek_agent`, which does not build an Agent, so asking a
-        question never spins up MCP connections and skills. `None` means the
-        source has no live instance (a nested hop, or the turn is mid-build);
-        the target then keeps its own mode rather than being guessed at.
+        A delegated run has its own session id with no prefs, so without this it
+        would fall back to the global mode, like a sub agent would. `peek_agent`
+        never builds an Agent; None means the source has no live instance.
         """
         session_id = (self.current_context.kwargs or {}).get("session_id")
         if not session_id:
@@ -549,9 +540,6 @@ class AgentDelegateTool(BaseTool):
         delegated_context["run_id"] = run_id
         delegated_context["parent_run_id"] = parent_run_id
         delegated_context["task_source"] = TASK_SOURCE
-        # The permission mode the delegating conversation is under. Read by
-        # apply_session_prefs, which would otherwise fall back to the global
-        # mode because this session id has no prefs of its own.
         inherited_mode = self._inherited_permission_mode(source.id)
         if inherited_mode:
             delegated_context["delegated_permission_mode"] = inherited_mode

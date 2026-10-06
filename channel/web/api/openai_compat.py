@@ -372,13 +372,7 @@ def _non_stream_completion(
         else:
             tool_trace.extend(_tool_events(chunk))
 
-    # Register the run the way the streaming path does, so `/cancel` can reach
-    # it. `cancel_session` reads the registry's per-session index, which only
-    # `register` fills, and `stream` is the client's choice and defaults to
-    # False -- so without this the default (non-streaming) call is the one that
-    # cannot be cancelled, and `/cancel` answers "nothing to cancel" while the
-    # agent keeps working. There is no request_id for the client to cancel by
-    # either: this surface only returns one once the reply is complete.
+    # Registered like the streaming path so a session cancel can reach it.
     from agent.protocol import get_cancel_registry
 
     registry = get_cancel_registry()

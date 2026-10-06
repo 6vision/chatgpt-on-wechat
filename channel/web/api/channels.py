@@ -1055,14 +1055,10 @@ class FeishuRegisterHandler:
 
     @classmethod
     def _owns_session(cls, cancel_event) -> bool:
-        """Whether ``_state`` is still the session this worker was started for.
+        """Whether ``_state`` is still this worker's session.
 
-        A retry replaces ``_state`` and sets the previous worker's
-        ``cancel_event``, but the SDK call already in flight still returns and
-        still runs its callbacks. Every write below therefore has to confirm it
-        is writing into its own session: a superseded worker that writes anyway
-        hands the console credentials for the app the user just cancelled, and
-        discards whatever the new session had already put there.
+        A retry replaces ``_state``, but the SDK call already in flight still
+        returns and runs its callbacks.
         """
         return cls._state.get("cancel_event") is cancel_event
 

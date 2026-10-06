@@ -17,13 +17,8 @@ from common.log import logger
 from config import conf
 
 
-#: The action types a scheduled task may carry. `send_message` and `agent_task`
-#: are what the chat interface can create; the scheduler also knows how to run
-#: `tool_call` / `skill_call` internally, but those are not reachable from a
-#: task the user owns -- they would run a registered tool on a timer with no
-#: permission check, since this path does not go through the agent's own
-#: `check_tool_call`. Both the create and the edit route have to agree on this,
-#: or a task can be created as one type and edited into another.
+# `tool_call` / `skill_call` would run a tool on a timer without the agent's
+# permission check, so neither route may produce them.
 _ALLOWED_ACTION_TYPES = ("send_message", "agent_task")
 
 
@@ -343,13 +338,6 @@ class SchedulerUpdateHandler:
                 action = dict(original_action)
                 action.update(action_patch)
                 action_type = action.get("type")
-                # Same whitelist the create route applies. Without it a task the
-                # user legitimately owns as `send_message` can be edited into a
-                # `tool_call`, and the scheduler will then run that tool on a
-                # timer straight through `ToolManager().create_tool(...).execute`,
-                # which is not the agent's tool-calling path and so never reaches
-                # `check_tool_call`. The permission mode the session was put in
-                # would not apply, and nothing would be recorded in its audit.
                 if action_type not in _ALLOWED_ACTION_TYPES:
                     return json.dumps({
                         "status": "error",

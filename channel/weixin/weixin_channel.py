@@ -501,17 +501,8 @@ class WeixinChannel(ChatChannel):
                     qr_resp = api.fetch_qr_code()
                     qrcode = qr_resp.get("qrcode", "")
                     qrcode_url = qr_resp.get("qrcode_img_content", "")
-                    # Same guard the first fetch has at the top of this method:
-                    # fetch_qr_code only calls raise_for_status(), so a 200
-                    # carrying an error body comes back with no qrcode at all.
-                    # Without this the old code was overwritten with nothing and
-                    # the loop went on to poll `get_qrcode_status?qrcode=`,
-                    # which cannot succeed -- and a timeout there is reported as
-                    # {"status": "wait"}, so an invalid code looks exactly like
-                    # a slow one. The user watches a QR that will never scan
-                    # until the wall-clock timeout ends the loop, and
-                    # QR_MAX_REFRESHES does not help because it only counts
-                    # expiry events, which a dead code never reports.
+                    # A 200 with an error body has no qrcode; polling an empty
+                    # code only ever reports "wait".
                     if not qrcode:
                         logger.error(
                             "[Weixin] QR refresh returned no qrcode; stopping login"
