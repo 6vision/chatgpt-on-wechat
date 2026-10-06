@@ -65,22 +65,25 @@ _lock = threading.Lock()
 
 def _load() -> Dict:
     path = _store_file()
+    empty = {"sessions": {}, "recents": [], "meta": {}, "order": []}
     if not os.path.isfile(path):
-        return {"sessions": {}, "recents": [], "meta": {}, "order": []}
+        return empty
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f) or {}
     except Exception as e:
         logger.warning(f"[ProjectStore] Could not read {path}: {e}")
-        return {"sessions": {}, "recents": [], "meta": {}, "order": []}
-    data.setdefault("sessions", {})
-    data.setdefault("recents", [])
-    # ``meta``: path -> {"display_name": str}. A rename lives here, never on
-    # disk, so the folder keeps its name and existing bindings stay valid.
-    data.setdefault("meta", {})
-    # ``order``: user-chosen sidebar order of spaces (project paths and the
-    # DEFAULT_SPACE_KEY sentinel). Absent entries fall back to recency order.
-    data.setdefault("order", [])
+        return empty
+    if not isinstance(data, dict):
+        return empty
+    # setdefault only fills a key that is *absent*, so a hand-edited or
+    # truncated file that already has ``"sessions": []`` (or a string, or a
+    # number) would keep it — and every caller then does dict.get / .pop / .items
+    # on it. The sibling session_prefs store guards this exact shape; do the
+    # same here so a bad file costs the bindings, not the feature.
+    for key, shape in (("sessions", dict), ("recents", list), ("meta", dict), ("order", list)):
+        if not isinstance(data.get(key), shape):
+            data[key] = shape()
     return data
 
 
