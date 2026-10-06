@@ -74,7 +74,7 @@ def staleness_warning(path: str) -> Optional[str]:
     if seen is None:
         return None
     current = _current_mtime(key)
-    if current is None or current <= seen:
+    if current is None or current == seen:
         return None
     return (
         f"{os.path.basename(key)} was modified after you last read it "
