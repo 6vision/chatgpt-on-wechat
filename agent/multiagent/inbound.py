@@ -165,6 +165,12 @@ def serve_invoke(payload: dict, agent_bridge, send_chunk: Callable[[dict], None]
     context["run_id"] = run_id
     context["parent_run_id"] = current_agent_run_id() or ""
     context["task_source"] = TASK_SOURCE
+    # The caller's mode travels with the hand-off, the same key a local one
+    # sets: this turn runs under a synthetic session id that has no prefs, so
+    # without it agent_reply falls back to the global setting.
+    inherited_mode = str(payload.get("permission_mode") or "").strip()
+    if inherited_mode:
+        context["delegated_permission_mode"] = inherited_mode
 
     # The caller's side brackets and attributes these; here we only decide what
     # crosses the wire, and it is the same set a local hand-off relays.

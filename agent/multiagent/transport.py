@@ -72,6 +72,13 @@ class InvokeRequest:
     ``history`` (``{"role", "text", "agent_id"}`` entries, oldest first);
     :data:`MODE_CLEAR` runs no turn and drops the teammate's context for
     ``root_session_id``.
+
+    ``permission_mode`` is the calling Agent's own mode, carried for the same
+    reason a local hand-off inherits it: a delegated run uses a synthetic
+    session id that has no prefs, so without this the far side would fall back
+    to the global setting — which is what a local delegation no longer does.
+    Empty means "the caller has no live instance to read", and the far side
+    keeps its own default.
     """
 
     request_id: str
@@ -87,6 +94,7 @@ class InvokeRequest:
     timeout_seconds: float = 600.0
     mode: str = MODE_DELEGATE
     history: Tuple[dict, ...] = ()
+    permission_mode: str = ""
 
 
 @dataclass
