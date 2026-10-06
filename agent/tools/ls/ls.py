@@ -98,7 +98,7 @@ class Ls(BaseTool):
                     # Skip entries we can't stat
                     continue
             
-            if not results:
+            if not results and not entry_limit_reached:
                 return ToolResult.success({"message": "(empty directory)", "entries": []})
             
             # Format output
@@ -110,7 +110,7 @@ class Ls(BaseTool):
             notices = []
             
             if entry_limit_reached:
-                notices.append(f"{limit} entries limit reached. Use limit={limit * 2} for more")
+                notices.append(f"{limit} entries limit reached. Use limit={max(1, limit * 2)} for more")
                 details["entry_limit_reached"] = limit
             
             if truncation.truncated:
