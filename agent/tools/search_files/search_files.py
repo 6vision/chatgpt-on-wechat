@@ -609,7 +609,8 @@ class SearchFiles(BaseTool):
                 if self._is_credential_path(os.path.join(dirpath, d)):
                     continue
                 kept.append(d)
-            dirnames[:] = sorted(kept)
+            # A file target is scoped to that file, not nested namesakes.
+            dirnames[:] = [] if single_file else sorted(kept)
 
             for filename in sorted(filenames):
                 if single_file and filename != single_file:
