@@ -522,3 +522,149 @@ def _query_for(task, order):
         if task in query:
             return query
     raise AssertionError(f"no query recorded for {task}")
+
+
+# ---------------------------------------------------------------------------
+# A delegated run must answer under the same permission mode as the
+# conversation that handed it the work. agent/subagent/runner.py:131-136 does
+# exactly this for sub agents, and says why:
+#
+#     # Same working directory and same permission mode as the parent: the tool
+#     # copies already point at the parent's cwd, and delegating to a sub agent
+#     # must not become a way around the session's permissions.
+#
+# A delegated turn gets a session id synthesised per (source, target, root), so
+# the target's session prefs never exist and the mode fell back to the global
+# default -- full-access.
+# ---------------------------------------------------------------------------
+
+
+class _Source:
+    """Stands in for the delegating Agent, already in a mode for this session."""
+
+    def __init__(self, mode="read-only"):
+        self._mode = mode
+
+    def effective_permission_mode(self):
+        return self._mode
+
+
+_DEFAULT = object()
+
+
+class PeekBridge(FakeBridge):
+    """A bridge that has a live source Agent to look up.
+
+    ``source=None`` means genuinely no live instance, which is what
+    ``peek_agent`` returns for a nested hop; the default is a live source in
+    read-only. A sentinel keeps those two apart.
+    """
+
+    def __init__(self, registry=None, source_mode="read-only", source=_DEFAULT):
+        super().__init__(registry)
+        self._source = _Source(source_mode) if source is _DEFAULT else source
+        self.peeked = []
+
+    def peek_agent(self, session_id, agent_id=None):
+        self.peeked.append((session_id, agent_id))
+        return self._source
+
+
+def test_a_delegated_run_inherits_the_delegating_permission_mode():
+    bridge = PeekBridge()
+    tool = _tool(bridge=bridge)
+
+    result = tool.execute({"agent_id": "research", "task": "Check the evidence"})
+
+    assert result.status == "success"
+    _, context, _ = bridge.calls[0]
+    assert context.get("delegated_permission_mode") == "read-only"
+    # Read from the source's own session, not the delegated one.
+    assert bridge.peeked == [("user-session", "primary")]
+
+
+def test_the_inherited_mode_is_the_one_actually_in_force():
+    # Not the mode the source was configured with, but the one in force for this
+    # conversation -- a session may have narrowed it.
+    bridge = PeekBridge(source_mode="workspace-write")
+    tool = _tool(bridge=bridge)
+
+    tool.execute({"agent_id": "research", "task": "Check the evidence"})
+
+    _, context, _ = bridge.calls[0]
+    assert context.get("delegated_permission_mode") == "workspace-write"
+
+
+def test_no_live_source_leaves_the_mode_alone():
+    """peek_agent returns None when the source has no instance (a nested hop).
+
+    Guessing a mode there would either invent a restriction the user never set
+    or, worse, widen one they did -- so the key is left off and the target keeps
+    its own.
+    """
+    bridge = PeekBridge(source=None)
+    tool = _tool(bridge=bridge)
+
+    result = tool.execute({"agent_id": "research", "task": "Check the evidence"})
+
+    assert result.status == "success"
+    _, context, _ = bridge.calls[0]
+    assert "delegated_permission_mode" not in context
+
+
+def test_a_failing_lookup_does_not_break_the_delegation():
+    class _Broken(PeekBridge):
+        def peek_agent(self, session_id, agent_id=None):
+            raise RuntimeError("registry is locked")
+
+    tool = _tool(bridge=_Broken())
+
+    result = tool.execute({"agent_id": "research", "task": "Check the evidence"})
+
+    assert result.status == "success"
+    _, context, _ = tool.agent_bridge.calls[0]
+    assert "delegated_permission_mode" not in context
+
+
+def test_ordinary_turns_still_read_their_prefs():
+    """The control: without delegation the mode comes from session_prefs.
+
+    Exercised through the real apply_session_prefs, since that is where the two
+    paths meet.
+    """
+    class _Target:
+        def __init__(self):
+            self.applied = []
+            self.model = None
+
+        def apply_permission_mode(self, mode):
+            self.applied.append(mode)
+
+    from bridge.agent_bridge import AgentBridge
+
+    bridge = AgentBridge.__new__(AgentBridge)
+
+    target = _Target()
+    bridge.apply_session_prefs(target, "ordinary-session", "primary")
+    assert target.applied == [None], "no prefs and no override means 'use global'"
+
+    target = _Target()
+    bridge.apply_session_prefs(
+        target, "ordinary-session", "primary", permission_mode="read-only"
+    )
+    assert target.applied == ["read-only"]
+
+
+def test_the_read_only_gate_lets_both_delegation_tools_through():
+    """Why the fix is a mode hand-off and not a stricter gate.
+
+    `subagent` is in _KNOWN_TOOLS and is therefore allowed in read-only --
+    correctly, because runner.py copies the mode onto the child.
+    `agent_delegate` was allowed too, but by omission: it is not in the table
+    and _MUTATING_NAME_RE does not match the verb. Now that the mode travels,
+    both are allowed for the same reason.
+    """
+    from agent.permission import policy
+
+    assert policy.check_tool_call("read-only", "agent_delegate", {}).allowed
+    assert policy.check_tool_call("read-only", "subagent", {}).allowed
