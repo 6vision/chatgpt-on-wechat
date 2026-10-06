@@ -30,7 +30,9 @@ from bridge.reply import Reply, ReplyType
 from channel.chat_channel import ChatChannel, check_prefix
 from channel.feishu.feishu_message import FeishuMessage
 from channel.feishu.feishu_static_card import (
+    IMAGE_SUFFIXES,
     build_text_delivery,
+    download_public_image,
     resolve_markdown_images,
     upload_public_image_to_feishu,
 )
@@ -43,7 +45,7 @@ from channel.feishu.feishu_scheduler_card import (
 from common import state_dir, utils
 from common.expired_dict import ExpiredDict
 from common.log import logger
-from common.media_download import MAX_FILE_BYTES, MAX_IMAGE_BYTES, download_bytes, download_to_file
+from common.media_download import MAX_FILE_BYTES, download_bytes, download_to_file
 from common.singleton import singleton
 from config import conf
 
@@ -1885,20 +1887,26 @@ class FeiShuChanel(ChatChannel):
                     logger.error(f"[FeiShu] upload failed: {response_data}")
                     return None
 
-        # HTTP URL: upload the bytes that were just downloaded. Staging them in a
-        # file first wrote into the process CWD -- not where the packaged desktop
-        # build starts, and not necessarily writable there -- and that file was
-        # only removed after a successful upload, so a failed upload left it
-        # behind in the working directory.
+        # A remote image can only be fetched through the public-image guard:
+        # this URL came from the Agent's own reply, so it points wherever a
+        # prompt or a page it read decided. The Markdown-image path above
+        # already goes through it, and it checks the resolved address of every
+        # hop, so a public URL cannot 3xx its way into a loopback, link-local
+        # or cloud-metadata address. `download_bytes` bounded the size but not
+        # the destination, and the bytes it fetched were uploaded to Feishu and
+        # handed back as an image_key — so a loopback read or a cloud
+        # credential would have ended up in the chat.
         try:
-            image_bytes = download_bytes(img_url, MAX_IMAGE_BYTES, timeout=(5, 30))
+            image_bytes, content_type = download_public_image(img_url)
         except Exception as e:
             # The caller relies on None here:
             # `if not reply_content: logger.warning("upload image failed")`.
             logger.error(f"[FeiShu] download image failed: {e}")
             return None
 
-        suffix = utils.get_path_suffix(img_url)
+        # Name the part by what the server actually sent rather than by the
+        # URL's extension, which the redirect chain may not have preserved.
+        suffix = IMAGE_SUFFIXES.get(content_type) or utils.get_path_suffix(img_url)
         upload_url = "https://open.feishu.cn/open-apis/im/v1/images"
         data = {
             'image_type': 'message'

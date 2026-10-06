@@ -24,6 +24,17 @@ _REDIRECT_CODES = {301, 302, 303, 307, 308}
 _MAX_REDIRECTS = 3
 _MAX_REMOTE_IMAGE_BYTES = 10 * 1024 * 1024
 
+# Feishu names the uploaded part by its extension, so the multipart filename has
+# to carry the real format. Shared with the ReplyType.IMAGE_URL upload, which
+# fetches through the same guard.
+IMAGE_SUFFIXES = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/gif": "gif",
+    "image/webp": "webp",
+    "image/bmp": "bmp",
+}
+
 
 def contains_markdown(text: str) -> bool:
     """Return whether *text* contains syntax that benefits from card Markdown."""
@@ -217,13 +228,7 @@ def upload_public_image_to_feishu(
 ) -> Optional[str]:
     """Download a public image and upload its bytes to Feishu."""
     payload, content_type = download_public_image(url)
-    extension = {
-        "image/jpeg": "jpg",
-        "image/png": "png",
-        "image/gif": "gif",
-        "image/webp": "webp",
-        "image/bmp": "bmp",
-    }.get(content_type, "img")
+    extension = IMAGE_SUFFIXES.get(content_type, "img")
     response = post(
         "https://open.feishu.cn/open-apis/im/v1/images",
         headers={"Authorization": "Bearer " + access_token},
