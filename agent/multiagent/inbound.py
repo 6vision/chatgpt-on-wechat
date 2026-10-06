@@ -108,10 +108,13 @@ def serve_invoke(payload: dict, agent_bridge, send_chunk: Callable[[dict], None]
     if target.id in trace[:-1]:
         return fail(f"Delegation cycle rejected: {' -> '.join(trace)}", target.id, target.name)
 
-    try:
-        depth = int(payload.get("depth") or (len(trace) - 1))
-    except (TypeError, ValueError):
-        depth = len(trace) - 1
+    # The trace is the chain, so it — not the payload — says how deep this
+    # hand-off is. The sending side derives its depth the same way (it reads
+    # the depth it was handed and adds one), which is what keeps max_depth a
+    # bound on the chain rather than on a field anyone can set. Trusting the
+    # wire value let a negative depth clear the check outright and then, once
+    # stamped into the context, leave every later hop's ``+1`` negative too.
+    depth = len(trace) - 1
     if depth > policy.max_depth:
         return fail(
             f"Delegation depth {depth} exceeds the maximum {policy.max_depth}", target.id, target.name
