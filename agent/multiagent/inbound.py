@@ -94,7 +94,16 @@ def serve_invoke(payload: dict, agent_bridge, send_chunk: Callable[[dict], None]
 
     # The caller may know this Agent by another id; fold every such alias onto
     # the local id so the chain and roster compare against what runs here.
+    # The reserved alias counts too, and always: this side reports the default
+    # Agent to remote callers under it (CloudClient._alias_agent_id), so a chain
+    # that already ran here can name that Agent both ways. Left unfolded, the
+    # cycle guard sees two distinct entries for one Agent and lets a chain that
+    # has been here before back in.
     aliases = {addressed_id, *(str(a).strip() for a in payload.get("target_aliases") or [] if a)}
+    if target.id == agent_bridge.agent_registry.default_agent_id:
+        from agent.registry import DEFAULT_AGENT_ALIAS
+
+        aliases.add(DEFAULT_AGENT_ALIAS)
     aliases.discard("")
 
     def local(agent_id) -> str:
