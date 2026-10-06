@@ -22,6 +22,7 @@ import requests
 import web
 import websocket
 
+from agent.tools.utils.url_safety import safe_get
 from bridge.context import Context, ContextType
 from bridge.reply import Reply, ReplyType
 from channel.chat_channel import ChatChannel, check_prefix
@@ -30,7 +31,12 @@ from channel.wecom_bot.wecom_bot_message import WecomBotMessage
 from common import state_dir
 from common.expired_dict import ExpiredDict
 from common.log import logger
-from common.media_download import MAX_FILE_BYTES, MAX_IMAGE_BYTES, download_to_file
+from common.media_download import (
+    MAX_FILE_BYTES,
+    MAX_IMAGE_BYTES,
+    MediaTooLargeError,
+    save_response,
+)
 from common.singleton import singleton
 from common.ws_client_compat import websocket_app_run_forever
 from config import conf
@@ -70,9 +76,40 @@ def _download_remote_media(url: str, prefix: str, ext, max_bytes: int, read_time
     """Download one reply into managed tmp storage; returns (path, size, content_type).
 
     ``ext=None`` means an image whose extension comes from the Content-Type.
+
+    Every caller passes a URL that came out of the Agent's reply, so it is
+    fetched only after the address has been checked — and re-checked on each
+    redirect hop, since a public URL can 3xx its way onto this host. The bytes
+    end up back in the chat, so an unchecked one is a read of whatever the
+    prompt (or a page it read) pointed at.
+
+    The guard is the unconditional one rather than the tool-level opt-in: this
+    is a delivery path, not a tool reaching a dev server on request, and
+    ``web_security_ssrf_protection`` being off must not turn it into one.
+
+    ``save_response`` bounds the body as it arrives, but the declared length is
+    checked here so an oversized reply is refused before its first chunk is
+    read — the same order the shared downloader uses.
     """
     path = _media_tmp_path(prefix)
-    size, content_type = download_to_file(url, path, max_bytes, timeout=(5, read_timeout))
+    response = safe_get(
+        url, timeout=(5, read_timeout), guard="always", stream=True
+    )
+    try:
+        response.raise_for_status()
+        try:
+            declared = int(response.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            declared = 0
+        if declared > max_bytes:
+            raise MediaTooLargeError(
+                f"remote media too large: {declared} bytes, limit {max_bytes}"
+            )
+        result = save_response(response, path, max_bytes)
+    except Exception:
+        response.close()
+        raise
+    size, content_type = result.size, result.content_type
     if not size:
         os.remove(path)
         raise ValueError("remote media is empty")

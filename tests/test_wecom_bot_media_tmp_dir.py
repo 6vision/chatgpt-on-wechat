@@ -10,6 +10,8 @@ import inspect
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import socket
+
 import pytest
 
 from agent.registry import AgentProfile, AgentRegistry, set_agent_registry
@@ -26,6 +28,26 @@ def agent_workspace(tmp_path):
     # None, not the previous instance: an instance argument re-pins the
     # registry and would leak this workspace into the later tests.
     set_agent_registry(None)
+
+
+
+@pytest.fixture(autouse=True)
+def _public_host(monkeypatch):
+    """Resolve the reply URLs these tests use to a public address.
+
+    Reply media is fetched only after its address has been checked, and the
+    check resolves the hostname — so a name that cannot resolve is refused
+    before the request, which is the point. These tests are about the size and
+    cleanup bounds, so they need a host that resolves.
+    """
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))
+        ],
+    )
+
 
 
 def _channel(uploads):

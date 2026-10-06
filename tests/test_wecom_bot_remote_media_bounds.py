@@ -1,9 +1,30 @@
 """WeCom reply downloads must never publish unbounded or partial media."""
 
+import socket
+
 import pytest
 import requests
 
 from channel.wecom_bot import wecom_bot_channel as channel
+
+
+@pytest.fixture(autouse=True)
+def _public_host(monkeypatch):
+    """Resolve the reply URLs these tests use to a public address.
+
+    Reply media is fetched only after its address has been checked, and the
+    check resolves the hostname — so a name that cannot resolve is refused
+    before the request, which is the point. These tests are about the size and
+    cleanup bounds, so they need a host that resolves.
+    """
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))
+        ],
+    )
+
 
 
 class Response:
@@ -13,6 +34,10 @@ class Response:
         self.error = error
         self.interrupt = interrupt
         self.closed = False
+        # safe_get reads these to decide whether a response is a hop to follow.
+        self.status_code = 200
+        self.is_redirect = False
+        self.is_permanent_redirect = False
 
     def raise_for_status(self):
         if self.error:
@@ -53,7 +78,12 @@ def test_small_media_is_streamed_to_managed_temp_file(monkeypatch, tmp_path):
     assert path == str(tmp_path / "wecom_img.png")
     assert (tmp_path / "wecom_img.png").read_bytes() == b"media"
     assert size == 5 and content_type == "image/png"
-    assert calls == [{"stream": True, "timeout": (5, 30)}]
+    # Streamed, so the size cap counts chunks rather than buffering the body,
+    # and auto-redirect off, so each hop's address can be checked before it is
+    # followed.
+    assert calls[0]["stream"] is True
+    assert calls[0]["timeout"] == (5, 30)
+    assert calls[0]["allow_redirects"] is False
     assert response.closed
 
 
