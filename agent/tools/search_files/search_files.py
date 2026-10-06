@@ -397,7 +397,7 @@ class SearchFiles(BaseTool):
 
     # ------------------------------------------------------------- rg backend
     def _backend_rg(self, opts: "_SearchOptions") -> "_BackendResult":
-        cmd = ["rg", "--line-number", "--no-heading", "--with-filename", "--color", "never"]
+        cmd = ["rg", "--null", "--line-number", "--no-heading", "--with-filename", "--color", "never"]
         # Exclude the same VCS/dependency dirs the other backends hardcode, so a
         # repo WITHOUT a .gitignore still gives identical results across backends
         # (rg alone would otherwise only skip what .gitignore lists).
@@ -425,7 +425,7 @@ class SearchFiles(BaseTool):
         # -H forces filename even for a single-file target; -r recurses; -E = ERE
         # (aligns alternation/quantifier syntax with rg). -n is added only in
         # content mode — mixing it with -c/-l corrupts their output.
-        cmd = ["grep", "-rH", "-E"]
+        cmd = ["grep", "--null", "-rH", "-E"]
         if not opts.no_ignore:
             for d in _SKIP_DIR_NAMES:
                 cmd.append(f"--exclude-dir={d}")
@@ -435,12 +435,11 @@ class SearchFiles(BaseTool):
             cmd.append(f"--include={opts.file_glob}")
         if opts.output_mode == "files":
             cmd.append("-l")
-        elif opts.output_mode == "count":
-            cmd.append("-c")
         else:
             cmd.append("-n")
         cmd += ["-e", opts.pattern, opts.root]
-        rows, timed_out = self._run_external(cmd, opts)
+        # BSD grep ignores --null with -c; aggregate framed matching lines instead.
+        rows, timed_out = self._run_external(cmd, opts, count_from_content=opts.output_mode == "count")
         return _BackendResult(rows, timed_out)
 
     # ------------------------------------------------ powershell backend (win)
@@ -448,7 +447,7 @@ class SearchFiles(BaseTool):
         shell = shutil.which("powershell") or shutil.which("pwsh")
         # Select-String has no per-mode output flags like grep's -l/-c, so it
         # always emits `path:line:content`; files/count are aggregated from that
-        # in _parse_powershell (NOT the shared _parse_lines, whose files/count
+        # in _parse_powershell (NOT the shared _parse_null_output, whose files/count
         # parsers assume grep-native shapes). Emit an explicit \t between path
         # and line:content so a Windows drive-letter colon (C:\...) never gets
         # mistaken for the field separator.
@@ -527,67 +526,68 @@ class SearchFiles(BaseTool):
         return rows[:opts.max_results]
 
     # ----------------------------------------------- external runner + parser
-    def _run_external(self, cmd: List[str], opts: "_SearchOptions") -> Tuple[List[dict], bool]:
+    def _run_external(
+        self, cmd: List[str], opts: "_SearchOptions", count_from_content: bool = False,
+    ) -> Tuple[List[dict], bool]:
         remaining = max(0.1, opts.deadline - time.monotonic())
         try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=remaining,
-            )
+            proc = subprocess.run(cmd, capture_output=True, timeout=remaining)
         except subprocess.TimeoutExpired:
             return [], True
-        rows = self._parse_lines((proc.stdout or "").splitlines(), opts)
+        # Binary capture avoids universal-newline conversion inside filenames.
+        output = (proc.stdout or b"").decode("utf-8", errors="replace")
+        rows = self._parse_null_output(output, opts, count_from_content)
         # Exit 1 is "no matches". Exit 2 with rows is a partial result (an
         # unreadable file); without rows it is a real failure, e.g. ripgrep
         # rejecting lookaround, and execute() falls back to Python.
         if not rows and proc.returncode not in (0, 1):
-            diagnostic = (proc.stderr or "").strip()[:1000]
+            diagnostic = (proc.stderr or b"").decode("utf-8", errors="replace").strip()[:1000]
             raise RuntimeError(f"search process exited {proc.returncode}: {diagnostic}")
         return rows, False
 
-    def _parse_lines(self, lines: List[str], opts: "_SearchOptions") -> List[dict]:
-        """Parse `path:line:content` (content) / `path` (files) / `path:count`
-        (count) output shared by rg, grep and the PowerShell shim. Drops the
-        backend's own diagnostic lines (rg:/grep: prefixes) so they never reach
-        the model."""
+    def _parse_null_output(
+        self, output: str, opts: "_SearchOptions", count_from_content: bool = False,
+    ) -> List[dict]:
+        """Both external tools delimit filenames with NUL, never ':' or LF."""
         rows: List[dict] = []
-        for line in lines:
-            if not line or line.startswith(("rg:", "grep:")):
-                continue
+        counts: Dict[str, int] = {}
+        offset = 0
+        while offset < len(output):
+            separator = output.find("\0", offset)
+            if separator < 0:
+                break
+            path = output[offset:separator]
+            offset = separator + 1
             if opts.output_mode == "files":
-                p = line.strip()
-                if p:
-                    rows.append({"file": self._rel(p, opts.root)})
+                rows.append({"file": self._rel(path, opts.root)})
                 continue
-            if opts.output_mode == "count":
-                # path:count — split from the right to tolerate ':' in paths.
-                # grep -c emits a line for EVERY scanned file including :0, while
-                # rg -c only lists files with matches; drop zeros so both align.
-                head, sep, tail = line.rpartition(":")
-                if sep and tail.isdigit() and int(tail) > 0:
-                    rows.append({"file": self._rel(head, opts.root), "count": int(tail)})
+            end = output.find("\n", offset)
+            if end < 0:
+                end = len(output)
+            body = output[offset:end]
+            if body.endswith("\r"):
+                body = body[:-1]
+            offset = end + 1
+            if opts.output_mode == "count" and not count_from_content:
+                if body.isdigit() and int(body) > 0:
+                    rows.append({"file": self._rel(path, opts.root), "count": int(body)})
                 continue
-            # content mode: path:line:content
-            first = line.find(":")
-            second = line.find(":", first + 1)
-            if first == -1 or second == -1:
+            line_no, separator, content = body.partition(":")
+            if not separator or not line_no.isdigit():
                 continue
-            file_part = line[:first]
-            line_no = line[first + 1:second]
-            content = line[second + 1:]
-            if not line_no.isdigit():
-                continue
-            truncated, _ = truncate_line(content)
-            rows.append({
-                "file": self._rel(file_part, opts.root),
-                "line": int(line_no),
-                "match": truncated,
-            })
+            if count_from_content:
+                file = self._rel(path, opts.root)
+                counts[file] = counts.get(file, 0) + 1
+            else:
+                truncated, _ = truncate_line(content)
+                rows.append({"file": self._rel(path, opts.root), "line": int(line_no), "match": truncated})
+        if count_from_content:
+            rows = [{"file": file, "count": count} for file, count in counts.items()]
         # Deterministic order across backends.
         if opts.output_mode == "content":
-            rows.sort(key=lambda r: (r["file"], r["line"]))
+            rows.sort(key=lambda row: (row["file"], row["line"]))
         else:
-            rows.sort(key=lambda r: r["file"])
+            rows.sort(key=lambda row: row["file"])
         return rows[:opts.max_results]
 
     # ------------------------------------------------------- python fallback
