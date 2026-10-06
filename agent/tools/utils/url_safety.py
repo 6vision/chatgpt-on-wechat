@@ -50,6 +50,48 @@ def _is_blocked_ip(ip: "ipaddress._BaseAddress") -> bool:
     )
 
 
+def assert_public_url(url: str, what: str = "URL") -> None:
+    """Refuse a URL that names a non-public address, unconditionally.
+
+    Unlike :func:`validate_url_safe` this has no config switch, because the
+    callers are not tools reaching a dev server on request — they are handing a
+    model- or user-supplied URL to something that fetches it and shows the
+    bytes to a person. A local MCP server behind a loopback address is a
+    legitimate target there; this host's own services are not a legitimate
+    target for an image a reply happened to name.
+
+    Resolves the hostname and refuses if *any* of its addresses is non-public,
+    so a name with one public and one private A record is rejected. A literal
+    address is checked without a lookup, and a name that does not resolve is
+    refused rather than passed through.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"{what} does not use http(s): {parsed.scheme}")
+    if not parsed.hostname:
+        raise ValueError(f"{what} has no hostname")
+
+    try:
+        literal = ipaddress.ip_address(parsed.hostname)
+    except ValueError:
+        try:
+            addresses = socket.getaddrinfo(
+                parsed.hostname,
+                parsed.port,
+                socket.AF_UNSPEC,
+                socket.SOCK_STREAM,
+            )
+        except socket.gaierror as exc:
+            raise ValueError(f"cannot resolve {what.lower()} hostname: {parsed.hostname}") from exc
+        resolved = [ipaddress.ip_address(item[4][0]) for item in addresses]
+    else:
+        resolved = [literal]
+
+    for address in resolved:
+        if _is_blocked_ip(address):
+            raise ValueError(f"{what} resolves to a non-public address: {address}")
+
+
 def assert_public_ip(ip_str: str) -> None:
     """Raise ValueError if the given literal IP is a non-public address.
 
@@ -104,7 +146,8 @@ MAX_REDIRECTS = 10
 
 
 def safe_get(url: str, timeout: float = 30, headers: dict = None,
-             max_redirects: int = MAX_REDIRECTS, **kwargs) -> "requests.Response":
+             max_redirects: int = MAX_REDIRECTS, guard: str = "config",
+             **kwargs) -> "requests.Response":
     """Issue a GET request while re-validating every redirect hop (SSRF guard).
 
     Auto-redirect is disabled and each hop is followed manually, so the target
@@ -116,11 +159,20 @@ def safe_get(url: str, timeout: float = 30, headers: dict = None,
     Any tool that fetches a model-supplied URL must go through this helper:
     validating only the original URL leaves the redirect hop unguarded.
 
+    ``guard`` picks the check applied to the first URL and to every hop:
+    ``"config"`` (the default) defers to ``web_security_ssrf_protection``,
+    ``"always"`` refuses a non-public address whatever the setting says, and
+    ``"none"`` checks only the shape. Pass ``"always"`` when the caller is not
+    a tool reaching a dev server on request but a delivery path showing the
+    bytes to a person.
+
     Raises:
         ValueError: if any hop resolves to a non-public address.
     """
     kwargs.pop("allow_redirects", None)
     current = url
+    if guard == "always":
+        assert_public_url(current)
     for _ in range(max_redirects + 1):
         response = requests.get(
             current,
@@ -140,7 +192,10 @@ def safe_get(url: str, timeout: float = 30, headers: dict = None,
         # re-validate it before following.
         try:
             current = requests.compat.urljoin(current, location)
-            validate_url_safe(current)
+            if guard == "always":
+                assert_public_url(current, "redirect target")
+            else:
+                validate_url_safe(current)
         finally:
             # A rejected redirect is never returned to the caller, so it must
             # release its connection here even when resolution/validation fails.

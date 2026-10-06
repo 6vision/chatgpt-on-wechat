@@ -20,12 +20,17 @@ from dingtalk_stream.card_replier import AICardReplier
 from dingtalk_stream.card_replier import AICardStatus
 from dingtalk_stream.card_replier import CardReplier
 
+from agent.tools.utils.url_safety import safe_get
 from bridge.context import Context, ContextType
 from bridge.reply import Reply, ReplyType
 from channel.chat_channel import ChatChannel
 from channel.chat_message import safe_filename
 from common import state_dir
-from common.media_download import MAX_FILE_BYTES, MediaTooLargeError, download_to_file
+from common.media_download import (
+    MAX_FILE_BYTES,
+    MediaTooLargeError,
+    save_response,
+)
 from channel.dingtalk.dingtalk_message import DingTalkMessage
 from channel.dingtalk.dingtalk_stream_card import (
     DingTalkCardStreamer,
@@ -459,16 +464,36 @@ class DingTalkChanel(ChatChannel, dingtalk_stream.ChatbotHandler):
                     or f"media_{uuid.uuid4()}"
                 )
                 temp_file = os.path.join(str(state_dir.tmp_dir()), file_name)
+                # 这里的 URL 来自 Agent 的回复，不是钉钉自己给的，所以先校验地址
+                # 再抓：回环 / 链路本地 / 云元数据地址不该被本机读出来再转发给
+                # 钉钉。逐跳校验是为了挡住「公网 URL 3xx 拐进内网」。
+                # guard="always"：投递路径不该因为 web_security_ssrf_protection
+                # 默认关着就变成一条 SSRF 通道（那个开关是给工具连本地服务用的）。
+                response = safe_get(
+                    file_path, timeout=(5, 60), guard="always", stream=True
+                )
                 try:
-                    download_to_file(
-                        file_path, temp_file, MAX_FILE_BYTES,
-                        timeout=(5, 60), max_seconds=_MAX_REMOTE_FILE_SECONDS,
+                    response.raise_for_status()
+                    try:
+                        declared = int(response.headers.get("Content-Length") or 0)
+                    except (TypeError, ValueError):
+                        declared = 0
+                    if declared > MAX_FILE_BYTES:
+                        raise MediaTooLargeError(
+                            f"remote file too large: {declared} bytes"
+                        )
+                    save_response(
+                        response, temp_file, MAX_FILE_BYTES,
+                        max_seconds=_MAX_REMOTE_FILE_SECONDS,
                     )
-                except MediaTooLargeError:
-                    logger.error("[DingTalk] Remote file exceeds size limit, skipped upload")
-                    return None
+                except Exception:
+                    response.close()
+                    raise
                 file_path = temp_file
                 logger.info(f"[DingTalk] Downloaded file to {file_path}")
+            except MediaTooLargeError:
+                logger.error("[DingTalk] Remote file exceeds size limit, skipped upload")
+                return None
             except Exception as e:
                 logger.error(f"[DingTalk] Error downloading file: {type(e).__name__}")
                 return None
