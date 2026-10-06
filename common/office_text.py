@@ -25,6 +25,23 @@ def iter_docx_body_text(document):
                 yield "\t".join(cell.text for cell in row.cells)
 
 
+def iter_pptx_shape_text(shapes):
+    """Yield slide text, including table cells and nested groups, in shape order."""
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    for shape in shapes:
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            yield from iter_pptx_shape_text(shape.shapes)
+        elif shape.has_table:
+            for row in shape.table.rows:
+                # A merged cell's origin owns the text; covered cells add none.
+                yield "\t".join(cell.text for cell in row.cells if not cell.is_spanned)
+        elif shape.has_text_frame:
+            for paragraph in shape.text_frame.paragraphs:
+                text = paragraph.text.strip()
+                if text:
+                    yield text
+
 def _sheet_rows(cached_sheet, formula_sheet):
     for cached_row, formula_row in zip(cached_sheet.iter_rows(), formula_sheet.iter_rows()):
         values = []

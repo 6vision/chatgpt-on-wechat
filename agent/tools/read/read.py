@@ -536,16 +536,12 @@ class Read(BaseTool):
                 from pptx import Presentation
             except ImportError:
                 raise ImportError("Error: python-pptx library not installed. Install with: pip install python-pptx")
+            from common.office_text import iter_pptx_shape_text
             prs = Presentation(absolute_path)
             parts = []
             for i, slide in enumerate(prs.slides, 1):
                 parts.append(f"--- Slide {i} ---")
-                for shape in slide.shapes:
-                    if shape.has_text_frame:
-                        for para in shape.text_frame.paragraphs:
-                            text = para.text.strip()
-                            if text:
-                                parts.append(text)
+                parts.extend(iter_pptx_shape_text(slide.shapes))
             return '\n'.join(parts)
 
         return ""

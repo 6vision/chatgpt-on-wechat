@@ -367,17 +367,12 @@ class WebFetch(BaseTool):
                 "python-pptx library is required for .pptx parsing. Install with: pip install python-pptx"
             )
 
+        from common.office_text import iter_pptx_shape_text
         prs = Presentation(file_path)
         text_parts = []
 
         for slide_num, slide in enumerate(prs.slides, 1):
-            slide_texts = []
-            for shape in slide.shapes:
-                if shape.has_text_frame:
-                    for paragraph in shape.text_frame.paragraphs:
-                        text = paragraph.text.strip()
-                        if text:
-                            slide_texts.append(text)
+            slide_texts = list(iter_pptx_shape_text(slide.shapes))
             if slide_texts:
                 text_parts.append(f"--- Slide {slide_num}/{len(prs.slides)} ---\n" + "\n".join(slide_texts))
 
