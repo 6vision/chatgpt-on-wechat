@@ -19,10 +19,6 @@ from typing import Optional
 from common.log import logger
 
 
-# Aliases accepted for the Streamable HTTP transport type
-_STREAMABLE_HTTP_ALIASES = {"streamable-http", "streamable_http", "streamablehttp", "http"}
-
-
 # System env vars a stdio MCP subprocess legitimately needs to run
 # (node/python/npx toolchains). Everything else is dropped by default so
 # API keys living in the agent's own environment don't leak into servers.
@@ -105,12 +101,33 @@ class McpClient:
         raw_transport: str = config.get("type", "stdio")
         # Per-server timeout for tool calls (default 120s, suitable for data queries)
         self._timeout: int = int(config.get("timeout", 120))
-        # Normalize streamable-http aliases to a single internal key
-        self.transport: str = (
-            "streamable-http"
-            if raw_transport.lower() in _STREAMABLE_HTTP_ALIASES
-            else raw_transport
-        )
+        # Normalize the transport through the same function the console and the
+        # config API validate with. A hand-edited mcp.json reaches here without
+        # passing validate_server, and this used to fold only the bare aliases:
+        # a padded `"  http  "` or an empty `"type": ""` left self.transport as
+        # something `initialize()` does not recognise, so the server was logged
+        # as an unknown transport and never booted -- on every start, because
+        # nothing rewrites the file. It also disagreed with what the console's
+        # own test-connection had just reported as working, since that path does
+        # go through the validator.
+        #
+        # An unrecognised type falls back to the raw value rather than raising:
+        # this constructor is also reached from paths that must report the
+        # problem themselves (a bad entry in mcp.json should not take down the
+        # whole loader), and `initialize()` already logs and returns False for
+        # an unknown transport.
+        try:
+            from agent.tools.mcp.service import normalize_transport
+
+            self.transport: str = normalize_transport(
+                raw_transport, has_url=bool(config.get("url"))
+            )
+        except Exception:
+            self.transport = (
+                raw_transport.strip().lower()
+                if isinstance(raw_transport, str)
+                else "stdio"
+            )
 
         # stdio state
         self._proc: Optional[subprocess.Popen] = None
