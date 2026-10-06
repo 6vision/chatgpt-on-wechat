@@ -22,6 +22,8 @@ author off what it produces.
 
 import pytest
 
+from agent.registry import DEFAULT_AGENT_ALIAS
+
 
 class _Profile:
     def __init__(self, agent_id, workspace="/tmp/alias-hist"):
@@ -206,20 +208,43 @@ def test_persistence_off_yields_no_history(service, monkeypatch):
     assert history == []
 
 
-def test_the_history_exit_matches_the_speaker_chunk_exit(service):
-    """The two exits that name this Agent must not disagree."""
-    from agent.registry import DEFAULT_AGENT_ALIAS
+def test_the_history_exit_agrees_with_the_reserved_alias(service):
+    """The history exit applies the one rule the chunk exit applies.
 
-    _svc, registry = service
-    try:
-        from common.cloud_client import CloudClient
+    ``CloudClient._alias_agent_id`` is a staticmethod over the *global*
+    registry, so the cross-module comparison below needs that stack. This one
+    pins the rule itself — the default Agent, and only the default Agent, comes
+    out as the reserved alias — which is what the history exit has to match.
+    """
+    svc, registry = service
 
-        aliased = CloudClient._alias_agent_id(registry.default_agent_id)
-    except Exception:
-        # cloud_client pulls in the socket stack; the rule it applies is this one.
-        aliased = DEFAULT_AGENT_ALIAS
+    assert svc._outside_agent_id(registry.default_agent_id) == DEFAULT_AGENT_ALIAS
+    assert svc._outside_agent_id("helper") == "helper"
+    assert svc._outside_agent_id("") == ""
+    assert svc._outside_agent_id(None) is None
 
-    assert aliased == DEFAULT_AGENT_ALIAS
+
+def test_the_history_exit_matches_the_speaker_chunk_exit(service, monkeypatch):
+    """The two exits that name this Agent must not disagree.
+
+    ``CloudClient._alias_agent_id`` is a staticmethod that reads the *global*
+    registry, so the global has to be the roster under test — otherwise this
+    compares the history exit against whatever Agent the machine running it
+    happens to default to.
+    """
+    cloud_client = pytest.importorskip(
+        "common.cloud_client", reason="cloud_client needs the optional linkai stack"
+    )
+
+    import agent.registry as registry_module
+
+    svc, registry = service
+    monkeypatch.setattr(registry_module, "get_agent_registry", lambda: registry)
+
+    for agent_id in (registry.default_agent_id, "helper", ""):
+        assert svc._outside_agent_id(agent_id) == cloud_client.CloudClient._alias_agent_id(
+            agent_id
+        )
 
 
 if __name__ == "__main__":
