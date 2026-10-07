@@ -817,13 +817,27 @@ class Vision(BaseTool):
 
         def _try_sips(max_dim: str, quality: str) -> bool:
             try:
+                info = subprocess.run(
+                    ["sips", "-g", "pixelHeight", "-g", "pixelWidth", path],
+                    capture_output=True, text=True, check=True,
+                )
+                dimensions = {}
+                for line in info.stdout.splitlines():
+                    name, _, value = line.strip().partition(": ")
+                    if name in ("pixelHeight", "pixelWidth"):
+                        dimensions[name] = int(value)
+                if len(dimensions) != 2 or min(dimensions.values()) <= 0:
+                    return False
+                # Unlike convert's ">" geometry, sips -Z also enlarges images.
+                # Omit resampling when the source already fits the maximum.
+                resize = ["-Z", max_dim] if max(dimensions.values()) > int(max_dim) else []
                 subprocess.run(
-                    ["sips", "-Z", max_dim, "-s", "formatOptions", quality,
+                    ["sips", *resize, "-s", "formatOptions", quality,
                      path, "--out", tmp.name],
                     capture_output=True, check=True,
                 )
                 return True
-            except (FileNotFoundError, subprocess.CalledProcessError):
+            except (FileNotFoundError, subprocess.CalledProcessError, ValueError):
                 return False
 
         def _try_convert(max_dim: str, quality: str) -> bool:
