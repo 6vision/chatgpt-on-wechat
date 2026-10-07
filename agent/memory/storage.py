@@ -48,7 +48,7 @@ _CJK_RANGES = (
 )
 _RE_CONTAINS_CJK   = re.compile(f'[{_CJK_RANGES}]')
 _RE_CJK_WORDS      = re.compile(f'[{_CJK_RANGES}]+')
-_RE_TRIGRAM_TOKENS = re.compile(f'[{_CJK_RANGES}]+|[A-Za-z0-9_]+')
+_RE_TRIGRAM_TOKENS = re.compile(rf'[{_CJK_RANGES}]+|[^\W{_CJK_RANGES}]+')
 
 # sqlite3.OperationalError subclasses DatabaseError, so "database is locked",
 # "disk I/O error" and friends must be told apart from actual corruption before
@@ -927,13 +927,13 @@ class MemoryStorage:
         """LIKE-based search.
 
         Used as the keyword-search fallback when FTS5 is unavailable, fails,
-        or returns empty. Supports both CJK runs (1+ chars) and ASCII word
+        or returns empty. Supports both CJK runs (1+ chars) and Unicode word
         tokens (3+ chars) so it can serve as a true safety net for any query.
         """
-        # CJK runs (1+ chars, wide Unicode range) + ASCII words (3+ chars to avoid noise)
+        # Keep CJK runs separate from adjacent words, as in the trigram query.
         cjk_words = _RE_CJK_WORDS.findall(query)
-        ascii_words = [t for t in re.findall(r'[A-Za-z0-9_]+', query) if len(t) >= 3]
-        words = cjk_words + ascii_words
+        word_text = _RE_CONTAINS_CJK.sub(' ', query)
+        words = cjk_words + [t for t in re.findall(r'\w+', word_text) if len(t) >= 3]
         if not words:
             return []
 
@@ -1148,7 +1148,7 @@ class MemoryStorage:
     def _build_trigram_query(raw_query: str) -> Optional[str]:
         """
         Build FTS5 MATCH query for the trigram tokenizer.
-        Extracts CJK sequences (including single characters) and ASCII words,
+        Extracts CJK sequences (including single characters) and Unicode words,
         joining them with AND so all terms must appear in the matched chunk.
         """
         tokens = _RE_TRIGRAM_TOKENS.findall(raw_query)
@@ -1225,8 +1225,8 @@ class MemoryStorage:
         Works best for English and word-based languages.
         For CJK characters, LIKE search will be used as fallback.
         """
-        # Extract words (primarily English words and numbers)
-        tokens = re.findall(r'[A-Za-z0-9_]+', raw_query)
+        # SQLite's unicode61 tokenizer supports words outside the ASCII alphabet.
+        tokens = re.findall(r'\w+', raw_query)
         if not tokens:
             return None
         
