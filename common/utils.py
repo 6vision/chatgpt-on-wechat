@@ -60,7 +60,9 @@ def split_string_by_utf8_length(string, max_length, max_split=0):
 
 
 def get_path_suffix(path):
-    path = urlparse(path).path
+    # Local filenames may legitimately contain URL query/fragment characters.
+    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", path):
+        path = urlparse(path).path
     return os.path.splitext(path)[-1].lstrip('.')
 
 
