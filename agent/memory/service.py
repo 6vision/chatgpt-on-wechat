@@ -14,9 +14,6 @@ from datetime import datetime
 from typing import List, Optional
 from common.log import logger
 
-# Upper bound on one page of memory files. A caller asking for more gets this
-# many rather than the whole listing, so a mistyped page_size cannot turn a
-# paginated call into an unbounded read.
 MAX_PAGE_SIZE = 200
 
 
@@ -47,11 +44,7 @@ class MemoryService:
                                         merged with the nightly dream diaries, so
                                         one tab shows everything the agent learned.
 
-        ``page`` and ``page_size`` are clamped rather than trusted: the cloud
-        console forwards whatever it was handed, and a negative or zero value
-        reaches Python's slicing with its wrap-around and empty-slice semantics,
-        so ``page=0`` reported an empty list next to a non-zero ``total`` and
-        ``page_size=-1`` silently dropped the last file instead of erroring.
+        ``page`` and ``page_size`` are clamped to ``[1, MAX_PAGE_SIZE]``.
         """
         page = max(1, int(page))
         page_size = max(1, min(int(page_size), MAX_PAGE_SIZE))
@@ -176,10 +169,7 @@ class MemoryService:
                 page = payload.get("page", 1)
                 page_size = payload.get("page_size", 20)
                 category = payload.get("category", "memory")
-                # The console sends these as strings. Coerce here so a
-                # non-numeric value is a 400 the caller can act on, instead of
-                # a 500 from the arithmetic below -- which is what the sibling
-                # on_history handler already does for the same two fields.
+                # They may arrive as strings; a non-numeric value is a 400.
                 try:
                     page = int(page)
                     page_size = int(page_size)

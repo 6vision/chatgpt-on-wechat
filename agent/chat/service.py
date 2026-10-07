@@ -769,14 +769,7 @@ class ChatService:
         return history
 
     def _outside_agent_id(self, agent_id):
-        """This Agent's id as the far side addresses it: the reserved alias.
-
-        Speaker chunks already leave through ``CloudClient._aliasing_sender``,
-        which rewrites the default Agent to the alias. The history rides the
-        request itself rather than a chunk, so it never passes through that
-        sender — and a transcript that names the default Agent two ways leaves
-        the teammate attributing its own conversation to a stranger.
-        """
+        """The default Agent goes out under the reserved alias, as speaker chunks do."""
         try:
             from agent.registry import DEFAULT_AGENT_ALIAS
 

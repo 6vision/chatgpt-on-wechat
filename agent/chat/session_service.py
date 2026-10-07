@@ -341,18 +341,7 @@ class SessionService:
         logger.info(f"[SessionService] Session deleted: {session_id}")
 
     def _forget_side_stores(self, session_id: str, agent_id: str = None) -> None:
-        """Drop what else a session leaves behind, best-effort.
-
-        The project binding and the pinned model/permission live in their own
-        stores, both namespaced by Agent. Left behind, a stale project binding
-        keeps counting the deleted session in the "spaces in use" figure the
-        list is grouped by and keeps the Agent's file tools pointed at a project
-        the user removed; a stale model pin answers for that Agent the next time
-        the id is reused. Neither is reachable from the conversation store, so
-        clearing that one does not touch them. The HTTP route has always done
-        this. Each store is swept on its own, and a failure in one leaves the
-        other to be cleaned rather than skipping both.
-        """
+        """Drop the session's project binding and prefs, each best-effort."""
         try:
             scoped = self._resolve_agent_id(agent_id)
         except Exception as e:

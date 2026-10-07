@@ -630,13 +630,7 @@ class MemoryManager:
     
     def _generate_chunk_id(self, path: str, start_line: int, end_line: int,
                            part: int = 0) -> str:
-        """Generate unique chunk ID
-
-        `part` distinguishes the pieces one over-long line is hard-split into:
-        they share (start_line, end_line), so keying on the line range alone
-        gives them all the same id and save_chunks_batch's UPSERT keeps only one
-        of them. 0 keeps the historical id for every ordinary chunk.
-        """
+        """Generate unique chunk ID; `part` separates the pieces of one split line."""
         content = f"{path}:{start_line}:{end_line}"
         if part:
             content += f":{part}"

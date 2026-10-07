@@ -331,15 +331,7 @@ def _avatar_path(agent_id: str) -> Optional[str]:
 
 
 def delete_avatar_files(agent_id: str) -> int:
-    """Remove every uploaded avatar file belonging to ``agent_id``.
-
-    The bytes live under ``<shared root>/avatars/``, which is outside the
-    Agent's workspace, so deleting the workspace does not reach them. An id
-    is reusable, and a stale file would be served to whoever takes it next,
-    so this runs when an Agent is deleted as well as when its picture is
-    replaced. Returns how many files went away; best-effort, because a
-    deletion that already committed must not be undone by a leftover file.
-    """
+    """Best-effort removal of ``agent_id``'s avatar files, which live outside its workspace."""
     from common.state_dir import shared_root
 
     base = shared_root() / "avatars"
@@ -386,10 +378,7 @@ def _annotate_avatar_revs(snapshot: dict) -> dict:
 class AgentAvatarHandler:
     def GET(self, agent_id: str):
         _require_auth()
-        # The file outlives the roster entry unless something removed it, so
-        # the roster is what decides whether this id still has an Agent. POST
-        # checks it for the same reason; without it here a deleted id keeps
-        # serving its old picture to anyone who kept the URL.
+        # A deleted Agent's id must not keep serving an old picture.
         try:
             from agent.registry import get_agent_registry
 

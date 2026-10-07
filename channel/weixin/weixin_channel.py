@@ -64,14 +64,7 @@ def _media_tmp_path(prefix: str, ext: str = "") -> str:
 
 
 def _remove_media_tmp(path: str) -> None:
-    """Delete a media file this channel downloaded, ignoring a missing one.
-
-    Only ever called with a path that came out of :meth:`_resolve_media` with
-    its ``downloaded`` flag set, so a file the user asked us to send is never
-    touched. The managed tmp dir is not pruned by anything else, so without
-    this every media reply left its download behind for the life of the
-    install.
-    """
+    """Delete a media file this channel downloaded."""
     if not path:
         return
     try:
@@ -998,13 +991,7 @@ class WeixinChannel(ChatChannel):
 
     @staticmethod
     def _resolve_media_path(path_or_url: str) -> str:
-        """Resolve a file path or URL to a local file path. Downloads if needed.
-
-        A downloaded file is transient and is *not* cleaned up here: the caller
-        still has to upload it, so the lifetime is the caller's. Use
-        :meth:`_resolve_media` where the caller wants the file removed after
-        the upload, or :func:`_remove_media_tmp` to clean one up by hand.
-        """
+        """Resolve a file path or URL to a local file path. Downloads if needed."""
         if not path_or_url:
             return ""
 
@@ -1046,12 +1033,7 @@ class WeixinChannel(ChatChannel):
 
     @classmethod
     def _resolve_media(cls, path_or_url: str) -> Tuple[str, bool]:
-        """Like :meth:`_resolve_media_path`, plus whether *we* created the file.
-
-        The flag is what keeps the cleanup honest: a path the user pointed us
-        at belongs to them and must survive the send, while a download this
-        method made is ours to delete once the upload is done.
-        """
+        """Like :meth:`_resolve_media_path`, plus whether the file was downloaded here."""
         downloaded = bool(path_or_url) and path_or_url.startswith(
             ("http://", "https://"))
         local_path = cls._resolve_media_path(path_or_url)

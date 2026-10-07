@@ -207,13 +207,7 @@ class PluginManager:
                         logger.warn("Failed to import plugin %s: %s" % (plugin_name, e))
                         continue
         pconf = self.pconf
-        # Compare by registry key, not by class identity. Reloading a plugin
-        # re-runs its @register decorator, which hands the manager a brand new
-        # class object, so the snapshot taken before the loop holds objects
-        # that are no longer the ones in self.plugins. A set difference over
-        # the classes therefore reported every reloaded plugin as brand new --
-        # and since every scan reloads, every scan claimed all of them.
-        # The key is what identity means here: register() writes name.upper().
+        # Compare by registry key: a reload registers a new class object.
         new_plugins = [self.plugins[name] for name in self.plugins
                        if name not in raws]
         modified = False

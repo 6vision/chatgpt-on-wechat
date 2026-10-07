@@ -627,11 +627,7 @@ class AgentAdminService:
             except Exception as e:
                 logger.warning(f"[AgentAdmin] project store cleanup after delete failed: {e}")
 
-            # An uploaded avatar is the one asset that does not live in the
-            # workspace: its bytes sit in <shared root>/avatars/ under the
-            # Agent's id. Same threat as the two stores above -- the id is
-            # reusable, and the next Agent to take it would be served the
-            # deleted Agent's picture -- so it is swept here too.
+            # The avatar lives outside the workspace; a reused id must not inherit it.
             try:
                 from channel.web.api.agents import delete_avatar_files
 
