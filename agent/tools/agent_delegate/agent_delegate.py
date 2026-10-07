@@ -636,9 +636,6 @@ class AgentDelegateTool(BaseTool):
             members=tuple(onward_members),
             peers=tuple(p for p in peers if p is not None),
             timeout_seconds=policy.timeout_seconds,
-            # The far side runs under a synthetic session id with no prefs, so
-            # without this the hand-off would answer under the global mode —
-            # the one thing a delegation must not widen.
             permission_mode=self._inherited_permission_mode(source.id) or "",
         )
         started_at = time.monotonic()

@@ -73,12 +73,8 @@ class InvokeRequest:
     :data:`MODE_CLEAR` runs no turn and drops the teammate's context for
     ``root_session_id``.
 
-    ``permission_mode`` is the calling Agent's own mode, carried for the same
-    reason a local hand-off inherits it: a delegated run uses a synthetic
-    session id that has no prefs, so without this the far side would fall back
-    to the global setting — which is what a local delegation no longer does.
-    Empty means "the caller has no live instance to read", and the far side
-    keeps its own default.
+    ``permission_mode`` is the calling Agent's mode; the far side may only
+    narrow its own mode with it. Empty leaves the far side's default.
     """
 
     request_id: str
