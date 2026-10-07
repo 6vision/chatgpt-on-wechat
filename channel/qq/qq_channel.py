@@ -50,11 +50,18 @@ OP_HEARTBEAT_ACK = 11
 # Resumable error codes
 RESUMABLE_CLOSE_CODES = {4008, 4009}
 
+# Delay before reconnecting after a session ends. Consecutive sessions that never
+# reach READY/RESUMED (gateway unreachable, handshake refused) back off
+# exponentially up to the cap so a long outage does not hammer the API.
+RESUME_DELAY_SECONDS = 3
+RECONNECT_DELAY_SECONDS = 5
+MAX_RECONNECT_DELAY_SECONDS = 60
+
 # WebSocket transport-level keepalive. Without this the client never sends
 # protocol pings, so a half-open connection (NAT/container network drop with no
-# TCP FIN/RST) is never detected and _on_close never fires — the socket looks
+# TCP FIN/RST) is never detected and the session never ends — the socket looks
 # alive but no events arrive. ping_timeout closes the socket when a pong is
-# missed, which routes into the existing _on_close reconnect path.
+# missed, which ends run_forever and lets the reconnect loop take over.
 WS_PING_INTERVAL = 20
 WS_PING_TIMEOUT = 10
 
@@ -83,7 +90,10 @@ class QQChannel(ChatChannel):
         self._ws = None
         self._ws_thread = None
         self._heartbeat_thread = None
+        self._heartbeat_ws = None
         self._connected = False
+        # Set when the gateway sends OP_RECONNECT, so the next session resumes.
+        self._reconnect_requested = False
         self._stop_event = threading.Event()
         self._token_lock = threading.Lock()
 
@@ -216,13 +226,58 @@ class QQChannel(ChatChannel):
             logger.error(f"[QQ] Failed to get gateway URL: {e}")
             return ""
 
+    def _is_current(self, generation: int) -> bool:
+        return not self._stop_event.is_set() and self._generation == generation
+
     def _start_ws(self):
+        """Keep a gateway session open until stop(), reconnecting whenever one ends.
+
+        Reconnecting is driven by run_forever() returning, not by on_close:
+        websocket-client < 1.6 returns from run_forever without firing on_close
+        when the socket is closed locally (server-requested reconnect, heartbeat
+        watchdog), which used to leave the bot offline for good.
+        """
         generation = self._generation
-        ws_url = self._get_ws_url()
-        if not ws_url:
-            logger.error("[QQ] Cannot start WebSocket without gateway URL")
-            self.report_startup_error(f"Failed to get gateway URL: {self._last_api_error}")
-            return
+        first_attempt = True
+        failures = 0
+        while self._is_current(generation):
+            ws_url = self._get_ws_url()
+            if not ws_url and first_attempt:
+                logger.error("[QQ] Cannot start WebSocket without gateway URL")
+                self.report_startup_error(f"Failed to get gateway URL: {self._last_api_error}")
+                return
+            first_attempt = False
+
+            close_code = None
+            established = False
+            if ws_url:
+                close_code, established = self._run_session(ws_url)
+            self._connected = False
+            # A newer session took over (restart) or stop() was called; going
+            # round again would run two sessions and double every event.
+            if not self._is_current(generation):
+                break
+
+            self._can_resume = bool(self._session_id) and (
+                self._reconnect_requested or close_code in RESUMABLE_CLOSE_CODES
+            )
+            failures = 0 if established else failures + 1
+            if self._can_resume and failures == 0:
+                delay = RESUME_DELAY_SECONDS
+            else:
+                delay = min(RECONNECT_DELAY_SECONDS * (2 ** failures), MAX_RECONNECT_DELAY_SECONDS)
+            logger.info(f"[QQ] Session ended, will {'resume' if self._can_resume else 'reconnect'} in {delay}s...")
+            self._stop_event.wait(delay)
+        logger.info("[QQ] WebSocket loop exited")
+
+    def _run_session(self, ws_url: str):
+        """Run one WebSocket session to completion.
+
+        Returns (close_code, established): the close code, if the library
+        reported one, and whether the session reached READY/RESUMED.
+        """
+        result = {"close_code": None, "established": False}
+        self._reconnect_requested = False
 
         def _on_open(ws):
             logger.debug("[QQ] WebSocket connected, waiting for Hello...")
@@ -231,6 +286,8 @@ class QQChannel(ChatChannel):
             try:
                 data = json.loads(raw)
                 self._handle_ws_message(data)
+                if self._connected:
+                    result["established"] = True
             except Exception as e:
                 logger.error(f"[QQ] Failed to handle ws message: {e}", exc_info=True)
 
@@ -238,37 +295,22 @@ class QQChannel(ChatChannel):
             logger.error(f"[QQ] WebSocket error: {error}")
 
         def _on_close(ws, close_status_code, close_msg):
+            result["close_code"] = close_status_code
             logger.warning(f"[QQ] WebSocket closed: status={close_status_code}, msg={close_msg}")
-            if self._generation != generation:
-                # A newer session took over; reconnecting here would revive the
-                # old one alongside it and double every incoming event.
-                logger.info("[QQ] Superseded session closed, not reconnecting")
-                return
-            self._connected = False
-            if not self._stop_event.is_set():
-                if close_status_code in RESUMABLE_CLOSE_CODES and self._session_id:
-                    self._can_resume = True
-                    logger.info("[QQ] Will attempt resume in 3s...")
-                    time.sleep(3)
-                else:
-                    self._can_resume = False
-                    logger.info("[QQ] Will reconnect in 5s...")
-                    time.sleep(5)
-                if not self._stop_event.is_set():
-                    self._start_ws()
 
-        self._ws = websocket.WebSocketApp(
+        ws = websocket.WebSocketApp(
             ws_url,
             on_open=_on_open,
             on_message=_on_message,
             on_error=_on_error,
             on_close=_on_close,
         )
+        self._ws = ws
 
         def run_forever():
             try:
                 websocket_app_run_forever(
-                    self._ws,
+                    ws,
                     ping_interval=WS_PING_INTERVAL,
                     ping_timeout=WS_PING_TIMEOUT,
                     reconnect=0,
@@ -281,6 +323,7 @@ class QQChannel(ChatChannel):
         self._ws_thread = threading.Thread(target=run_forever, daemon=True)
         self._ws_thread.start()
         self._ws_thread.join()
+        return result["close_code"], result["established"]
 
     def _ws_send(self, data: dict):
         if self._ws:
@@ -318,8 +361,14 @@ class QQChannel(ChatChannel):
         logger.debug(f"[QQ] Resume sent: session_id={self._session_id}, seq={self._last_seq}")
 
     def _start_heartbeat(self, interval_ms: int):
-        if self._heartbeat_thread and self._heartbeat_thread.is_alive():
+        # Each heartbeat thread serves exactly one socket. A thread left over
+        # from the previous session may still be sleeping when the next one
+        # becomes READY; it must not stand in for (or write to) the new socket.
+        ws = self._ws
+        if (self._heartbeat_thread and self._heartbeat_thread.is_alive()
+                and self._heartbeat_ws is ws):
             return
+        self._heartbeat_ws = ws
         self._heartbeat_interval = interval_ms
         interval_sec = interval_ms / 1000.0
         # Seed the ACK clock so the watchdog measures silence from now, not from
@@ -327,33 +376,35 @@ class QQChannel(ChatChannel):
         self._last_heartbeat_ack = time.time()
         ack_timeout = interval_sec * HEARTBEAT_ACK_TIMEOUT_FACTOR
 
+        def alive():
+            return not self._stop_event.is_set() and self._connected and self._ws is ws
+
+        def force_close():
+            try:
+                ws.close()
+            except Exception:
+                pass
+
         def heartbeat_loop():
-            while not self._stop_event.is_set() and self._connected:
+            while alive():
                 try:
-                    self._ws_send({
-                        "op": OP_HEARTBEAT,
-                        "d": self._last_seq,
-                    })
+                    ws.send(json.dumps({"op": OP_HEARTBEAT, "d": self._last_seq}))
                 except Exception as e:
-                    logger.warning(f"[QQ] Heartbeat send failed: {e}")
+                    logger.warning(f"[QQ] Heartbeat send failed: {e}, forcing reconnect")
+                    force_close()
                     break
                 self._stop_event.wait(interval_sec)
-                # A live socket whose gateway has gone silent (no ACKs) still
-                # passes ws_send, so detect the stall here and force a close so
-                # the _on_close reconnect path runs.
-                if self._stop_event.is_set() or not self._connected:
+                if not alive():
                     break
+                # A live socket whose gateway has gone silent (no ACKs) still
+                # accepts sends, so detect the stall here and close it to end
+                # the session and let the reconnect loop take over.
                 if time.time() - self._last_heartbeat_ack > ack_timeout:
                     logger.warning(
                         f"[QQ] No heartbeat ACK for over {ack_timeout:.0f}s, "
                         f"connection appears dead, forcing reconnect"
                     )
-                    ws = self._ws
-                    if ws:
-                        try:
-                            ws.close()
-                        except Exception:
-                            pass
+                    force_close()
                     break
 
         self._heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
@@ -389,7 +440,7 @@ class QQChannel(ChatChannel):
 
         elif op == OP_RECONNECT:
             logger.warning("[QQ] Server requested reconnect")
-            self._can_resume = True
+            self._reconnect_requested = True
             if self._ws:
                 self._ws.close()
 

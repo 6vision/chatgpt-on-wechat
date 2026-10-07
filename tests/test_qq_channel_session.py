@@ -7,6 +7,7 @@ failures used to be reported without the platform's own error body, which is
 the only thing that tells an IP-allowlist rejection from a bad secret.
 """
 
+import json
 import os
 import sys
 import threading
@@ -31,7 +32,42 @@ def _make_channel():
     ch._token_lock = threading.Lock()
     ch._stop_event = MagicMock()
     ch._connected = False
+    ch._session_id = None
+    ch._last_seq = None
+    ch._can_resume = False
+    ch._reconnect_requested = False
+    ch._heartbeat_thread = None
+    ch._heartbeat_ws = None
+    ch._heartbeat_interval = 45000
+    ch._last_heartbeat_ack = 0.0
     return ch
+
+
+class _FakeApp:
+    """Stands in for websocket.WebSocketApp; each instance plays one scripted session.
+
+    Like websocket-client < 1.6, run_forever returns without calling on_close
+    when the socket was closed locally.
+    """
+
+    def __init__(self, script, url, on_open, on_message, on_error, on_close):
+        self.script = script
+        self.on_message = on_message
+        self.on_close = on_close
+        self.sent = []
+        self.closed = False
+
+    def run_forever(self, **kwargs):
+        for frame in self.script(self):
+            if self.closed:
+                return
+            self.on_message(self, json.dumps(frame))
+
+    def send(self, data):
+        self.sent.append(json.loads(data))
+
+    def close(self, **kwargs):
+        self.closed = True
 
 
 class SessionLifecycleTest(unittest.TestCase):
@@ -46,25 +82,90 @@ class SessionLifecycleTest(unittest.TestCase):
         self.assertIsNone(ch._ws)
         self.assertFalse(ch._connected)
 
-    def test_a_superseded_socket_does_not_reconnect(self):
-        """The old socket's on_close fires after a new session took over."""
-        ch = _make_channel()
-        started = []
 
-        with patch.object(ch, "_get_ws_url", return_value="wss://example/ws"), \
-             patch("channel.qq.qq_channel.websocket.WebSocketApp") as ws_app, \
-             patch("channel.qq.qq_channel.threading.Thread") as thread:
-            thread.return_value = MagicMock()
+_HELLO = {"op": 10, "d": {"heartbeat_interval": 45000}}
+_RECONNECT = {"op": 7}
+
+
+def _ready(session_id):
+    return {"op": 0, "t": "READY", "s": 1,
+            "d": {"session_id": session_id, "user": {"username": "bot"}}}
+
+
+class ReconnectLoopTest(unittest.TestCase):
+    """A session that ends for any reason is followed by a new one until stop().
+
+    Reconnecting used to hang off on_close, which websocket-client < 1.6 skips
+    when the socket is closed locally, so a server-requested reconnect left the
+    bot offline for good.
+    """
+
+    def _run(self, ch, scripts, urls=None):
+        apps = []
+
+        def make_app(url, **callbacks):
+            app = _FakeApp(scripts[len(apps)], url, **callbacks)
+            apps.append(app)
+            return app
+
+        ch._stop_event = threading.Event()
+        url_patch = (patch.object(ch, "_get_ws_url", side_effect=urls) if urls
+                     else patch.object(ch, "_get_ws_url", return_value="wss://example/ws"))
+        with url_patch, \
+             patch.object(ch, "report_startup_success"), \
+             patch("channel.qq.qq_channel.websocket.WebSocketApp", side_effect=make_app), \
+             patch("channel.qq.qq_channel.RESUME_DELAY_SECONDS", 0), \
+             patch("channel.qq.qq_channel.RECONNECT_DELAY_SECONDS", 0):
             ch._start_ws()
-            on_close = ws_app.call_args.kwargs["on_close"]
+        ch._stop_event.set()
+        return apps
 
-            # A newer session comes up, then the old socket finally closes.
+    def test_a_server_requested_reconnect_resumes_the_session(self):
+        ch = _make_channel()
+
+        def first(app):
+            yield _HELLO
+            yield _ready("s1")
+            yield _RECONNECT
+
+        def second(app):
+            yield _HELLO
+            ch._stop_event.set()
+
+        apps = self._run(ch, [first, second])
+
+        self.assertEqual(len(apps), 2, "the bot must come back after OP_RECONNECT")
+        resume = apps[1].sent[0]
+        self.assertEqual(resume["op"], 6)
+        self.assertEqual(resume["d"]["session_id"], "s1")
+
+    def test_a_dropped_session_reconnects_even_if_the_gateway_blips(self):
+        ch = _make_channel()
+
+        def first(app):
+            yield _HELLO
+            yield _ready("s1")
+
+        def second(app):
+            ch._stop_event.set()
+            yield _HELLO
+
+        apps = self._run(ch, [first, second],
+                         urls=["wss://example/ws", "", "wss://example/ws"])
+
+        self.assertEqual(len(apps), 2, "a failed gateway lookup must be retried")
+
+    def test_a_superseded_session_does_not_reconnect(self):
+        """A restart bumps the generation; the old loop must not open another socket."""
+        ch = _make_channel()
+
+        def first(app):
+            yield _HELLO
             ch._generation += 1
-            ch._stop_event.is_set.return_value = False
-            with patch.object(ch, "_start_ws", side_effect=lambda: started.append(1)):
-                on_close(None, 1006, "closed")
 
-        self.assertEqual(started, [], "a superseded socket must not reconnect itself")
+        apps = self._run(ch, [first])
+
+        self.assertEqual(len(apps), 1)
 
 
 class HeartbeatWatchdogTest(unittest.TestCase):
@@ -72,7 +173,8 @@ class HeartbeatWatchdogTest(unittest.TestCase):
 
     ping_interval alone can miss an application-layer stall where the socket is
     up but the gateway has gone quiet, so the heartbeat loop watches ACK
-    freshness and closes the socket when it goes stale, routing into _on_close.
+    freshness and closes the socket when it goes stale, ending the session so
+    the reconnect loop opens a new one.
     """
 
     def test_missing_acks_force_the_socket_closed(self):
