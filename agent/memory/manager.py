@@ -424,7 +424,8 @@ class MemoryManager:
                 logger.warning(f"[MemoryManager] Skipping {file_path}: cannot read it ({e})")
                 continue
             file_hash = MemoryStorage.compute_hash(content)
-            if self.storage.get_file_hash(rel_path) == file_hash:
+            previous_hash = self.storage.get_file_hash(rel_path)
+            if previous_hash == file_hash:
                 continue
             # Markdown files (memory + knowledge) get structure-aware chunking;
             # anything else (rare) falls back to the plain char splitter.
@@ -432,7 +433,7 @@ class MemoryManager:
                 chunks = self.chunker.chunk_markdown(content)
             else:
                 chunks = self.chunker.chunk_text(content)
-            if not chunks:
+            if not chunks and previous_hash is None:
                 continue
             pending.append({
                 "file_path": file_path,
@@ -494,9 +495,9 @@ class MemoryManager:
         for entry in pending:
             all_texts.extend(entry["texts"])
 
-        if not self.embedding_provider:
-            # No provider configured at all (legacy keyword-only). Persist
-            # chunks without embeddings — this is the user's intent.
+        if not all_texts or not self.embedding_provider:
+            # Empty files still replace their index entry without an API call.
+            # Keyword-only indexes persist nonempty chunks without embeddings.
             all_embeddings: List[Optional[List[float]]] = [None] * len(all_texts)
         else:
             try:
