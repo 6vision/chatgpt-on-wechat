@@ -276,6 +276,26 @@ class AgentDelegateTool(BaseTool):
         digest = hashlib.sha256(root_session_id.encode("utf-8")).hexdigest()[:16]
         return f"delegate_{source_agent_id}_{target_agent_id}_{digest}"
 
+    def _inherited_permission_mode(self, source_agent_id: str) -> str | None:
+        """The delegating Agent's permission mode, or None to leave the target's.
+
+        A delegated run has its own session id with no prefs, so without this it
+        would fall back to the global mode, like a sub agent would. `peek_agent`
+        never builds an Agent; None means the source has no live instance.
+        """
+        session_id = (self.current_context.kwargs or {}).get("session_id")
+        if not session_id:
+            return None
+        try:
+            source = self.agent_bridge.peek_agent(session_id, source_agent_id)
+        except Exception as e:
+            logger.debug(f"[AgentDelegate] could not read the source's mode: {e}")
+            return None
+        if source is None:
+            return None
+        getter = getattr(source, "effective_permission_mode", None)
+        return getter() if callable(getter) else None
+
     def _team_members(self, context_values: dict, source_agent_id: str) -> list:
         """The teammates the source Agent may delegate to this turn.
 
@@ -520,6 +540,9 @@ class AgentDelegateTool(BaseTool):
         delegated_context["run_id"] = run_id
         delegated_context["parent_run_id"] = parent_run_id
         delegated_context["task_source"] = TASK_SOURCE
+        inherited_mode = self._inherited_permission_mode(source.id)
+        if inherited_mode:
+            delegated_context["delegated_permission_mode"] = inherited_mode
 
         prompt = delegated_prompt(source.name, source.id, task)
 

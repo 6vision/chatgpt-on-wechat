@@ -601,6 +601,9 @@ def _session_settings_state(session_id: str, agent_id: Optional[str]) -> dict:
     global config. ``source`` is ``session`` / ``agent`` / ``global`` accordingly,
     and ``agent`` carries the Agent's default when it has one, so a fresh chat
     with a specialist Agent shows the model it will really answer with.
+
+    A conversation with members ignores the pin, as ``apply_session_prefs``
+    does, and ``pin_ignored`` says so.
     """
     from agent.workspace import session_prefs
 
@@ -628,7 +631,9 @@ def _session_settings_state(session_id: str, agent_id: Optional[str]) -> dict:
     except Exception as e:
         logger.debug(f"[WebChannel] agent default model unavailable: {e}")
 
-    if prefs.get("model"):
+    is_group = bool(prefs.get("members"))
+
+    if prefs.get("model") and not is_group:
         effective_model, effective_provider, source = prefs["model"], prefs.get("provider"), "session"
     elif agent_default:
         effective_model, effective_provider, source = agent_default["model"], agent_default["provider"], "agent"
@@ -640,6 +645,7 @@ def _session_settings_state(session_id: str, agent_id: Optional[str]) -> dict:
             "model": effective_model,
             "provider": effective_provider or global_provider,
             "source": source,
+            "pin_ignored": bool(prefs.get("model")) and is_group,
             "global": {"model": global_model, "provider": global_provider},
             "agent": agent_default,
             "providers": _session_model_catalog(),

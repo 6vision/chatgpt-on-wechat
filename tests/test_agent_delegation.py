@@ -522,3 +522,91 @@ def _query_for(task, order):
         if task in query:
             return query
     raise AssertionError(f"no query recorded for {task}")
+
+
+# A delegated run inherits the delegating conversation's permission mode.
+
+
+class _Source:
+    def __init__(self, mode="read-only"):
+        self._mode = mode
+
+    def effective_permission_mode(self):
+        return self._mode
+
+
+_DEFAULT = object()
+
+
+class PeekBridge(FakeBridge):
+    """``source=None`` means no live source instance, as for a nested hop."""
+
+    def __init__(self, registry=None, source_mode="read-only", source=_DEFAULT):
+        super().__init__(registry)
+        self._source = _Source(source_mode) if source is _DEFAULT else source
+        self.peeked = []
+
+    def peek_agent(self, session_id, agent_id=None):
+        self.peeked.append((session_id, agent_id))
+        return self._source
+
+
+def test_a_delegated_run_inherits_the_delegating_permission_mode():
+    bridge = PeekBridge()
+    tool = _tool(bridge=bridge)
+
+    result = tool.execute({"agent_id": "research", "task": "Check the evidence"})
+
+    assert result.status == "success"
+    _, context, _ = bridge.calls[0]
+    assert context.get("delegated_permission_mode") == "read-only"
+    assert bridge.peeked == [("user-session", "primary")]
+
+
+def test_no_live_source_leaves_the_mode_alone():
+    bridge = PeekBridge(source=None)
+    tool = _tool(bridge=bridge)
+
+    result = tool.execute({"agent_id": "research", "task": "Check the evidence"})
+
+    assert result.status == "success"
+    _, context, _ = bridge.calls[0]
+    assert "delegated_permission_mode" not in context
+
+
+def test_a_failing_lookup_does_not_break_the_delegation():
+    class _Broken(PeekBridge):
+        def peek_agent(self, session_id, agent_id=None):
+            raise RuntimeError("registry is locked")
+
+    tool = _tool(bridge=_Broken())
+
+    result = tool.execute({"agent_id": "research", "task": "Check the evidence"})
+
+    assert result.status == "success"
+    _, context, _ = tool.agent_bridge.calls[0]
+    assert "delegated_permission_mode" not in context
+
+
+def test_ordinary_turns_still_read_their_prefs():
+    class _Target:
+        def __init__(self):
+            self.applied = []
+            self.model = None
+
+        def apply_permission_mode(self, mode):
+            self.applied.append(mode)
+
+    from bridge.agent_bridge import AgentBridge
+
+    bridge = AgentBridge.__new__(AgentBridge)
+
+    target = _Target()
+    bridge.apply_session_prefs(target, "ordinary-session", "primary")
+    assert target.applied == [None]
+
+    target = _Target()
+    bridge.apply_session_prefs(
+        target, "ordinary-session", "primary", permission_mode="read-only"
+    )
+    assert target.applied == ["read-only"]

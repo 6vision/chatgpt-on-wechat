@@ -501,6 +501,14 @@ class WeixinChannel(ChatChannel):
                     qr_resp = api.fetch_qr_code()
                     qrcode = qr_resp.get("qrcode", "")
                     qrcode_url = qr_resp.get("qrcode_img_content", "")
+                    # A 200 with an error body has no qrcode; polling an empty
+                    # code only ever reports "wait".
+                    if not qrcode:
+                        logger.error(
+                            "[Weixin] QR refresh returned no qrcode; stopping login"
+                        )
+                        self._current_qr_url = ""
+                        return {}
                     scanned_printed = False
                     self._current_qr_url = qrcode_url
                     logger.info(f"[Weixin] 微信二维码链接 ({refresh_count}/{QR_MAX_REFRESHES}): {qrcode_url}")

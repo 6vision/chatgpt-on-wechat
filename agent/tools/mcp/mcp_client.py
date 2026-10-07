@@ -19,10 +19,6 @@ from typing import Optional
 from common.log import logger
 
 
-# Aliases accepted for the Streamable HTTP transport type
-_STREAMABLE_HTTP_ALIASES = {"streamable-http", "streamable_http", "streamablehttp", "http"}
-
-
 # System env vars a stdio MCP subprocess legitimately needs to run
 # (node/python/npx toolchains). Everything else is dropped by default so
 # API keys living in the agent's own environment don't leak into servers.
@@ -105,12 +101,21 @@ class McpClient:
         raw_transport: str = config.get("type", "stdio")
         # Per-server timeout for tool calls (default 120s, suitable for data queries)
         self._timeout: int = int(config.get("timeout", 120))
-        # Normalize streamable-http aliases to a single internal key
-        self.transport: str = (
-            "streamable-http"
-            if raw_transport.lower() in _STREAMABLE_HTTP_ALIASES
-            else raw_transport
-        )
+        # Same normalization the console validates with, since a hand-edited
+        # mcp.json skips validation. An unknown type is left for initialize()
+        # to report rather than raising here.
+        try:
+            from agent.tools.mcp.service import normalize_transport
+
+            self.transport: str = normalize_transport(
+                raw_transport, has_url=bool(config.get("url"))
+            )
+        except Exception:
+            self.transport = (
+                raw_transport.strip().lower()
+                if isinstance(raw_transport, str)
+                else "stdio"
+            )
 
         # stdio state
         self._proc: Optional[subprocess.Popen] = None

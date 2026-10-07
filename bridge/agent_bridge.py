@@ -1247,6 +1247,7 @@ class AgentBridge:
         session_id: str = None,
         agent_id: str = None,
         host_agent_id: str = None,
+        permission_mode: str = None,
     ) -> Optional[Agent]:
         """
         Get agent instance for the given session
@@ -1303,6 +1304,7 @@ class AgentBridge:
                 session_id,
                 host_id,
                 owns_conversation=resolved_agent_id == host_id,
+                permission_mode=permission_mode,
             )
             return agent
 
@@ -1343,7 +1345,12 @@ class AgentBridge:
             logger.debug(f"[AgentBridge] apply_session_project failed: {e}")
 
     def apply_session_prefs(
-        self, agent, session_id: str, agent_id: str = None, owns_conversation: bool = True
+        self,
+        agent,
+        session_id: str,
+        agent_id: str = None,
+        owns_conversation: bool = True,
+        permission_mode: str = None,
     ) -> None:
         """Apply a session's model / permission overrides to its agent.
 
@@ -1378,7 +1385,9 @@ class AgentBridge:
                 else:
                     model.set_session_override(None, None)
             if hasattr(agent, "apply_permission_mode"):
-                agent.apply_permission_mode(prefs.get("permission"))
+                # A delegated turn's session has no prefs; it carries the
+                # delegating conversation's mode instead.
+                agent.apply_permission_mode(permission_mode or prefs.get("permission"))
         except Exception as e:
             logger.debug(f"[AgentBridge] apply_session_prefs failed: {e}")
 
@@ -1624,6 +1633,7 @@ class AgentBridge:
                 session_id=session_id,
                 agent_id=speaker_agent_id,
                 host_agent_id=resolved_agent_id,
+                permission_mode=context.get("delegated_permission_mode"),
             )
             if not agent:
                 return Reply(ReplyType.ERROR, "Failed to initialize super agent")
