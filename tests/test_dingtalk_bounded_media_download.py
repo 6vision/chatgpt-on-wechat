@@ -4,29 +4,7 @@
 It used a bare requests.get + f.write, so an oversized URL filled memory/disk.
 Pin it to the shared download_to_file helper.
 """
-import socket
-
-import pytest
-
 from tests.test_dingtalk_streaming_cards import _bare_channel
-
-
-@pytest.fixture(autouse=True)
-def _public_host(monkeypatch):
-    """Resolve the reply URLs these tests use to a public address.
-
-    Remote media is fetched only after its address has been checked, and the
-    check resolves the hostname — a name that cannot resolve is refused before
-    the request. These tests are about the size bound, so they need a host that
-    resolves.
-    """
-    monkeypatch.setattr(
-        socket,
-        "getaddrinfo",
-        lambda *args, **kwargs: [
-            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))
-        ],
-    )
 
 
 class FakeResp:
@@ -36,9 +14,6 @@ class FakeResp:
         self._json = json_data or {}
         self.status_code = status
         self.closed = False
-        # safe_get reads these to decide whether a response is a hop to follow.
-        self.is_redirect = status in (301, 302, 303, 307, 308)
-        self.is_permanent_redirect = status in (301, 308)
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -76,14 +51,12 @@ def _channel():
 
 
 def _stub(monkeypatch, get_resp, post_resp, tmp_path):
-    from agent.tools.utils import url_safety
     from channel.dingtalk import dingtalk_channel as mod
+    from common import media_download as md
 
     fake = _FakeReq(lambda *a, **k: get_resp, lambda *a, **k: post_resp)
     monkeypatch.setattr(mod, "requests", fake)
-    # The download goes through url_safety.safe_get, which calls requests.get
-    # from its own module.
-    monkeypatch.setattr(url_safety, "requests", fake)
+    monkeypatch.setattr(md, "requests", fake)
     monkeypatch.setattr(
         "channel.dingtalk.dingtalk_channel.state_dir.tmp_dir",
         lambda *a, **k: str(tmp_path),
@@ -121,3 +94,18 @@ def test_local_file_url_still_uploaded(monkeypatch, tmp_path):
     post = FakeResp(json_data={"errcode": 0, "media_id": "mid-2"})
     _stub(monkeypatch, FakeResp(), post, tmp_path)
     assert _channel().upload_media("file://" + str(local), "video") == "mid-2"
+
+
+def test_http_url_download_is_guarded(monkeypatch, tmp_path):
+    from channel.dingtalk import dingtalk_channel as mod
+
+    seen = {}
+
+    def download_to_file(url, path, max_bytes, **kwargs):
+        seen.update(kwargs)
+        raise mod.MediaTooLargeError("stop")
+
+    _stub(monkeypatch, FakeResp(), FakeResp(), tmp_path)
+    monkeypatch.setattr(mod, "download_to_file", download_to_file)
+    assert _channel().upload_media("https://cdn.example/a.pdf", "file") is None
+    assert seen.get("guarded") is True
