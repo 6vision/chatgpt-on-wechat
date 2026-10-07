@@ -330,6 +330,31 @@ def _avatar_path(agent_id: str) -> Optional[str]:
     return None
 
 
+def delete_avatar_files(agent_id: str) -> int:
+    """Remove every uploaded avatar file belonging to ``agent_id``.
+
+    The bytes live under ``<shared root>/avatars/``, which is outside the
+    Agent's workspace, so deleting the workspace does not reach them. An id
+    is reusable, and a stale file would be served to whoever takes it next,
+    so this runs when an Agent is deleted as well as when its picture is
+    replaced. Returns how many files went away; best-effort, because a
+    deletion that already committed must not be undone by a leftover file.
+    """
+    from common.state_dir import shared_root
+
+    base = shared_root() / "avatars"
+    removed = 0
+    for suffix in AVATAR_TYPES:
+        stale = base / f"{agent_id}{suffix}"
+        try:
+            if stale.is_file():
+                stale.unlink()
+                removed += 1
+        except OSError as e:
+            logger.warning(f"[WebChannel] avatar cleanup failed for {stale}: {e}")
+    return removed
+
+
 def _avatar_rev(agent_id: str) -> Optional[str]:
     """A cache-busting token derived from the avatar file's mtime.
 
@@ -361,6 +386,18 @@ def _annotate_avatar_revs(snapshot: dict) -> dict:
 class AgentAvatarHandler:
     def GET(self, agent_id: str):
         _require_auth()
+        # The file outlives the roster entry unless something removed it, so
+        # the roster is what decides whether this id still has an Agent. POST
+        # checks it for the same reason; without it here a deleted id keeps
+        # serving its old picture to anyone who kept the URL.
+        try:
+            from agent.registry import get_agent_registry
+
+            get_agent_registry().get(agent_id, require_enabled=False)
+        except KeyError:
+            web.ctx.status = "404 Not Found"
+            web.header('Content-Type', 'application/json; charset=utf-8')
+            return json.dumps({"status": "error", "message": "no such agent"})
         path = _avatar_path(agent_id)
         if not path:
             web.ctx.status = "404 Not Found"
@@ -406,13 +443,7 @@ class AgentAvatarHandler:
             base.mkdir(parents=True, exist_ok=True)
             # Drop any other extension first, so one Agent never ends up with
             # two avatar files and a resolution order deciding which one wins.
-            for other in AVATAR_TYPES:
-                stale = base / f"{agent_id}{other}"
-                if other != suffix and stale.is_file():
-                    try:
-                        stale.unlink()
-                    except OSError:
-                        pass
+            delete_avatar_files(agent_id)
             target = base / f"{agent_id}{suffix}"
             tmp = base / f".{agent_id}{suffix}.tmp"
             with open(tmp, "wb") as handle:
