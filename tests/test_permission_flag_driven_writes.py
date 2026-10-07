@@ -1,29 +1,5 @@
 # encoding:utf-8
-"""Read-only mode must catch writes that arrive as a flag, not a redirect.
-
-``agent/permission/policy.py`` allows a shell command under ``read-only`` when
-every command in the line is on an allowlist. Several allowlisted entries write
-a file through a flag rather than through a shell redirect, which the redirect
-scan cannot see:
-
-- ``find -delete`` / ``-exec`` / ``-fls`` / ``-fprint`` / ``-ok``
-- ``fd -exec`` / ``-X``
-- ``sort -o out`` / ``--output=out``
-- ``xxd -r in out`` (reverse-converting a hex dump *into* ``out``)
-- ``sed -e 'w out'`` (the ``w`` command inside the script)
-- ``awk 'BEGIN{system(...)}'`` (hands a string to the shell)
-
-Only ``sed -i`` was caught, so a session the user explicitly locked to
-read-only could delete and overwrite files anywhere the process could reach.
-
-The same commands are also absent from the workspace-write path-mutating set,
-so ``sort -o /etc/out`` and ``find /etc -delete`` wrote outside the workspace
-that mode promises to confine writes to.
-
-Read-only behaviour is unchanged for the plain reading forms of those commands:
-``find . -name '*.log'``, ``sort in.txt``, ``xxd dump.hex`` and
-``sed -n '1,10p' in.txt`` still run.
-"""
+"""Read-only and workspace-write must catch writes that arrive as a flag, not a redirect."""
 
 import pytest
 
@@ -60,6 +36,10 @@ READ_ONLY_WRITES = [
     "sort -o out.txt in.txt",
     "sort --output=out.txt in.txt",
     "sort --output=out.txt",
+    "sort -uo out.txt in.txt",
+    "sed -i.bak s/a/b/ f.txt",
+    "sed -Ei s/a/b/ f.txt",
+    "xxd dump.bin out.hex",
     # xxd -r converts a hex dump back into the named binary
     "xxd -r dump.hex out.bin",
     "xxd --reverse dump.hex out.bin",
@@ -88,6 +68,8 @@ READ_ONLY_OK = [
     "sort -k2 in.txt",
     "sort -u in.txt",
     "xxd dump.hex",
+    "xxd -l 16 dump.bin",
+    "fd --print0 -e txt",
     "sed -n '1,10p' in.txt",
     "sed 's/a/b/' in.txt",
     "awk '{print $1}' f.txt",
@@ -117,6 +99,9 @@ WORKSPACE_WRITE_DENY = [
     "xxd -r /etc/dump.hex /etc/out.bin",
     "sed -i s/a/b/ /etc/f.txt",
     "sed -e 'w /etc/written.txt' in.txt",
+    "sed -i.bak s/a/b/ /etc/f.txt",
+    "sort -uo /etc/out.txt in.txt",
+    "fd . /etc -x rm",
     # the checks that already existed
     "rm /etc/passwd",
     "cp a.txt /etc/b.txt",
@@ -133,6 +118,9 @@ WORKSPACE_WRITE_OK = [
     "cat /etc/hostname",
     "ls -la /etc",
     "find . -name '*.log'",
+    "fd foo /etc",
+    "xxd /etc/hosts",
+    "xxd -l 16 /etc/hosts",
 ]
 
 

@@ -167,18 +167,22 @@ _READ_ONLY_COMMANDS = frozenset({
     "dir", "findstr", "where", "ver", "systeminfo", "tasklist", "chdir", "cd",
 })
 
-# Allowlisted read-only commands that still write a file when handed one of
-# these flags/arguments, without a shell redirect. `cat > f` is caught by the
-# redirect check, so anything reaching here changes a file the redirect scan
-# cannot see. Grouped by command; an empty tuple means every form reads.
+# Allowlisted read-only commands that write a file through a flag rather than
+# a shell redirect (which is refused separately).
 _READ_ONLY_WRITE_FORMS = {
     "find": ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fls",
              "-fprint", "-fprintf"),
-    "fd": ("-exec", "-exec-batch", "-X", "--exec", "--exec-batch", "-x", "--print0"),
-    "sort": ("-o", "--output"),
-    "xxd": ("-r", "--reverse"),
-    "sed": ("-i", "--in-place"),
+    "fd": ("--exec", "--exec-batch"),
+    "sort": ("--output",),
+    "xxd": ("-r", "-revert"),
+    "sed": ("--in-place",),
 }
+
+# Short write options, which may be clustered (`-uo`) or carry a value (`-i.bak`).
+_READ_ONLY_WRITE_SHORT = {"fd": "xX", "sort": "o", "sed": "i"}
+
+_XXD_VALUE_FLAGS = frozenset({"-c", "-cols", "-g", "-groupsize", "-l", "-len",
+                              "-n", "-name", "-o", "-offset", "-s", "-seek"})
 
 # `sed` also writes through its `w` command (`sed -e 'w out.txt' in.txt`), which
 # takes a bare path inside the script rather than a flag.
@@ -251,8 +255,7 @@ _PATH_MUTATING_COMMANDS = frozenset({
     "shred", "ln", "mkdir", "touch", "chmod", "chown", "chgrp", "chflags",
     "tee", "sed", "zip", "unzip", "tar", "gzip", "gunzip", "del", "erase",
     "move", "copy", "ren", "rename", "md", "rd",
-    # Allowlisted text tools whose write form is a flag rather than a redirect:
-    # `find -delete`, `sort -o out`, `xxd -r in out`, `sed -e 'w out'`.
+    # Allowlisted text tools whose write form is a flag rather than a redirect.
     "find", "fd", "sort", "xxd", "awk",
 })
 
@@ -547,33 +550,34 @@ def _check_workspace_write(
     return ALLOW
 
 
+def _is_short_cluster(arg: str) -> bool:
+    return len(arg) > 1 and arg[0] == "-" and arg[1] != "-"
+
+
+def _xxd_output(args: Sequence[str]) -> List[str]:
+    """xxd writes its second operand, or stdout when there is none."""
+    operands = [a for i, a in enumerate(args) if not (i and args[i - 1] in _XXD_VALUE_FLAGS)]
+    return _positional_paths(operands)[1:2]
+
+
 def _read_only_write_form(
     name: str,
     args: Sequence[str],
 ) -> Optional[str]:
-    """Describe how *name* writes a file without a shell redirect, if it does.
-
-    Returns the offending flag/argument for the refusal message, or None when
-    the call only reads. Covers the allowlisted commands whose write form is a
-    flag rather than a redirect: ``find -delete``, ``sort -o``, ``xxd -r``,
-    ``sed -i``, plus ``find -exec`` and friends, which run another command and
-    so bypass the allowlist entirely.
-    """
-    forms = _READ_ONLY_WRITE_FORMS.get(name)
-    if forms:
-        for arg in args:
-            for form in forms:
-                if arg == form or arg.startswith(form + "="):
-                    return arg
+    """The flag or script form through which *name* writes a file, or None."""
+    forms = _READ_ONLY_WRITE_FORMS.get(name, ())
+    letters = _READ_ONLY_WRITE_SHORT.get(name, "")
+    for arg in args:
+        if any(arg == form or arg.startswith(form + "=") for form in forms):
+            return arg
+        if letters and _is_short_cluster(arg) and any(c in letters for c in arg[1:]):
+            return arg
 
     if name == "sed":
-        for script in args:
-            if script.startswith("-"):
-                # `-i` / `--in-place` already matched above; a bare `-e` holds
-                # the script in the *next* token, which is scanned below.
-                continue
-            if _SED_WRITE_COMMAND_RE.search(script):
-                return "w"
+        if any(_SED_WRITE_COMMAND_RE.search(a) for a in args if not a.startswith("-")):
+            return "w"
+    elif name == "xxd" and _xxd_output(args):
+        return _xxd_output(args)[0]
     elif name == "awk" and any(_AWK_SHELL_RE.search(a) for a in args):
         return "system()"
     return None
@@ -686,41 +690,30 @@ def _check_git_read_only(args: Sequence[str]) -> Decision:
 
 
 def _workspace_write_paths(name: str, args: Sequence[str]) -> List[str]:
-    """Paths a path-mutating command writes, given its flag-driven forms.
-
-    ``rm``/``cp`` take their targets as positionals, which
-    :func:`_positional_paths` already yields. The allowlisted text tools do
-    not: ``sort -o out.txt`` hides the destination behind a flag, ``xxd -r in
-    out`` puts it last, ``find -delete`` deletes every match under the roots
-    it is given, and ``sed -e 'w out.txt'`` names it inside the script.
-    """
-    if name in ("sort", "fd"):
+    """Paths a path-mutating command writes, including flag-driven forms."""
+    if name == "sort":
         paths = []
         for i, arg in enumerate(args):
-            if arg in ("-o", "--output"):
-                if i + 1 < len(args):
-                    paths.append(args[i + 1])
-            elif arg.startswith("--output="):
-                paths.append(arg.split("=", 1)[1])
-        return paths
+            nxt = args[i + 1] if i + 1 < len(args) else ""
+            if arg.startswith("--output"):
+                paths.append(arg.split("=", 1)[1] if "=" in arg else nxt)
+            elif _is_short_cluster(arg) and "o" in arg[1:]:
+                paths.append(arg[arg.index("o", 1) + 1:] or nxt)
+        return [p for p in paths if p]
 
     if name == "sed":
-        # `-i` rewrites the file named after the script, so the positionals
-        # already carry it; a `w` command instead names its destination
-        # inside the script text, which no positional will ever show.
+        # A `w` command names its destination inside the script text.
         found = [f.group(0).split()[1:]
                  for f in (_SED_WRITE_COMMAND_RE.search(a) for a in args
                            if not a.startswith("-")) if f]
         return found[0] if found else _positional_paths(args)
 
     if name == "xxd":
-        # `xxd -r` reverses into the last operand, or stdin when none is given.
-        operands = _positional_paths(args)
-        return operands[-1:] if operands else []
+        return _xxd_output(args)
 
-    if name in ("find", "awk"):
-        # `-delete` and `-fprint` remove or create whatever they match, so the
-        # roots are the paths that must stay inside the workspace.
+    if name in ("find", "fd", "awk"):
+        # Their write forms act on whatever they match, so the search roots
+        # must stay inside the workspace.
         if _read_only_write_form(name, args) is None:
             return []
         return _positional_paths(args)
