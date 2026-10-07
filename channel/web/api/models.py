@@ -1959,6 +1959,20 @@ class ModelsHandler:
         local_config = conf()
         file_cfg = self._read_file_config()
 
+        # The runtime prefers the custom provider's model over the global one.
+        if model and custom_provider:
+            custom_provider["model"] = model
+            # Environment providers may contain credentials absent from disk.
+            # Change only an already-persisted entry's selected model.
+            stored_providers = file_cfg.get("custom_providers")
+            if isinstance(stored_providers, list):
+                for stored_provider in stored_providers:
+                    if (
+                        isinstance(stored_provider, dict)
+                        and stored_provider.get("id") == custom_provider["id"]
+                    ):
+                        stored_provider["model"] = model
+
         # Fall back to the custom provider's default model when none is given.
         if not model and custom_provider:
             model = custom_provider.get("model") or ""
