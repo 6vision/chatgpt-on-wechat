@@ -4,6 +4,7 @@ Web Fetch tool - Fetch and extract readable content from web pages and remote fi
 Supports:
 - HTML web pages: extracts readable text content
 - Document files (PDF, Word, TXT, Markdown, etc.): downloads to workspace/tmp and parses content
+- Plain text downloads: prefers a declared HTTP charset, then existing decoding fallbacks
 """
 
 import os
@@ -258,7 +259,8 @@ class WebFetch(BaseTool):
                 return ToolResult.fail(f"Error: Failed to download file: {e}")
 
             try:
-                text = self._parse_document(local_path, suffix)
+                charset = _extract_charset_from_content_type(response.headers.get("Content-Type", ""))
+                text = self._parse_document(local_path, suffix, charset=charset)
             except Exception as e:
                 self._cleanup_file(local_path)
                 return ToolResult.fail(f"Error: Failed to parse document: {e}")
@@ -284,14 +286,14 @@ class WebFetch(BaseTool):
             if response is not None:
                 response.close()
 
-    def _parse_document(self, file_path: str, suffix: str) -> str:
+    def _parse_document(self, file_path: str, suffix: str, charset: Optional[str] = None) -> str:
         """Parse document file and return extracted text."""
         if suffix in PDF_SUFFIXES:
             return self._parse_pdf(file_path)
         elif suffix in WORD_SUFFIXES:
             return self._parse_word(file_path)
         elif suffix in TEXT_SUFFIXES:
-            return self._parse_text(file_path)
+            return self._parse_text(file_path, charset=charset)
         elif suffix in SPREADSHEET_SUFFIXES:
             return self._parse_spreadsheet(file_path)
         elif suffix in PPT_SUFFIXES:
@@ -328,14 +330,16 @@ class WebFetch(BaseTool):
         blocks = [text for text in iter_docx_body_text(doc) if text.strip()]
         return "\n\n".join(blocks)
 
-    def _parse_text(self, file_path: str) -> str:
-        """Read plain text files (txt, md, csv, etc.)."""
+    def _parse_text(self, file_path: str, charset: Optional[str] = None) -> str:
+        """Read plain text, trying a declared charset before existing fallbacks."""
         encodings = ["utf-8", "utf-8-sig", "gbk", "gb2312", "latin-1"]
+        if charset:
+            encodings.insert(0, charset)
         for enc in encodings:
             try:
                 with open(file_path, "r", encoding=enc) as f:
                     return f.read()
-            except (UnicodeDecodeError, UnicodeError):
+            except (UnicodeError, LookupError):
                 continue
         raise ValueError(f"Unable to decode file with any supported encoding: {encodings}")
 
