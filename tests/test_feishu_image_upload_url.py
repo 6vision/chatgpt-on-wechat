@@ -1,51 +1,20 @@
 """Regression tests for the Feishu image-URL upload path."""
 
-import socket
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from channel.feishu import feishu_channel, feishu_static_card
 from channel.feishu.feishu_channel import FeiShuChanel
 
 IMG_URL = "https://cdn.example.com/chart.png"
-
-
-@pytest.fixture(autouse=True)
-def public_host(monkeypatch):
-    """Let the public-image guard resolve IMG_URL to a routable address.
-
-    The guard resolves the hostname itself before it opens a connection, and it
-    takes its transport as a default argument bound at import, so patching
-    ``requests.get`` is not enough on its own. The tests here keep patching
-    ``requests.get`` for the assertions they make about the response object;
-    this only supplies the name resolution and points the guard's own transport
-    at the same stub.
-    """
-    monkeypatch.setattr(
-        socket,
-        "getaddrinfo",
-        lambda *args, **kwargs: [
-            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))
-        ],
-    )
-    real = feishu_static_card.download_public_image
-
-    def wrapper(url, max_bytes=feishu_static_card._MAX_REMOTE_IMAGE_BYTES):
-        return real(url, max_bytes=max_bytes, get=feishu_static_card.requests.get)
-
-    monkeypatch.setattr(feishu_channel, "download_public_image", wrapper)
 
 
 class DownloadResponse:
     def __init__(self, status_code=200, content=b"png-bytes", headers=None, interrupt=False):
         self.status_code = status_code
         self.content = content
-        # An image server says it is serving an image; a stub with no headers at
-        # all is not a shape this path ever sees, and the public-image guard
-        # rejects it before the assertions below get a chance to run.
-        self.headers = {"Content-Type": "image/png"} if headers is None else headers
+        self.headers = headers or {}
         self.interrupt = interrupt
         self.closed = False
 
@@ -108,11 +77,8 @@ def test_download_is_bounded_and_uploaded_from_memory(tmp_path, monkeypatch):
             result = _channel()._upload_image_url(IMG_URL, "token")
 
     assert result == "img_v2_chart"
-    # Both legs of the round trip are bounded. The download leg is the
-    # public-image guard's own transport now, so its connect/read pair is the
-    # guard's; what this test is about is that a pair is set at all.
-    connect, read = get.call_args.kwargs["timeout"]
-    assert connect > 0 and read > 0
+    # Both legs of the round trip are bounded.
+    assert get.call_args.kwargs["timeout"] == (5, 30)
     assert get.call_args.kwargs["stream"] is True
     assert response.closed
     assert post.calls[0]["timeout"] == (5, 15)
@@ -156,14 +122,7 @@ def test_api_error_code_returns_none(tmp_path, monkeypatch):
 
 
 def test_oversized_image_is_not_uploaded(monkeypatch):
-    # The type has to check out too, or the size check would never be reached
-    # and this would pass for the wrong reason.
-    response = DownloadResponse(
-        headers={
-            "Content-Type": "image/png",
-            "Content-Length": str(20 * 1024 * 1024 + 1),
-        }
-    )
+    response = DownloadResponse(headers={"Content-Length": str(20 * 1024 * 1024 + 1)})
     post = _ok_upload()
 
     with patch("channel.feishu.feishu_channel.requests.get", return_value=response):
@@ -186,3 +145,9 @@ def test_interrupted_image_stream_is_not_uploaded(monkeypatch):
     assert result is None
     assert post.calls == []
     assert response.closed
+
+
+def test_image_url_download_is_guarded():
+    with patch("channel.feishu.feishu_channel.download_bytes", side_effect=ValueError("blocked")) as dl:
+        assert _channel()._upload_image_url(IMG_URL, "token") is None
+    assert dl.call_args.kwargs["guarded"] is True
