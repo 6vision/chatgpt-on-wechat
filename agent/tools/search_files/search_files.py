@@ -54,6 +54,7 @@ DEFAULT_MAX_RESULTS = 50
 MAX_RESULTS_CAP = 500
 MAX_FILE_BYTES = 2 * 1024 * 1024
 SEARCH_TIMEOUT_SECONDS = 30
+MAX_GLOB_ALTERNATIVES = 256
 REGEX_MATCH_TIMEOUT_SECONDS = 1  # caps one regex.search() call in the python backend
 
 _IS_WIN = sys.platform == "win32"
@@ -83,6 +84,76 @@ def _ps_quote(value: str) -> str:
     successful search reporting zero matches for text that was there.
     """
     return "'" + value.replace("'", "''") + "'"
+
+
+def _brace_group(pattern: str):
+    """Find a comma-separated brace group outside escaped text/character classes."""
+    groups = []
+    escaped = False
+    class_start = None
+    for index, char in enumerate(pattern):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if class_start is not None:
+            # A class may start with a literal ']', after optional negation.
+            first_member = class_start + 1
+            if pattern[first_member:first_member + 1] in ("!", "^"):
+                first_member += 1
+            if char == "]" and index > first_member:
+                class_start = None
+            continue
+        if char == "[":
+            class_start = index
+        else:
+            if char == "{":
+                groups.append((index, []))
+            elif char == "," and groups:
+                groups[-1][1].append(index)
+            elif char == "}" and groups:
+                start, commas = groups.pop()
+                if commas:
+                    boundaries = [start] + commas + [index]
+                    alternatives = [pattern[a + 1:b] for a, b in zip(boundaries, boundaries[1:])]
+                    return start, index, alternatives
+    return None
+
+
+def _expand_glob_braces(pattern: str) -> List[str]:
+    """Expand existing ``*.{ts,tsx}`` alternatives without invoking a shell."""
+    pending = [pattern]
+    expanded = []
+    while pending:
+        current = pending.pop()
+        group = _brace_group(current)
+        if group is None:
+            expanded.append(current)
+            continue
+        start, end, alternatives = group
+        if len(expanded) + len(pending) + len(alternatives) > MAX_GLOB_ALTERNATIVES:
+            raise ValueError(f"file_glob exceeds {MAX_GLOB_ALTERNATIVES} expanded alternatives; use a narrower filter")
+        pending.extend(current[:start] + choice + current[end + 1:] for choice in reversed(alternatives))
+    return list(dict.fromkeys(expanded))
+
+
+def _python_file_glob(pattern: str) -> str:
+    """Translate escaped glob literals to fnmatch's literal-character syntax."""
+    translated = []
+    escaped = False
+    for char in pattern:
+        if escaped:
+            translated.append({"[": "[[]", "]": "[]]", "*": "[*]", "?": "[?]"}.get(char, char))
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        else:
+            translated.append(char)
+    if escaped:
+        translated.append("\\")
+    return "".join(translated)
 
 
 def _pruned_dirs(root: str, max_depth: int = 2) -> List[str]:
@@ -288,6 +359,11 @@ class SearchFiles(BaseTool):
         if not isinstance(file_glob, str):
             return ToolResult.fail(f"Error: file_glob must be a string, got: {file_glob!r}")
 
+        try:
+            _expand_glob_braces(file_glob)
+        except ValueError as exc:
+            return ToolResult.fail(f"Error: {exc}")
+
         output_mode = args.get("output_mode", "content") or "content"
         if output_mode not in ("content", "files", "count"):
             return ToolResult.fail(f"Error: output_mode must be content/files/count, got: {output_mode!r}")
@@ -432,7 +508,8 @@ class SearchFiles(BaseTool):
         if opts.ignore_case:
             cmd.append("-i")
         if opts.file_glob and opts.file_glob != "*":
-            cmd.append(f"--include={opts.file_glob}")
+            for pattern in _expand_glob_braces(opts.file_glob):
+                cmd.append(f"--include={pattern}")
         if opts.output_mode == "files":
             cmd.append("-l")
         else:
@@ -444,6 +521,10 @@ class SearchFiles(BaseTool):
 
     # ------------------------------------------------ powershell backend (win)
     def _backend_powershell(self, opts: "_SearchOptions") -> "_BackendResult":
+        if len(_expand_glob_braces(opts.file_glob)) > 1:
+            # PowerShell -Filter accepts one wildcard, not brace alternatives.
+            # The existing Python backend implements this documented filter.
+            return self._backend_python(opts)
         shell = shutil.which("powershell") or shutil.which("pwsh")
         # Select-String has no per-mode output flags like grep's -l/-c, so it
         # always emits `path:line:content`; files/count are aggregated from that
@@ -597,6 +678,7 @@ class SearchFiles(BaseTool):
         rows: List[dict] = []
         pattern_timeout = False
         root = opts.root
+        file_globs = [_python_file_glob(pattern) for pattern in _expand_glob_braces(opts.file_glob)]
 
         walk_root = root if os.path.isdir(root) else os.path.dirname(root)
         single_file = None if os.path.isdir(root) else os.path.basename(root)
@@ -618,7 +700,7 @@ class SearchFiles(BaseTool):
                     return _BackendResult(self._python_finalize(rows, opts), False, pattern_timeout)
                 if time.monotonic() >= opts.deadline:
                     return _BackendResult(self._python_finalize(rows, opts), True, pattern_timeout)
-                if opts.file_glob and opts.file_glob != "*" and not fnmatch.fnmatch(filename, opts.file_glob):
+                if opts.file_glob and opts.file_glob != "*" and not any(fnmatch.fnmatch(filename, pattern) for pattern in file_globs):
                     continue
                 fp = os.path.join(dirpath, filename)
                 if self._is_credential_path(fp):
