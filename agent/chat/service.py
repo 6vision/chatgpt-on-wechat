@@ -762,9 +762,29 @@ class ChatService:
                 continue
             entry = {"role": message["role"], "text": text}
             if message["role"] == "assistant":
-                entry["agent_id"] = message.get("agent_id") or owner.id
+                entry["agent_id"] = self._outside_agent_id(
+                    message.get("agent_id") or owner.id
+                )
             history.append(entry)
         return history
+
+    def _outside_agent_id(self, agent_id):
+        """This Agent's id as the far side addresses it: the reserved alias.
+
+        Speaker chunks already leave through ``CloudClient._aliasing_sender``,
+        which rewrites the default Agent to the alias. The history rides the
+        request itself rather than a chunk, so it never passes through that
+        sender — and a transcript that names the default Agent two ways leaves
+        the teammate attributing its own conversation to a stranger.
+        """
+        try:
+            from agent.registry import DEFAULT_AGENT_ALIAS
+
+            if agent_id and agent_id == self.agent_bridge.agent_registry.default_agent_id:
+                return DEFAULT_AGENT_ALIAS
+        except Exception as e:
+            logger.debug(f"[ChatService] alias lookup failed: {e}")
+        return agent_id
 
     def _owner_workspace(self, owner_agent_id: str, agent) -> str:
         """Workspace whose store holds the conversation: the owner's."""
