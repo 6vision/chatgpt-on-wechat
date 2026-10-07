@@ -636,6 +636,7 @@ class AgentDelegateTool(BaseTool):
             members=tuple(onward_members),
             peers=tuple(p for p in peers if p is not None),
             timeout_seconds=policy.timeout_seconds,
+            permission_mode=self._inherited_permission_mode(source.id) or "",
         )
         started_at = time.monotonic()
         try:

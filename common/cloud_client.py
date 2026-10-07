@@ -129,6 +129,8 @@ def _make_peer_transport(send):
             }
             if request.history:
                 body["history"] = list(request.history)
+            if request.permission_mode:
+                body["permission_mode"] = request.permission_mode
             try:
                 self._send(body)
             except Exception as exc:

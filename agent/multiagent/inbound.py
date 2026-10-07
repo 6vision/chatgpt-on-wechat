@@ -9,6 +9,7 @@ import time
 import uuid
 from typing import Callable
 
+from agent.permission.policy import MODES, global_mode, normalize_mode
 from bridge.context import Context, ContextType
 from bridge.reply import ReplyType
 from common.log import logger
@@ -174,6 +175,14 @@ def serve_invoke(payload: dict, agent_bridge, send_chunk: Callable[[dict], None]
     context["run_id"] = run_id
     context["parent_run_id"] = current_agent_run_id() or ""
     context["task_source"] = TASK_SOURCE
+    # The caller's mode travels with the hand-off, but a remote caller can only
+    # narrow this instance's mode, never widen it.
+    inherited_mode = str(payload.get("permission_mode") or "").strip()
+    if inherited_mode:
+        local_mode = global_mode()
+        context["delegated_permission_mode"] = min(
+            normalize_mode(inherited_mode, local_mode), local_mode, key=MODES.index
+        )
 
     # The caller's side brackets and attributes these; here we only decide what
     # crosses the wire, and it is the same set a local hand-off relays.
