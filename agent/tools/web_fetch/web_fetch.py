@@ -67,7 +67,7 @@ def _extract_charset_from_html_meta(raw_bytes: bytes) -> Optional[str]:
 
 def _get_url_suffix(url: str) -> str:
     """Extract file extension from URL path, ignoring query params."""
-    path = urlparse(url).path
+    path = unquote(urlparse(url).path)
     return os.path.splitext(path)[-1].lower()
 
 
