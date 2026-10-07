@@ -11,6 +11,7 @@ import os
 import threading
 import time
 import uuid
+from typing import Tuple
 
 import requests
 
@@ -60,6 +61,23 @@ def _media_tmp_path(prefix: str, ext: str = "") -> str:
     ``tmp_dir()`` also creates the directory, which ``/tmp`` does not guarantee.
     """
     return os.path.join(str(state_dir.tmp_dir()), f"{prefix}_{uuid.uuid4().hex[:8]}{ext}")
+
+
+def _remove_media_tmp(path: str) -> None:
+    """Delete a media file this channel downloaded, ignoring a missing one.
+
+    Only ever called with a path that came out of :meth:`_resolve_media` with
+    its ``downloaded`` flag set, so a file the user asked us to send is never
+    touched. The managed tmp dir is not pruned by anything else, so without
+    this every media reply left its download behind for the life of the
+    install.
+    """
+    if not path:
+        return
+    try:
+        os.remove(path)
+    except OSError as e:
+        logger.warning(f"[Weixin] media temp cleanup failed for {path}: {e}")
 
 
 def _load_credentials(cred_path: str) -> dict:
@@ -909,7 +927,7 @@ class WeixinChannel(ChatChannel):
         return chunks
 
     def _send_image(self, img_path_or_url: str, receiver: str, context_token: str):
-        local_path = self._resolve_media_path(img_path_or_url)
+        local_path, downloaded = self._resolve_media(img_path_or_url)
         if not local_path:
             self._send_text("[Image send failed: file not found]", receiver, context_token)
             return
@@ -927,9 +945,12 @@ class WeixinChannel(ChatChannel):
         except Exception as e:
             logger.error(f"[Weixin] Image send failed: {e}")
             self._send_text("[Image send failed]", receiver, context_token)
+        finally:
+            if downloaded:
+                _remove_media_tmp(local_path)
 
     def _send_file(self, file_path_or_url: str, receiver: str, context_token: str):
-        local_path = self._resolve_media_path(file_path_or_url)
+        local_path, downloaded = self._resolve_media(file_path_or_url)
         if not local_path:
             self._send_text("[File send failed: file not found]", receiver, context_token)
             return
@@ -948,9 +969,12 @@ class WeixinChannel(ChatChannel):
         except Exception as e:
             logger.error(f"[Weixin] File send failed: {e}")
             self._send_text("[File send failed]", receiver, context_token)
+        finally:
+            if downloaded:
+                _remove_media_tmp(local_path)
 
     def _send_video(self, video_path_or_url: str, receiver: str, context_token: str):
-        local_path = self._resolve_media_path(video_path_or_url)
+        local_path, downloaded = self._resolve_media(video_path_or_url)
         if not local_path:
             self._send_text("[Video send failed: file not found]", receiver, context_token)
             return
@@ -968,10 +992,19 @@ class WeixinChannel(ChatChannel):
         except Exception as e:
             logger.error(f"[Weixin] Video send failed: {e}")
             self._send_text("[Video send failed]", receiver, context_token)
+        finally:
+            if downloaded:
+                _remove_media_tmp(local_path)
 
     @staticmethod
     def _resolve_media_path(path_or_url: str) -> str:
-        """Resolve a file path or URL to a local file path. Downloads if needed."""
+        """Resolve a file path or URL to a local file path. Downloads if needed.
+
+        A downloaded file is transient and is *not* cleaned up here: the caller
+        still has to upload it, so the lifetime is the caller's. Use
+        :meth:`_resolve_media` where the caller wants the file removed after
+        the upload, or :func:`_remove_media_tmp` to clean one up by hand.
+        """
         if not path_or_url:
             return ""
 
@@ -1010,3 +1043,16 @@ class WeixinChannel(ChatChannel):
 
         logger.warning(f"[Weixin] Media file not found: {local_path}")
         return ""
+
+    @classmethod
+    def _resolve_media(cls, path_or_url: str) -> Tuple[str, bool]:
+        """Like :meth:`_resolve_media_path`, plus whether *we* created the file.
+
+        The flag is what keeps the cleanup honest: a path the user pointed us
+        at belongs to them and must survive the send, while a download this
+        method made is ours to delete once the upload is done.
+        """
+        downloaded = bool(path_or_url) and path_or_url.startswith(
+            ("http://", "https://"))
+        local_path = cls._resolve_media_path(path_or_url)
+        return local_path, bool(local_path) and downloaded
