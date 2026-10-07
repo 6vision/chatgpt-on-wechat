@@ -8,7 +8,7 @@ import copy
 import json
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from typing import List, Dict, Any, Optional, Callable, Tuple
 
 from agent.protocol.cancel import AgentCancelledError
@@ -43,6 +43,9 @@ MAX_STORED_REASONING_CHARS = 4 * 1024  # 4 KB
 
 # Marker inserted between head and tail when reasoning is truncated.
 _REASONING_TRUNCATE_MARKER = "\n\n... [reasoning truncated, {omitted} chars omitted] ...\n\n"
+
+# How often the parallel-tool prefetch wakes up to notice a cancel.
+PARALLEL_POLL_SECONDS = 0.5
 
 # ids of the model objects driving a run_stream that is still in progress in
 # this context. A sub agent shares its parent's model object and inherits this
@@ -2119,6 +2122,9 @@ class AgentStreamExecutor:
         assigning `cancel_event` and `progress_callback` before a call and
         clearing them after, which two concurrent calls on one instance would
         do to each other.
+
+        The wait polls `cancel_event`, so a cancel returns control without
+        waiting for the slowest call; each tool keeps its own timeout.
         """
         eligible = [
             call for call in tool_calls
@@ -2141,9 +2147,36 @@ class AgentStreamExecutor:
                 futures[call["id"]] = pool.submit(
                     ctx.run, self._execute_tool, call, copy.copy(self.tools[call["name"]])
                 )
-            return {call_id: future.result() for call_id, future in futures.items()}
+            return self._collect_parallel_results(futures)
         finally:
+            # Workers stop at their own next checkpoint; joining would delay the cancel.
             pool.shutdown(wait=False)
+
+    def _collect_parallel_results(
+        self, futures: Dict[str, "Future"]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Wait for the prefetched calls; on cancel, report the unfinished ones as errors."""
+        pending = dict(futures)
+        results: Dict[str, Dict[str, Any]] = {}
+        while pending:
+            wait(list(pending.values()), timeout=PARALLEL_POLL_SECONDS)
+            for call_id in [cid for cid, f in pending.items() if f.done()]:
+                try:
+                    results[call_id] = pending.pop(call_id).result()
+                except Exception as e:
+                    results[call_id] = {"status": "error", "result": f"Tool call failed: {e}"}
+            if pending and self.cancel_event is not None and self.cancel_event.is_set():
+                logger.info(
+                    f"[Agent] Cancelled while waiting for parallel tool calls; "
+                    f"{len(pending)} call(s) abandoned"
+                )
+                break
+        for call_id in pending:
+            results[call_id] = {
+                "status": "error",
+                "result": "This call was still running when the turn was cancelled; its result was discarded.",
+            }
+        return results
 
     def _execute_tool(self, tool_call: Dict, tool_override: Optional[BaseTool] = None) -> Dict[str, Any]:
         """
