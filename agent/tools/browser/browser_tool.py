@@ -362,11 +362,11 @@ class BrowserTool(BaseTool):
         return ToolResult.success("Filled text into element. Use 'snapshot' to verify.")
 
     def _do_select(self, args: Dict[str, Any]) -> ToolResult:
-        value = args.get("value", "")
+        value = args.get("value")
         ref = args.get("ref")
         selector = args.get("selector")
         timeout = args.get("timeout", 5000)
-        if not value:
+        if not isinstance(value, str):
             return ToolResult.fail("Error: 'value' is required for select action")
         result = self._get_service().select(value, ref=ref, selector=selector, timeout=timeout)
         if "error" in result:
