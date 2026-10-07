@@ -181,7 +181,7 @@ class PluginManager:
     def scan_plugins(self):
         logger.debug("Scanning plugins ...")
         plugins_dir = _plugins_resource_dir()
-        raws = [self.plugins[name] for name in self.plugins]
+        raws = {name: self.plugins[name] for name in self.plugins}
         for plugin_name in os.listdir(plugins_dir):
             plugin_path = os.path.join(plugins_dir, plugin_name)
             if os.path.isdir(plugin_path):
@@ -207,8 +207,15 @@ class PluginManager:
                         logger.warn("Failed to import plugin %s: %s" % (plugin_name, e))
                         continue
         pconf = self.pconf
-        news = [self.plugins[name] for name in self.plugins]
-        new_plugins = list(set(news) - set(raws))
+        # Compare by registry key, not by class identity. Reloading a plugin
+        # re-runs its @register decorator, which hands the manager a brand new
+        # class object, so the snapshot taken before the loop holds objects
+        # that are no longer the ones in self.plugins. A set difference over
+        # the classes therefore reported every reloaded plugin as brand new --
+        # and since every scan reloads, every scan claimed all of them.
+        # The key is what identity means here: register() writes name.upper().
+        new_plugins = [self.plugins[name] for name in self.plugins
+                       if name not in raws]
         modified = False
         for name, plugincls in self.plugins.items():
             rawname = plugincls.name
