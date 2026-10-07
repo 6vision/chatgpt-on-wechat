@@ -15,6 +15,12 @@ class TextChunk:
     text: str
     start_line: int
     end_line: int
+    # Ordinal within the same line range. Non-zero only for the pieces a single
+    # over-long line is hard-split into: they all share (start_line, end_line),
+    # so without an ordinal their chunk ids would be identical and the UPSERT
+    # in save_chunks_batch would silently keep just one of them. 0 keeps the
+    # historical id for every ordinary chunk.
+    part: int = 0
 
 
 class TextChunker:
@@ -72,11 +78,12 @@ class TextChunker:
                     current_chars = 0
                 
                 # Split long line into multiple chunks
-                for sub_chunk in self._split_long_line(line, max_chars):
+                for part, sub_chunk in enumerate(self._split_long_line(line, max_chars)):
                     chunks.append(TextChunk(
                         text=sub_chunk,
                         start_line=i,
-                        end_line=i
+                        end_line=i,
+                        part=part
                     ))
                 
                 start_line = i + 1
@@ -153,7 +160,12 @@ class TextChunker:
     # boundaries forever (file hashes do not change when only the chunker does).
     # v2: keep text before the first heading; end a heading's body at the next
     # heading of any level (skipped levels used to be indexed twice).
-    CHUNKER_VERSION = 2
+    # v3: hard-split pieces of one over-long line now carry a part ordinal, so
+    # their chunk ids no longer collide. Boundaries are unchanged, but the ids
+    # of the affected chunks are not: without a bump an index that already lost
+    # the colliding pieces would be neither re-synced (file hash unchanged) nor
+    # reported as stale.
+    CHUNKER_VERSION = 3
 
     def chunk_markdown(self, text: str) -> List[TextChunk]:
         """Chunk a markdown file while respecting its heading structure.
