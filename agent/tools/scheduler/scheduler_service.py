@@ -2,7 +2,6 @@
 Background scheduler service for executing scheduled tasks
 """
 
-import time
 import inspect
 import threading
 from datetime import datetime, timedelta
@@ -70,6 +69,7 @@ class SchedulerService:
         self._callback_accepts_trigger = _callable_accepts_two_positional(execute_callback)
         self.running = False
         self.thread = None
+        self._stop_event = None
         self._lock = threading.Lock()
         self._execution_lock = threading.Lock()
         self._active_task_ids = set()
@@ -82,7 +82,12 @@ class SchedulerService:
                 return
             
             self.running = True
-            self.thread = threading.Thread(target=self._run_loop, daemon=True)
+            # Each worker keeps its own stop signal so a restart cannot
+            # reactivate a previous worker still finishing a callback.
+            self._stop_event = threading.Event()
+            self.thread = threading.Thread(
+                target=self._run_loop, args=(self._stop_event,), daemon=True
+            )
             self.thread.start()
     
     def stop(self):
@@ -92,21 +97,22 @@ class SchedulerService:
                 return
             
             self.running = False
+            self._stop_event.set()
             if self.thread:
                 self.thread.join(timeout=5)
             logger.info("[Scheduler] Service stopped")
     
-    def _run_loop(self):
+    def _run_loop(self, stop_event):
         """Main scheduler loop"""
         logger.info("[Scheduler] Scheduler loop started")
         
-        while self.running:
+        while self.running and not stop_event.is_set():
             try:
                 self._check_and_execute_tasks()
             except Exception as e:
                 logger.error(f"[Scheduler] Error in scheduler loop: {e}")
 
-            time.sleep(30)
+            stop_event.wait(30)
     
     def _check_and_execute_tasks(self):
         """Check for due tasks and execute them"""
