@@ -1891,7 +1891,7 @@ class FeiShuChanel(ChatChannel):
         # only removed after a successful upload, so a failed upload left it
         # behind in the working directory.
         try:
-            image_bytes = download_bytes(img_url, MAX_IMAGE_BYTES, timeout=(5, 30))
+            image_bytes = download_bytes(img_url, MAX_IMAGE_BYTES, timeout=(5, 30), guarded=True)
         except Exception as e:
             # The caller relies on None here:
             # `if not reply_content: logger.warning("upload image failed")`.
