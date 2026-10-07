@@ -1630,8 +1630,8 @@ class CowCliPlugin(Plugin):
             from agent.memory.chunker import TextChunker
             if detect_chunker_version(memory_manager.storage) != TextChunker.CHUNKER_VERSION:
                 warnings.append(_t(
-                    "  ⚠️ 索引由旧版切分算法生成；建议运行 /memory rebuild-index 以按标题更精准地切分记忆（重建成本较高，由你决定）",
-                    "  ⚠️ Index was built by an older chunking strategy; consider running /memory rebuild-index for heading-aware chunking (a rebuild re-embeds everything, so it's your call)",
+                    "  ⚠️ 索引由旧版切分算法生成；建议运行 /memory rebuild-index 重建以与当前算法保持一致（重建成本较高，由你决定）",
+                    "  ⚠️ Index was built by an older chunking strategy; consider running /memory rebuild-index to bring it in line with the current one (a rebuild re-embeds everything, so it's your call)",
                 ))
 
         if warnings:

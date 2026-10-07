@@ -268,7 +268,7 @@ class MemoryManager:
         # Create memory chunks
         memory_chunks = []
         for chunk, embedding in zip(chunks, embeddings):
-            chunk_id = self._generate_chunk_id(path, chunk.start_line, chunk.end_line)
+            chunk_id = self._generate_chunk_id(path, chunk.start_line, chunk.end_line, chunk.part)
             chunk_hash = MemoryStorage.compute_hash(chunk.text)
             
             memory_chunks.append(MemoryChunk(
@@ -529,7 +529,7 @@ class MemoryManager:
                 self.storage.delete_by_path(rel_path.replace("/", os.sep))
             memory_chunks = []
             for chunk, embedding in zip(entry["chunks"], entry_embeddings):
-                chunk_id = self._generate_chunk_id(rel_path, chunk.start_line, chunk.end_line)
+                chunk_id = self._generate_chunk_id(rel_path, chunk.start_line, chunk.end_line, chunk.part)
                 chunk_hash = MemoryStorage.compute_hash(chunk.text)
                 memory_chunks.append(MemoryChunk(
                     id=chunk_id,
@@ -627,9 +627,18 @@ class MemoryManager:
     
     # Helper methods
     
-    def _generate_chunk_id(self, path: str, start_line: int, end_line: int) -> str:
-        """Generate unique chunk ID"""
+    def _generate_chunk_id(self, path: str, start_line: int, end_line: int,
+                           part: int = 0) -> str:
+        """Generate unique chunk ID
+
+        `part` distinguishes the pieces one over-long line is hard-split into:
+        they share (start_line, end_line), so keying on the line range alone
+        gives them all the same id and save_chunks_batch's UPSERT keeps only one
+        of them. 0 keeps the historical id for every ordinary chunk.
+        """
         content = f"{path}:{start_line}:{end_line}"
+        if part:
+            content += f":{part}"
         return hashlib.md5(content.encode('utf-8')).hexdigest()
     
     @staticmethod
