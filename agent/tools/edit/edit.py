@@ -127,7 +127,7 @@ class Edit(BaseTool):
             normalized_new_text = normalize_to_lf(new_text)
             
             # Special case: empty oldText means append to end of file
-            if not old_text or not old_text.strip():
+            if not old_text:
                 # Append mode: add newText to the end
                 # Add newline before newText if file doesn't end with one
                 if normalized_content and not normalized_content.endswith('\n'):
