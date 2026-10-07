@@ -72,7 +72,7 @@ def _download_remote_media(url: str, prefix: str, ext, max_bytes: int, read_time
     ``ext=None`` means an image whose extension comes from the Content-Type.
     """
     path = _media_tmp_path(prefix)
-    size, content_type = download_to_file(url, path, max_bytes, timeout=(5, read_timeout))
+    size, content_type = download_to_file(url, path, max_bytes, timeout=(5, read_timeout), guarded=True)
     if not size:
         os.remove(path)
         raise ValueError("remote media is empty")

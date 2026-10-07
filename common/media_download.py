@@ -34,18 +34,21 @@ class DownloadResult(NamedTuple):
 
 
 def download_to_file(url, path, max_bytes=MAX_FILE_BYTES, timeout=_DEFAULT_TIMEOUT, max_seconds=None,
-                     **kwargs) -> DownloadResult:
+                     guarded=False, **kwargs) -> DownloadResult:
     """Stream ``url`` into ``path``.
 
+    ``guarded`` marks a URL that came from a model reply: with
+    ``web_security_ssrf_protection`` on, it and every redirect hop must be public.
     Extra ``kwargs`` (headers, params, ...) are passed to ``requests.get``.
     """
-    response = _open(url, max_bytes, timeout, kwargs)
+    response = _open(url, max_bytes, timeout, kwargs, guarded)
     return save_response(response, path, max_bytes, max_seconds)
 
 
-def download_bytes(url, max_bytes=MAX_FILE_BYTES, timeout=_DEFAULT_TIMEOUT, max_seconds=None, **kwargs) -> bytes:
+def download_bytes(url, max_bytes=MAX_FILE_BYTES, timeout=_DEFAULT_TIMEOUT, max_seconds=None,
+                   guarded=False, **kwargs) -> bytes:
     """Return the body of ``url``, refusing anything larger than ``max_bytes``."""
-    response = _open(url, max_bytes, timeout, kwargs)
+    response = _open(url, max_bytes, timeout, kwargs, guarded)
     return read_response(response, max_bytes, max_seconds)
 
 
@@ -90,8 +93,15 @@ def read_response(response, max_bytes=MAX_FILE_BYTES, max_seconds=None) -> bytes
         response.close()
 
 
-def _open(url, max_bytes, timeout, kwargs):
-    response = requests.get(url, stream=True, timeout=timeout, **kwargs)
+def _open(url, max_bytes, timeout, kwargs, guarded=False):
+    get = requests.get
+    if guarded:
+        from agent.tools.utils.url_safety import _ssrf_protection_enabled, safe_get, validate_url_safe
+
+        if _ssrf_protection_enabled():
+            validate_url_safe(url)
+            get = safe_get
+    response = get(url, stream=True, timeout=timeout, **kwargs)
     try:
         response.raise_for_status()
         try:
