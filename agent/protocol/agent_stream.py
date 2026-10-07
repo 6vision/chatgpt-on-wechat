@@ -44,11 +44,7 @@ MAX_STORED_REASONING_CHARS = 4 * 1024  # 4 KB
 # Marker inserted between head and tail when reasoning is truncated.
 _REASONING_TRUNCATE_MARKER = "\n\n... [reasoning truncated, {omitted} chars omitted] ...\n\n"
 
-# How long the parallel-tool prefetch waits for its slowest call, and how often
-# it wakes up to notice a cancel. The budget exists so a tool that never
-# returns cannot hold the turn open forever; the poll interval is what makes a
-# cancel observable while the slow calls are still in flight.
-PARALLEL_PREFETCH_TIMEOUT_SECONDS = 900.0
+# How often the parallel-tool prefetch wakes up to notice a cancel.
 PARALLEL_POLL_SECONDS = 0.5
 
 # ids of the model objects driving a run_stream that is still in progress in
@@ -2127,12 +2123,8 @@ class AgentStreamExecutor:
         clearing them after, which two concurrent calls on one instance would
         do to each other.
 
-        Waiting is bounded and interruptible. A bare `future.result()` would
-        block here until the slowest tool finished, and the next
-        `_check_cancelled()` does not run until this returns -- so a cancel
-        pressed mid-prefetch could not reach the workers and every one of them
-        ran to completion. Mirrors the budget `subagent/runner.py` applies to
-        the same fan-out.
+        The wait polls `cancel_event`, so a cancel returns control without
+        waiting for the slowest call; each tool keeps its own timeout.
         """
         eligible = [
             call for call in tool_calls
@@ -2157,66 +2149,32 @@ class AgentStreamExecutor:
                 )
             return self._collect_parallel_results(futures)
         finally:
-            # Deliberately not waiting: the workers were told to stop, but they
-            # wind down at their own next checkpoint, which may be a whole LLM
-            # response away. Joining them here would make this call overrun the
-            # cancel the user just asked for.
+            # Workers stop at their own next checkpoint; joining would delay the cancel.
             pool.shutdown(wait=False)
 
     def _collect_parallel_results(
         self, futures: Dict[str, "Future"]
     ) -> Dict[str, Dict[str, Any]]:
-        """Wait for the prefetched calls, giving up on cancel or on the budget.
-
-        Every call still gets an entry: a tool that is still running when we
-        stop waiting gets an error result of its own, so the caller's loop
-        never has to distinguish "not run" from "gave up" when it looks the id
-        up in the returned map.
-        """
-        deadline = time.time() + PARALLEL_PREFETCH_TIMEOUT_SECONDS
+        """Wait for the prefetched calls; on cancel, report the unfinished ones as errors."""
         pending = dict(futures)
         results: Dict[str, Dict[str, Any]] = {}
-
         while pending:
-            # Short slices rather than one long wait, so a cancel is noticed
-            # while the slow calls are still running.
-            slice_seconds = min(
-                PARALLEL_POLL_SECONDS, max(0.0, deadline - time.time()))
-            if slice_seconds <= 0:
-                break
-            done, _ = wait(list(pending.values()), timeout=slice_seconds)
+            wait(list(pending.values()), timeout=PARALLEL_POLL_SECONDS)
             for call_id in [cid for cid, f in pending.items() if f.done()]:
                 try:
                     results[call_id] = pending.pop(call_id).result()
-                except Exception as e:  # mirrors the sequential path's handling
-                    results[call_id] = {
-                        "status": "error",
-                        "result": f"Tool call failed: {e}",
-                    }
-
-            if not pending:
-                break
-            if self.cancel_event is not None and self.cancel_event.is_set():
+                except Exception as e:
+                    results[call_id] = {"status": "error", "result": f"Tool call failed: {e}"}
+            if pending and self.cancel_event is not None and self.cancel_event.is_set():
                 logger.info(
-                    "[Agent] Cancelled while waiting for parallel tool calls; "
+                    f"[Agent] Cancelled while waiting for parallel tool calls; "
                     f"{len(pending)} call(s) abandoned"
                 )
                 break
-            if time.time() >= deadline:
-                logger.warning(
-                    f"[Agent] Parallel tool prefetch exceeded "
-                    f"{PARALLEL_PREFETCH_TIMEOUT_SECONDS:g}s; {len(pending)} "
-                    f"call(s) reported as still running"
-                )
-                break
-
         for call_id in pending:
             results[call_id] = {
                 "status": "error",
-                "result": (
-                    "This call was still running when the turn was cancelled or "
-                    "its budget ran out; its result was discarded."
-                ),
+                "result": "This call was still running when the turn was cancelled; its result was discarded.",
             }
         return results
 
