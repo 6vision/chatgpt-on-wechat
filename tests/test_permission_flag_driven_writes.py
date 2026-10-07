@@ -1,0 +1,152 @@
+# encoding:utf-8
+"""Read-only mode must catch writes that arrive as a flag, not a redirect.
+
+``agent/permission/policy.py`` allows a shell command under ``read-only`` when
+every command in the line is on an allowlist. Several allowlisted entries write
+a file through a flag rather than through a shell redirect, which the redirect
+scan cannot see:
+
+- ``find -delete`` / ``-exec`` / ``-fls`` / ``-fprint`` / ``-ok``
+- ``fd -exec`` / ``-X``
+- ``sort -o out`` / ``--output=out``
+- ``xxd -r in out`` (reverse-converting a hex dump *into* ``out``)
+- ``sed -e 'w out'`` (the ``w`` command inside the script)
+- ``awk 'BEGIN{system(...)}'`` (hands a string to the shell)
+
+Only ``sed -i`` was caught, so a session the user explicitly locked to
+read-only could delete and overwrite files anywhere the process could reach.
+
+The same commands are also absent from the workspace-write path-mutating set,
+so ``sort -o /etc/out`` and ``find /etc -delete`` wrote outside the workspace
+that mode promises to confine writes to.
+
+Read-only behaviour is unchanged for the plain reading forms of those commands:
+``find . -name '*.log'``, ``sort in.txt``, ``xxd dump.hex`` and
+``sed -n '1,10p' in.txt`` still run.
+"""
+
+import pytest
+
+from agent.permission.policy import READ_ONLY, WORKSPACE_WRITE, check_tool_call
+
+WORKSPACE = "H:/ws"
+
+
+def _read_only(command):
+    return check_tool_call(READ_ONLY, "bash", {"command": command})
+
+
+def _workspace_write(command):
+    return check_tool_call(WORKSPACE_WRITE, "bash", {"command": command}, WORKSPACE)
+
+
+# --- the bypasses ---------------------------------------------------------
+
+READ_ONLY_WRITES = [
+    # find: deletes, or writes through -fls / -fprint, or runs another command
+    "find . -name '*.log' -delete",
+    "find . -type f -exec rm {} ;",
+    "find . -type f -execdir rm {} ;",
+    "find . -type f -fls listing.txt",
+    "find . -type f -fprint stolen.txt",
+    "find . -type f -fprintf stolen.txt %p",
+    "find . -type f -ok rm {} ;",
+    "find . -type f -okdir rm {} ;",
+    "find /etc -delete",
+    # fd shares find's -exec family
+    "fd -e txt --exec rm {} ;",
+    "fd -e txt -X rm",
+    # sort writes its output file instead of stdout
+    "sort -o out.txt in.txt",
+    "sort --output=out.txt in.txt",
+    "sort --output=out.txt",
+    # xxd -r converts a hex dump back into the named binary
+    "xxd -r dump.hex out.bin",
+    "xxd --reverse dump.hex out.bin",
+    # sed's `w` command writes the named file from inside the script
+    "sed -e 'w written.txt' in.txt",
+    "sed -e 's/a/b/;w written.txt' in.txt",
+    # awk can hand a string to the shell
+    "awk 'BEGIN{system(\"rm -f victim\")}'",
+    # the redirect scan does not catch it when it is piped or sequenced
+    "find . -name '*.log' -delete | cat",
+    "sort -o out.txt in.txt && echo done",
+]
+
+# --- what must keep working ----------------------------------------------
+
+READ_ONLY_OK = [
+    "ls -la",
+    "grep -r foo .",
+    "tr a b < in.txt",
+    "cat a.txt",
+    # the plain reading forms of the guarded commands
+    "find . -name '*.log'",
+    "find . -type f -print",
+    "fd -e txt",
+    "sort in.txt",
+    "sort -k2 in.txt",
+    "sort -u in.txt",
+    "xxd dump.hex",
+    "sed -n '1,10p' in.txt",
+    "sed 's/a/b/' in.txt",
+    "awk '{print $1}' f.txt",
+]
+
+
+@pytest.mark.parametrize("command", READ_ONLY_WRITES)
+def test_read_only_refuses_a_write_hidden_behind_a_flag(command):
+    decision = _read_only(command)
+    assert not decision.allowed, f"{command!r} was allowed to write"
+    # The reason has to name the form, or the model retries the same thing.
+    assert command.split()[0] in decision.reason
+
+
+@pytest.mark.parametrize("command", READ_ONLY_OK)
+def test_read_only_still_allows_the_reading_forms(command):
+    assert _read_only(command).allowed
+
+
+# --- workspace-write: the same commands, confined to the workspace --------
+
+WORKSPACE_WRITE_DENY = [
+    "sort -o /etc/out.txt in.txt",
+    "sort --output=/etc/out.txt in.txt",
+    "find /etc -delete",
+    "find /etc -type f -exec rm {} ;",
+    "xxd -r /etc/dump.hex /etc/out.bin",
+    "sed -i s/a/b/ /etc/f.txt",
+    "sed -e 'w /etc/written.txt' in.txt",
+    # the checks that already existed
+    "rm /etc/passwd",
+    "cp a.txt /etc/b.txt",
+    "cat a.txt > /etc/b.txt",
+]
+
+WORKSPACE_WRITE_OK = [
+    # writing inside the workspace is what this mode is for
+    "sort -o out.txt in.txt",
+    "find . -name '*.log' -delete",
+    "sed -i s/a/b/ f.txt",
+    "sed -e 'w written.txt' in.txt",
+    # reading outside it always worked and must keep working
+    "cat /etc/hostname",
+    "ls -la /etc",
+    "find . -name '*.log'",
+]
+
+
+@pytest.mark.parametrize("command", WORKSPACE_WRITE_DENY)
+def test_workspace_write_refuses_a_write_outside_the_roots(command):
+    assert not _workspace_write(command).allowed, f"{command!r} escaped the roots"
+
+
+@pytest.mark.parametrize("command", WORKSPACE_WRITE_OK)
+def test_workspace_write_allows_inside_the_roots(command):
+    assert _workspace_write(command).allowed
+
+
+def test_an_unparsable_line_still_fails_closed_in_read_only():
+    # Unchanged behaviour, kept so a future parser change cannot quietly turn
+    # this into a fail-open path.
+    assert not _read_only("echo 'unterminated").allowed

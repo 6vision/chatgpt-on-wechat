@@ -151,7 +151,7 @@ _READ_ONLY_COMMANDS = frozenset({
     "pwd", "echo", "printf", "which", "type", "whereis", "locate",
     # searching / comparing
     "grep", "egrep", "fgrep", "rg", "ag", "ack", "find", "fd", "diff", "cmp",
-    # text processing (these write only through a redirect, which is refused)
+    # text processing (writes are caught per-command by _READ_ONLY_WRITE_FORMS)
     "sort", "uniq", "cut", "paste", "join", "comm", "column", "tr", "awk", "sed",
     "jq", "yq", "xxd", "od", "strings", "fold", "rev", "expand", "unexpand",
     # hashing
@@ -166,6 +166,26 @@ _READ_ONLY_COMMANDS = frozenset({
     # windows shell
     "dir", "findstr", "where", "ver", "systeminfo", "tasklist", "chdir", "cd",
 })
+
+# Allowlisted read-only commands that still write a file when handed one of
+# these flags/arguments, without a shell redirect. `cat > f` is caught by the
+# redirect check, so anything reaching here changes a file the redirect scan
+# cannot see. Grouped by command; an empty tuple means every form reads.
+_READ_ONLY_WRITE_FORMS = {
+    "find": ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fls",
+             "-fprint", "-fprintf"),
+    "fd": ("-exec", "-exec-batch", "-X", "--exec", "--exec-batch", "-x", "--print0"),
+    "sort": ("-o", "--output"),
+    "xxd": ("-r", "--reverse"),
+    "sed": ("-i", "--in-place"),
+}
+
+# `sed` also writes through its `w` command (`sed -e 'w out.txt' in.txt`), which
+# takes a bare path inside the script rather than a flag.
+_SED_WRITE_COMMAND_RE = re.compile(r"(?:^|[;{}])\s*w\s+\S")
+
+# awk can hand a string to the shell, which makes any statement a write.
+_AWK_SHELL_RE = re.compile(r"\bsystem\s*\(|\bgetline\b[^\n]*\||\bprint\b[^\n]*>\s*\"")
 
 # git sub-commands that only read the repository.
 _GIT_READ_SUBCOMMANDS = frozenset({
@@ -231,6 +251,9 @@ _PATH_MUTATING_COMMANDS = frozenset({
     "shred", "ln", "mkdir", "touch", "chmod", "chown", "chgrp", "chflags",
     "tee", "sed", "zip", "unzip", "tar", "gzip", "gunzip", "del", "erase",
     "move", "copy", "ren", "rename", "md", "rd",
+    # Allowlisted text tools whose write form is a flag rather than a redirect:
+    # `find -delete`, `sort -o out`, `xxd -r in out`, `sed -e 'w out'`.
+    "find", "fd", "sort", "xxd", "awk",
 })
 
 # For these only the destination (last positional) is written; reading a source
@@ -524,6 +547,38 @@ def _check_workspace_write(
     return ALLOW
 
 
+def _read_only_write_form(
+    name: str,
+    args: Sequence[str],
+) -> Optional[str]:
+    """Describe how *name* writes a file without a shell redirect, if it does.
+
+    Returns the offending flag/argument for the refusal message, or None when
+    the call only reads. Covers the allowlisted commands whose write form is a
+    flag rather than a redirect: ``find -delete``, ``sort -o``, ``xxd -r``,
+    ``sed -i``, plus ``find -exec`` and friends, which run another command and
+    so bypass the allowlist entirely.
+    """
+    forms = _READ_ONLY_WRITE_FORMS.get(name)
+    if forms:
+        for arg in args:
+            for form in forms:
+                if arg == form or arg.startswith(form + "="):
+                    return arg
+
+    if name == "sed":
+        for script in args:
+            if script.startswith("-"):
+                # `-i` / `--in-place` already matched above; a bare `-e` holds
+                # the script in the *next* token, which is scanned below.
+                continue
+            if _SED_WRITE_COMMAND_RE.search(script):
+                return "w"
+    elif name == "awk" and any(_AWK_SHELL_RE.search(a) for a in args):
+        return "system()"
+    return None
+
+
 def _check_bash_read_only(args: Dict[str, Any]) -> Decision:
     command = str(args.get("command") or "").strip()
     if not command:
@@ -557,8 +612,13 @@ def _check_bash_read_only(args: Dict[str, Any]) -> Decision:
             if not decision.allowed:
                 return decision
             continue
-        if name == "sed" and any(a.startswith("-i") for a in rest):
-            return _deny("'sed -i' edits files in place.", READ_ONLY)
+        write_form = _read_only_write_form(name, rest)
+        if write_form is not None:
+            return _deny(
+                f"'{name} {write_form}' writes a file without redirecting, so this "
+                f"session cannot run it.",
+                READ_ONLY,
+            )
         if name not in _READ_ONLY_COMMANDS:
             return _deny(
                 f"'{name}' is not on the read-only command allowlist, so it may change "
@@ -625,6 +685,49 @@ def _check_git_read_only(args: Sequence[str]) -> Decision:
     return ALLOW
 
 
+def _workspace_write_paths(name: str, args: Sequence[str]) -> List[str]:
+    """Paths a path-mutating command writes, given its flag-driven forms.
+
+    ``rm``/``cp`` take their targets as positionals, which
+    :func:`_positional_paths` already yields. The allowlisted text tools do
+    not: ``sort -o out.txt`` hides the destination behind a flag, ``xxd -r in
+    out`` puts it last, ``find -delete`` deletes every match under the roots
+    it is given, and ``sed -e 'w out.txt'`` names it inside the script.
+    """
+    if name in ("sort", "fd"):
+        paths = []
+        for i, arg in enumerate(args):
+            if arg in ("-o", "--output"):
+                if i + 1 < len(args):
+                    paths.append(args[i + 1])
+            elif arg.startswith("--output="):
+                paths.append(arg.split("=", 1)[1])
+        return paths
+
+    if name == "sed":
+        # `-i` rewrites the file named after the script, so the positionals
+        # already carry it; a `w` command instead names its destination
+        # inside the script text, which no positional will ever show.
+        found = [f.group(0).split()[1:]
+                 for f in (_SED_WRITE_COMMAND_RE.search(a) for a in args
+                           if not a.startswith("-")) if f]
+        return found[0] if found else _positional_paths(args)
+
+    if name == "xxd":
+        # `xxd -r` reverses into the last operand, or stdin when none is given.
+        operands = _positional_paths(args)
+        return operands[-1:] if operands else []
+
+    if name in ("find", "awk"):
+        # `-delete` and `-fprint` remove or create whatever they match, so the
+        # roots are the paths that must stay inside the workspace.
+        if _read_only_write_form(name, args) is None:
+            return []
+        return _positional_paths(args)
+
+    return _positional_paths(args)
+
+
 def _check_bash_workspace_write(
     args: Dict[str, Any], cwd: Optional[str], roots: Sequence[str]
 ) -> Decision:
@@ -656,10 +759,10 @@ def _check_bash_workspace_write(
             return _deny(f"'{name}' escalates privileges.", WORKSPACE_WRITE)
         if name not in _PATH_MUTATING_COMMANDS:
             continue
-        if name == "sed" and not any(a.startswith("-i") for a in rest):
+        if name == "sed" and _read_only_write_form(name, rest) is None:
             continue
 
-        paths = _positional_paths(rest)
+        paths = _workspace_write_paths(name, rest)
         if name == "dd":
             paths = [a.split("=", 1)[1] for a in rest if a.startswith("of=")]
         elif name in _DESTINATION_ONLY_COMMANDS:
