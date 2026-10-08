@@ -95,6 +95,8 @@ export interface ProductLinks {
   // The "what's new" page for a given version. `lang` is the UI language
   // (e.g. 'zh'). Return null to use the core docs site.
   releaseNotesUrl?: (version: string, lang: string) => string | null
+  // Hide the "what's new" entry of the update panel.
+  hideReleaseNotes?: boolean
 }
 
 export interface ProductSkills {
