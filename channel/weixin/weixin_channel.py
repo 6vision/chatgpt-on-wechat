@@ -73,6 +73,19 @@ def _remove_media_tmp(path: str) -> None:
         logger.warning(f"[Weixin] media temp cleanup failed for {path}: {e}")
 
 
+def _console_print(*args, **kwargs):
+    """print() that never raises.
+
+    Console output is cosmetic, but a Windows GBK console rejects characters
+    such as emoji with UnicodeEncodeError; raised mid-login it would discard a
+    login the server has already confirmed.
+    """
+    try:
+        print(*args, **kwargs)
+    except (UnicodeEncodeError, OSError, ValueError):
+        pass
+
+
 def _load_credentials(cred_path: str) -> dict:
     """Load saved credentials from JSON file."""
     try:
@@ -210,7 +223,7 @@ class WeixinChannel(ChatChannel):
         self.login_status = self.LOGIN_STATUS_IDLE
         if not self._stop_event.is_set():
             logger.info("[Weixin] QR login timed out, waiting for stop or reconnect...")
-            print("  二维码登录超时，请通过控制台重新接入\n")
+            _console_print("  二维码登录超时，请通过控制台重新接入\n")
             self._stop_event.wait()
 
         logger.info("[Weixin] Login cancelled by stop event")
@@ -474,7 +487,7 @@ class WeixinChannel(ChatChannel):
         logger.info(f"[Weixin] 微信二维码链接: {qrcode_url}")
         self._print_qr(qrcode_url)
         self._notify_cloud_qrcode(qrcode_url)
-        print("  等待扫码...\n")
+        _console_print("  等待扫码...\n")
 
         scanned_printed = False
         refresh_count = 0
@@ -483,7 +496,7 @@ class WeixinChannel(ChatChannel):
         while not self._stop_event.is_set():
             if time.time() >= deadline:
                 logger.warning(f"[Weixin] QR login timed out after {QR_LOGIN_TIMEOUT_S}s")
-                print(f"\n  二维码登录超时（{QR_LOGIN_TIMEOUT_S}s），请重启后重试")
+                _console_print(f"\n  二维码登录超时（{QR_LOGIN_TIMEOUT_S}s），请重启后重试")
                 break
 
             try:
@@ -499,15 +512,15 @@ class WeixinChannel(ChatChannel):
             elif status == "scaned":
                 self.login_status = self.LOGIN_STATUS_SCANNED
                 if not scanned_printed:
-                    print("  已扫码，请在手机上确认...")
+                    _console_print("  已扫码，请在手机上确认...")
                     scanned_printed = True
             elif status == "expired":
                 refresh_count += 1
                 if refresh_count >= QR_MAX_REFRESHES:
                     logger.warning(f"[Weixin] QR code refreshed {QR_MAX_REFRESHES} times, giving up")
-                    print(f"\n  二维码已刷新 {QR_MAX_REFRESHES} 次仍未扫码，请重启后重试")
+                    _console_print(f"\n  二维码已刷新 {QR_MAX_REFRESHES} 次仍未扫码，请重启后重试")
                     break
-                print(f"  二维码已过期，正在刷新（{refresh_count}/{QR_MAX_REFRESHES}）...")
+                _console_print(f"  二维码已过期，正在刷新（{refresh_count}/{QR_MAX_REFRESHES}）...")
                 try:
                     qr_resp = api.fetch_qr_code()
                     qrcode = qr_resp.get("qrcode", "")
@@ -539,7 +552,7 @@ class WeixinChannel(ChatChannel):
                     return {}
 
                 self._current_qr_url = ""
-                print(f"\n  ✅ 微信登录成功！bot_id={bot_id}")
+                _console_print(f"\n  ✅ 微信登录成功！bot_id={bot_id}")
                 logger.info(f"[Weixin] Login confirmed: bot_id={bot_id}")
                 self._notify_cloud_connected()
 
