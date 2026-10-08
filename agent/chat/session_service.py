@@ -271,12 +271,12 @@ class SessionService:
 
     def _resolve_agent_id(self, agent_id: str = None) -> str:
         from agent.registry import get_agent_registry
-        return get_agent_registry().get(agent_id or self.agent_id).id
+        return get_agent_registry().get_addressed(agent_id or self.agent_id).id
 
     def _get_store(self, agent_id: str = None):
         from agent.registry import get_agent_registry
         from agent.memory import get_conversation_store
-        profile = get_agent_registry().get(agent_id or self.agent_id)
+        profile = get_agent_registry().get_addressed(agent_id or self.agent_id)
         return get_conversation_store(profile.workspace)
 
     def _remove_agent(self, session_id: str, agent_id: str = None):
