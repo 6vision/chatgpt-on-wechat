@@ -312,8 +312,9 @@ const NavRail: React.FC<NavRailProps> = ({ onLangChange }) => {
             <div className="flex-1" />
           )}
 
-          {/* The editor lives in the "more" menu; a build that hides it keeps a button. */}
-          {product.nav?.hideFooterMenu && (
+          {/* The editor lives in the "more" menu. A build that hides it keeps a
+              button, unless its own footer slot takes over the menu. */}
+          {product.nav?.hideFooterMenu && !product.slots?.NavRailFooter && (
             <FooterBtn collapsed={collapsed} onClick={() => openMenuEditor()} title={t('menu_edit')}>
               <SquarePen size={16} />
             </FooterBtn>
