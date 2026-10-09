@@ -620,6 +620,10 @@ def _linkai_call_with_tools(self, messages, tools=None, stream=False, **kwargs):
             "sender_id": session_id,
         }
 
+        if stream:
+            # LinkAI only appends the trailing usage chunk when this is set
+            body["stream_options"] = {"include_usage": True}
+
         try:
             from linkai import LinkAIClient
             client_id = LinkAIClient.fetch_client_id()
