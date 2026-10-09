@@ -825,8 +825,8 @@ class SessionTitleHandler:
 
             from agent.memory import get_conversation_store
             store = get_conversation_store(_get_workspace_root(agent_id=agent_id))
-            updated = store.rename_session(session_id, title)
-            logger.info(f"[WebChannel] Session title set: sid={session_id}, title='{title}', db_updated={updated}")
+            existed = store.upsert_title(session_id, title, channel_type="web")
+            logger.info(f"[WebChannel] Session title set: sid={session_id}, title='{title}', existed={existed}")
 
             return json.dumps({"status": "success", "title": title}, ensure_ascii=False)
         except Exception as e:

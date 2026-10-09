@@ -1949,6 +1949,38 @@ class ConversationStore:
             finally:
                 conn.close()
 
+    def upsert_title(self, session_id: str, title: str, channel_type: str = "") -> bool:
+        """Set a session's title, creating its record first when missing.
+
+        A client may title a brand-new chat before the agent has persisted its
+        first turn; a plain rename would hit no row and lose the title. The
+        record created here is the same one ``append_messages`` would create,
+        so the later write just fills it in. Returns True if the row existed.
+        """
+        now = int(time.time())
+        with self._lock:
+            conn = self._connect()
+            try:
+                with conn:
+                    aid = self._agent_id
+                    inserted = conn.execute(
+                        """
+                        INSERT OR IGNORE INTO sessions
+                            (agent_id, session_id, channel_type, title, created_at, last_active, msg_count)
+                        VALUES (?, ?, ?, ?, ?, ?, 0)
+                        """,
+                        (aid, session_id, channel_type, title, now, now),
+                    ).rowcount
+                    if inserted:
+                        return False
+                    conn.execute(
+                        "UPDATE sessions SET title = ? WHERE agent_id = ? AND session_id = ?",
+                        (title, aid, session_id),
+                    )
+                    return True
+            finally:
+                conn.close()
+
     def set_pinned(self, session_id: str, pinned: bool) -> bool:
         """Pin or unpin a session. Returns True if the session existed."""
         with self._lock:

@@ -243,7 +243,12 @@ const ChatPage: React.FC<ChatPageProps> = ({ baseUrl }) => {
       // After the first message, refresh the list and ask backend to title it.
       if (isFirst) {
         try {
-          await apiClient.generateSessionTitle(sid, text, undefined, owner)
+          const res = await apiClient.generateSessionTitle(sid, text, undefined, owner)
+          if (res.status === 'success' && res.title) {
+            useSessionStore.setState((s) => ({
+              sessions: s.sessions.map((x) => (x.session_id === sid ? { ...x, title: res.title } : x)),
+            }))
+          }
         } catch {
           /* ignore */
         }

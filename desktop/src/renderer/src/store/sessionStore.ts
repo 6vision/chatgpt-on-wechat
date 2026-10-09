@@ -107,6 +107,17 @@ function dedupe(list: SessionItem[]): SessionItem[] {
   })
 }
 
+// The open chat may not be stored yet: its first turn lands only once the
+// agent has started, so a refresh in between would drop its optimistic row.
+function keepUnpersisted(
+  s: { sessions: SessionItem[]; activeId: string },
+  fetched: SessionItem[]
+): SessionItem[] {
+  if (fetched.some((x) => x.session_id === s.activeId)) return fetched
+  const local = s.sessions.find((x) => x.session_id === s.activeId && x.msg_count === 0)
+  return local ? [local, ...fetched] : fetched
+}
+
 function sortSessions(list: SessionItem[]): SessionItem[] {
   return [...list].sort((a, b) => {
     const pa = a.pinned ? 1 : 0
@@ -143,7 +154,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         activateOwner(get().activeId)
       }
       set((s) => ({
-        sessions: page === 1 ? dedupe(res.sessions) : dedupe([...s.sessions, ...res.sessions]),
+        sessions: page === 1 ? dedupe(keepUnpersisted(s, res.sessions)) : dedupe([...s.sessions, ...res.sessions]),
         total: res.total,
         page: res.page,
         hasMore: res.has_more,
