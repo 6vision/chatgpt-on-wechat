@@ -1440,6 +1440,31 @@ class AgentBridge:
             logger.info(f"[AgentBridge] cleared engaged fallback on {cleared} model(s)")
         return cleared
 
+    def apply_runtime_limits(self) -> int:
+        """Push the configured step cap and context budget onto live agents.
+
+        Both are read once when an agent is built. Updating them in place keeps
+        each session's working context and prompt cache; a smaller budget is
+        enforced by the regular trim (with summary) at the start of the next
+        run. Evicting the agents instead would rebuild them from the store's
+        short, clipped restore window.
+
+        Returns the number of agents updated.
+        """
+        from bridge.agent_initializer import configured_runtime_limits
+
+        max_steps, max_context_tokens = configured_runtime_limits()
+        updated = 0
+        for _agent_id, _session_id, agent in self.iter_agent_instances():
+            agent.max_steps = max_steps
+            agent.max_context_tokens = max_context_tokens
+            updated += 1
+        logger.info(
+            f"[AgentBridge] Applied runtime limits to {updated} agent(s): "
+            f"max_steps={max_steps}, max_context_tokens={max_context_tokens}"
+        )
+        return updated
+
     def sync_session_messages_from_store(
         self, session_id: str, agent_id: str = None
     ) -> int:

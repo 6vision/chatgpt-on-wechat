@@ -9,7 +9,7 @@ import json
 import re
 import threading
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from agent.protocol import Agent
 from agent.tools import ToolManager
@@ -68,6 +68,25 @@ def _interruption_note(tool_uses: List[dict]) -> str:
         note + "\n" + head + "\n" + "\n".join(calls)
         + "\nThese calls really ran; pick up from where they left off instead of starting over."
     )
+
+
+def configured_runtime_limits() -> Tuple[int, Optional[int]]:
+    """Read (max_steps, max_context_tokens) from config.
+
+    The context budget is normally derived from the effective model's context
+    window (see Agent._get_model_context_window). agent_max_context_tokens is
+    an optional manual override: 0/unset means "derive from the model", a
+    positive value forces that input ceiling (still clamped below the model
+    window in _trim_messages) for gateways / self-hosted models whose real
+    window we can't infer.
+    """
+    from config import conf
+    max_steps = conf().get("agent_max_steps", 20)
+    try:
+        max_context_tokens = int(conf().get("agent_max_context_tokens", 0) or 0)
+    except (TypeError, ValueError):
+        max_context_tokens = 0
+    return max_steps, (max_context_tokens if max_context_tokens > 0 else None)
 
 
 class AgentInitializer:
@@ -178,20 +197,8 @@ class AgentInitializer:
             runtime_info=runtime_info,
         )
         
-        # Get cost control parameters. The context budget is normally derived
-        # from the effective model's context window (see
-        # Agent._get_model_context_window). agent_max_context_tokens is an
-        # optional manual override: 0/unset means "derive from the model", a
-        # positive value forces that input ceiling (still clamped below the
-        # model window in _trim_messages) for gateways / self-hosted models
-        # whose real window we can't infer.
         from config import conf
-        max_steps = conf().get("agent_max_steps", 20)
-        try:
-            max_context_tokens = int(conf().get("agent_max_context_tokens", 0) or 0)
-        except (TypeError, ValueError):
-            max_context_tokens = 0
-        max_context_tokens = max_context_tokens if max_context_tokens > 0 else None
+        max_steps, max_context_tokens = configured_runtime_limits()
 
         # Create agent
         agent = self.agent_bridge.create_agent(

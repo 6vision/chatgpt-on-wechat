@@ -882,6 +882,15 @@ class CowCliPlugin(Plugin):
         except Exception as e:
             logger.warning(f"[CowCli] config reload warning: {e}")
 
+        if key in ("agent_max_context_tokens", "agent_max_steps"):
+            try:
+                from bridge.bridge import Bridge
+                agent_bridge = Bridge().get_agent_bridge()
+                if agent_bridge is not None:
+                    agent_bridge.apply_runtime_limits()
+            except Exception as e:
+                logger.warning(f"[CowCli] apply runtime limits failed: {e}")
+
         result = _t(f"✅ 配置已更新\n\n  {key}: {old_val} → {new_val}", f"✅ Config updated\n\n  {key}: {old_val} → {new_val}")
         if "bot_type" in updates and updates["bot_type"] != old_bot_type:
             result += f"\n  bot_type: {old_bot_type} → {updates['bot_type']}"
