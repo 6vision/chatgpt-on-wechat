@@ -262,7 +262,7 @@ class WebFetch(BaseTool):
                     response = self._safe_get(url, stream=True)
                 response.raise_for_status()
 
-                content_length = int(response.headers.get("Content-Length", 0))
+                content_length = _parse_content_length(response)
                 if content_length > MAX_FILE_SIZE:
                     return ToolResult.fail(
                         f"Error: File too large ({format_size(content_length)} > {format_size(MAX_FILE_SIZE)})"
