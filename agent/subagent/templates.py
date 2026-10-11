@@ -9,7 +9,6 @@ the same shape skills already use.
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -144,14 +143,10 @@ def _parse_tools(raw) -> List[str]:
 
 def parse_template(content: str, fallback_name: str, source: str) -> Optional[SubagentTemplate]:
     """Parse one markdown template. Returns None when it is unusable."""
-    from agent.skills.frontmatter import parse_frontmatter
+    from agent.skills.frontmatter import parse_frontmatter, strip_frontmatter
 
     frontmatter = parse_frontmatter(content) or {}
-    body = content
-    frontmatter_block = re.match(r"^---\s*\n.*?\n---\s*\n", content, re.DOTALL)
-    if frontmatter_block is not None:
-        body = content[frontmatter_block.end():]
-    body = body.strip()
+    body = strip_frontmatter(content).strip()
 
     name = str(frontmatter.get("name") or fallback_name).strip()
     description = str(frontmatter.get("description") or "").strip()

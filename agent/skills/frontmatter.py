@@ -8,6 +8,15 @@ from typing import Dict, Any, Optional, List
 from agent.skills.types import SkillMetadata, SkillInstallSpec
 
 
+FRONTMATTER_RE = re.compile(r'^---\s*\n(.*?)\n---\s*\n', re.DOTALL)
+
+
+def strip_frontmatter(content: str) -> str:
+    """The markdown body after the frontmatter block, or all of it when there is none."""
+    match = FRONTMATTER_RE.match(content)
+    return content[match.end():] if match else content
+
+
 def parse_frontmatter(content: str) -> Dict[str, Any]:
     """
     Parse YAML-style frontmatter from markdown content.
@@ -16,8 +25,7 @@ def parse_frontmatter(content: str) -> Dict[str, Any]:
     """
     frontmatter = {}
     
-    # Match frontmatter block between --- markers
-    match = re.match(r'^---\s*\n(.*?)\n---\s*\n', content, re.DOTALL)
+    match = FRONTMATTER_RE.match(content)
     if not match:
         return frontmatter
     
