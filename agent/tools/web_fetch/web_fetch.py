@@ -233,8 +233,13 @@ class WebFetch(BaseTool):
 
             response.encoding = self._detect_encoding(response)
             html = response.text
-            title = self._extract_title(html)
-            text = self._extract_text(html)
+            media_type = content_type.split(";", 1)[0].strip().lower()
+            if media_type in ("text/plain", "application/json"):
+                title = "Untitled"
+                text = html
+            else:
+                title = self._extract_title(html)
+                text = self._extract_text(html)
 
             return ToolResult.success(f"Title: {title}\n\nContent:\n{text}")
         finally:
