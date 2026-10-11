@@ -75,3 +75,4 @@ Agent 会在对话中根据需要自动触发记忆检索，将相关历史信�
 | `agent_max_context_turns` | 最大上下文轮次，超出时裁剪并总结写入记忆 | `20` |
 | `rerank_provider` | 记忆检索重排服务，留空表示关闭；`local` 为本地交叉编码器 | `""` |
 | `rerank_model` | 重排模型，留空使用默认模型 | `BAAI/bge-reranker-base` |
+| `memory.hit_boost` | 常被检索到的记忆排序略微靠前（一周不用逐渐回落）；关闭时排序不变、检索不写库 | `false` |

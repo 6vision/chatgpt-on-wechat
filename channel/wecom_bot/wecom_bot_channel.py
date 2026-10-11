@@ -354,11 +354,14 @@ class WecomBotChannel(ChatChannel):
         (e.g. an image/file silently cached for the next query).
         """
         msg_id = data.get("msgid", "")
-        if msg_id and self.received_msgs.get(msg_id):
-            logger.debug(f"[WecomBot] Duplicate msg filtered: {msg_id}")
-            return None
         if msg_id:
-            self.received_msgs[msg_id] = True
+            with self._callback_lock:
+                duplicate = self.received_msgs.get(msg_id)
+                if not duplicate:
+                    self.received_msgs[msg_id] = True
+            if duplicate:
+                logger.debug(f"[WecomBot] Duplicate msg filtered: {msg_id}")
+                return None
 
         chattype = data.get("chattype", "single")
         is_group = chattype == "group"

@@ -194,7 +194,7 @@ def sanitize_claude_messages(messages: List[Dict]) -> int:
                 isinstance(b, dict) and b.get("type") == "tool_use"
                 and b.get("id") in bad_use for b in content
             ):
-                logger.warning(f"⚠️ Removing assistant msg with unmatched tool_use")
+                logger.warning("⚠️ Removing assistant msg with unmatched tool_use")
                 messages.pop(i)
                 pass_removed += 1
                 continue
@@ -206,7 +206,7 @@ def sanitize_claude_messages(messages: List[Dict]) -> int:
                 )
                 if has_bad:
                     if not _has_block_type(content, "text"):
-                        logger.warning(f"⚠️ Removing user msg with unmatched tool_result")
+                        logger.warning("⚠️ Removing user msg with unmatched tool_result")
                         messages.pop(i)
                         pass_removed += 1
                         continue
@@ -300,10 +300,15 @@ def compress_turn_to_text_only(turn: Dict) -> Dict:
     This preserves the conversational context (what the user asked and what the
     agent concluded) while stripping out the bulky intermediate tool interactions.
 
+    The names of the tools called are kept as a one-line note on the assistant
+    message: with no trace of its own tool use, a model tends to answer later
+    turns with invented "already done" claims instead of calling a tool.
+
     Returns a new turn dict with a ``messages`` list; the original is not mutated.
     """
     user_text = ""
     last_assistant_text = ""
+    called_tools: List[str] = []
 
     for msg in turn["messages"]:
         role = msg.get("role")
@@ -319,6 +324,14 @@ def compress_turn_to_text_only(turn: Dict) -> Dict:
             text = _extract_text_from_content(content)
             if text:
                 last_assistant_text = text
+            if isinstance(content, list):
+                for block in content:
+                    if (isinstance(block, dict)
+                            and block.get("type") == "tool_use"
+                            and block.get("name")):
+                        name = block["name"]
+                        if name not in called_tools:
+                            called_tools.append(name)
 
     compressed_messages = []
     if user_text:
@@ -327,9 +340,16 @@ def compress_turn_to_text_only(turn: Dict) -> Dict:
             "content": [{"type": "text", "text": user_text}]
         })
     if last_assistant_text:
+        assistant_content = [{"type": "text", "text": last_assistant_text}]
+        if called_tools:
+            assistant_content.append({
+                "type": "text",
+                "text": "[Context compressed: tools already called this turn: "
+                        + ", ".join(called_tools) + "]"
+            })
         compressed_messages.append({
             "role": "assistant",
-            "content": [{"type": "text", "text": last_assistant_text}]
+            "content": assistant_content
         })
 
     return {"messages": compressed_messages}

@@ -62,3 +62,4 @@ Web コンソールの記憶管理ページで、記憶ファイルと夢日記�
 | `agent_max_context_turns` | 最大コンテキストターン数。超過時にトリミングされ、記憶として要約されます | `20` |
 | `rerank_provider` | 記憶検索のリランクサービス。空の場合は無効、`local` はローカルのクロスエンコーダー（`pip install sentence-transformers` が必要） | `""` |
 | `rerank_model` | リランクモデル。空の場合はデフォルトモデルを使用 | `BAAI/bge-reranker-base` |
+| `memory.hit_boost` | よく検索される記憶の順位を少し上げる（1 週間ほど使われないと元に戻る）。オフなら順位は変わらず、検索時の書き込みもなし | `false` |
