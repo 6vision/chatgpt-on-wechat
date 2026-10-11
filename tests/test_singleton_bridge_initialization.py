@@ -84,3 +84,16 @@ def test_failed_bridge_initialization_can_retry(monkeypatch):
     monkeypatch.setattr(bridge_module, "conf", lambda: SETTINGS)
     instance = bridge()
     assert bridge() is instance
+
+
+def test_reentrant_construction_does_not_deadlock():
+    holder = {}
+
+    @singleton
+    class Reentrant:
+        def __init__(self):
+            if not holder:
+                holder["inner"] = True
+                Reentrant()
+
+    assert Reentrant() is Reentrant()

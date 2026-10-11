@@ -3,7 +3,8 @@ import threading
 
 def singleton(cls):
     instances = {}
-    initialization_lock = threading.Lock()
+    # Reentrant: a constructor that reaches its own class again must not deadlock.
+    initialization_lock = threading.RLock()
 
     def get_instance(*args, **kwargs):
         if cls not in instances:
