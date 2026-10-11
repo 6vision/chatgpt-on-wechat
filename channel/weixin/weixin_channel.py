@@ -857,23 +857,33 @@ class WeixinChannel(ChatChannel):
         return self._context_tokens.get(receiver, "")
 
     def _check_send_response(self, resp, receiver: str) -> None:
-        """Inspect a send-API response; drop stale context_token on -14.
+        """Inspect a send-API response; log failures and drop stale context_token on -14.
 
         ilink uses ret/errcode = -14 to signal that the session (and any
         cached context_token) is no longer valid. The plugin keeps running
         because the bot itself can re-login; we just need to forget the
         per-user token so the next push won't retry forever.
+
+        Other non-zero codes (e.g. the user has not messaged the bot within
+        the last 24h, or the send quota is used up) come back with HTTP 200,
+        so they would otherwise pass silently.
         """
         if not isinstance(resp, dict):
             return
         ret = resp.get("ret")
         errcode = resp.get("errcode")
         if ret == -14 or errcode == -14:
-            logger.warning(
+            logger.error(
                 f"[Weixin] Send returned -14 (session expired) for "
                 f"receiver={receiver}; dropping cached context_token"
             )
             self._invalidate_context_token(receiver)
+        elif ret or errcode:
+            logger.error(
+                f"[Weixin] Send failed for receiver={receiver}: ret={ret} "
+                f"errcode={errcode} errmsg={resp.get('errmsg', '')}. The user may "
+                f"need to send a message to the bot to re-open the 24h send window"
+            )
 
     def _send_text(self, text: str, receiver: str, context_token: str):
         if len(text) <= TEXT_CHUNK_LIMIT:
