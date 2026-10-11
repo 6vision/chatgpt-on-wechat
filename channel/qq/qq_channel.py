@@ -35,23 +35,12 @@ QQ_FILE_TYPE_FILE = 4
 
 QQ_API_BASE = "https://api.sgroup.qq.com"
 
-# Direct binary uploads (the base64 file_data field) are capped at 5MB by the
-# gateway; anything larger trips a 500/{850012} at the edge before the API ever
-# sees it, so bigger files must go through the chunked (upload_prepare) path.
+# The gateway caps a base64 file_data body at 5MB; larger files must use the
+# chunked upload_prepare path.
 QQ_BINARY_UPLOAD_LIMIT = 5 * 1024 * 1024
 
-# Per-type rich-media size policy, enforced by QQ server-side (official Rich
-# Media docs). A file past its type's SOFT limit is downgraded BY QQ to a plain
-# file (file_type=4) automatically; past the 200MB HARD limit the API errors out
-# (code 850031). The client must therefore NOT downgrade the type itself — just
-# upload with the real file_type and let QQ apply the policy.
-#   file_type=1 image (png/jpg)  soft 20MB   hard 200MB
-#   file_type=2 video (mp4)      soft 30MB   hard 200MB
-#   file_type=3 voice (silk)     soft 20MB   hard 200MB
-#   file_type=4 file (any)       soft 200MB  hard 200MB
-#
-# The 200MB hard limit is universal across types; QQ refuses anything larger
-# (code 850012), so refuse it locally and tell the user instead of round-tripping.
+# QQ refuses any file past 200MB. Below that, QQ itself downgrades a type past
+# its soft limit to a plain file, so the real file_type is always sent as-is.
 QQ_HARD_LIMIT_BYTES = 200 * 1024 * 1024
 
 # upload_prepare's md5_10m is the MD5 of the first 10002432 bytes (not a round
@@ -804,16 +793,11 @@ class QQChannel(ChatChannel):
         For group: POST /v2/groups/{group_openid}/files
         For c2c:   POST /v2/users/{openid}/files
         """
-        if event_type == "GROUP_AT_MESSAGE_CREATE":
-            group_openid = msg._rawmsg.get("group_openid", "")
-            upload_url = f"{QQ_API_BASE}/v2/groups/{group_openid}/files"
-        elif event_type == "C2C_MESSAGE_CREATE":
-            user_openid = (msg._rawmsg.get("author", {}).get("user_openid", "")
-                           or msg.from_user_id)
-            upload_url = f"{QQ_API_BASE}/v2/users/{user_openid}/files"
-        else:
+        upload_base = self._resolve_upload_base(msg, event_type)
+        if not upload_base:
             logger.warning(f"[QQ] Rich media upload not supported for event_type: {event_type}")
             return ""
+        upload_url = f"{upload_base}/files"
 
         upload_body = {
             "file_type": file_type,
@@ -850,16 +834,11 @@ class QQChannel(ChatChannel):
     def _upload_rich_media_base64(self, file_path: str, file_type: int, msg: QQMessage,
                                   event_type: str, file_name: str = "") -> str:
         """Upload local file via base64 file_data field."""
-        if event_type == "GROUP_AT_MESSAGE_CREATE":
-            group_openid = msg._rawmsg.get("group_openid", "")
-            upload_url = f"{QQ_API_BASE}/v2/groups/{group_openid}/files"
-        elif event_type == "C2C_MESSAGE_CREATE":
-            user_openid = (msg._rawmsg.get("author", {}).get("user_openid", "")
-                           or msg.from_user_id)
-            upload_url = f"{QQ_API_BASE}/v2/users/{user_openid}/files"
-        else:
+        upload_base = self._resolve_upload_base(msg, event_type)
+        if not upload_base:
             logger.warning(f"[QQ] Rich media upload not supported for event_type: {event_type}")
             return ""
+        upload_url = f"{upload_base}/files"
 
         try:
             with open(file_path, "rb") as f:
