@@ -76,16 +76,55 @@ nohup python3 app.py & tail -f nohup.out
 
 ## Docker upgrade
 
-Run the following in the directory containing `docker-compose.yml`:
+<Tip>
+  Back up `config.json` before upgrading.
+</Tip>
+
+Run every step in the directory that contains `docker-compose.yml`. Compose mounts `./cow-data` from that directory. Copy the files out before `pull` and `up -d`. A recreated container cannot yield them. `docker cp` works on a stopped container too, so copy while the old container still exists. Do not run `docker compose down` or `docker rm` until the copy finishes. Skip the copy when `COW_DATA_DIR` is already set: `/app/config.json` is then the image template (`docker/Dockerfile.latest` runs `cp config-template.json config.json`) and would overwrite `./cow-data/config.json`. Without `COW_DATA_DIR`, the saved config is the writable-layer `/app/config.json`, and the WeChat login is `/home/agent/.weixin_cow_credentials.json`.
+
+### 1. Copy the files out
+
+Replace `chatgpt-on-wechat` if that is not the container name. If the container is already gone, the files are gone. When this prints `COW_DATA_DIR=` and a path, skip the copies. An empty value prints nothing. Run the copies only when it prints nothing. Skip the WeChat line if you never logged in.
+
+```bash
+sudo docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' chatgpt-on-wechat | grep -E '^COW_DATA_DIR=.+'
+```
+
+```bash
+mkdir -p ./cow-data
+sudo docker cp chatgpt-on-wechat:/app/config.json ./cow-data/config.json
+sudo docker cp chatgpt-on-wechat:/home/agent/.weixin_cow_credentials.json ./cow-data/weixin_credentials.json
+```
+
+### 2. Add `COW_DATA_DIR` and the `./cow-data` volume
+
+Add both to the compose file, or to the NAS volume and environment settings, before `up -d`. `docker compose pull` does not edit a saved compose file. On every start, a set compose environment value overrides the same setting loaded from `config.json`. `CHANNEL_TYPE: 'web, weixin'` and a blank string such as `DEEPSEEK_API_KEY: ''` replace the file's value. Remove or edit those variables to keep what you saved.
+
+```yaml
+    environment:
+      COW_DATA_DIR: '/home/agent/.cow'
+    volumes:
+      - ./cow:/home/agent/cow
+      - ./cow-data:/home/agent/.cow
+```
+
+### 3. Pull, chown to `agent`, then start
+
+`sudo docker cp` keeps mode `0600` and sets the owner to root. `docker/entrypoint.sh` chowns only the mount directory, then runs as `agent`, which cannot read that WeChat file. `docker/Dockerfile.latest` creates `agent` with `useradd -r` and does not pin a uid. Read the uid and gid, put the two numbers in `UID:GID`, and delete a path you did not copy. Replace the image name if yours differs. Chown before `up -d`.
 
 ```bash
 sudo docker compose pull
-sudo docker compose up -d
+sudo docker run --rm --entrypoint id zhayujie/chatgpt-on-wechat -u agent
+sudo docker run --rm --entrypoint id zhayujie/chatgpt-on-wechat -g agent
 ```
 
-<Tip>
-  Back up `config.json` before upgrading. For Docker deployments, mount the workspace directory as a volume to persist data across upgrades.
-</Tip>
+```bash
+sudo chown UID:GID ./cow-data/config.json ./cow-data/weixin_credentials.json
+```
+
+```bash
+sudo docker compose up -d
+```
 
 ## Desktop client upgrade
 
