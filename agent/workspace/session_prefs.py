@@ -62,6 +62,8 @@ def _load() -> Dict:
     except Exception as e:
         logger.warning(f"[SessionPrefs] Could not read {path}: {e}")
         return {"sessions": {}}
+    if not isinstance(data, dict):
+        return {"sessions": {}}
     if not isinstance(data.get("sessions"), dict):
         data["sessions"] = {}
     return data
