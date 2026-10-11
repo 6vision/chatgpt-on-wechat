@@ -300,12 +300,9 @@ def compress_turn_to_text_only(turn: Dict) -> Dict:
     This preserves the conversational context (what the user asked and what the
     agent concluded) while stripping out the bulky intermediate tool interactions.
 
-    The names of the tools called this turn are kept as a one-line breadcrumb
-    on the assistant message. Without it, compaction erases all evidence of the
-    model's own prior tool use, and on the next turn the model may answer with
-    a fabricated completion claim ("already done", invented task id) instead of
-    calling a tool (see issue #3633). The breadcrumb restores that evidence
-    while keeping ``tool_choice=auto`` semantics untouched.
+    The names of the tools called are kept as a one-line note on the assistant
+    message: with no trace of its own tool use, a model tends to answer later
+    turns with invented "already done" claims instead of calling a tool.
 
     Returns a new turn dict with a ``messages`` list; the original is not mutated.
     """
