@@ -182,9 +182,21 @@ class McpClient:
         Each item is a dict: {"name": str, "description": str, "inputSchema": dict}
         """
         try:
-            resp = self._send_request("tools/list", {})
-            self._raise_for_rpc_error(resp)
-            tools = (resp.get("result") or {}).get("tools", [])
+            tools = []
+            params = {}
+            seen_cursors = set()
+            while True:
+                resp = self._send_request("tools/list", params)
+                self._raise_for_rpc_error(resp)
+                page = resp.get("result") or {}
+                tools.extend(page.get("tools", []))
+                cursor = page.get("nextCursor")
+                if not cursor:
+                    break
+                if cursor in seen_cursors:
+                    raise ValueError("tools/list returned a repeated pagination cursor")
+                seen_cursors.add(cursor)
+                params = {"cursor": cursor}
             return [
                 {
                     "name": t.get("name", ""),
