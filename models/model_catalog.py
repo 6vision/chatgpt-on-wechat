@@ -92,7 +92,7 @@ def normalize_entry(raw) -> dict:
             continue
         try:
             value = int(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             raise ValueError(f"{key} for {name} must be a positive integer")
         if value <= 0:
             raise ValueError(f"{key} for {name} must be a positive integer")
@@ -116,13 +116,17 @@ def _normalize_provider_doc(raw) -> dict:
     else:
         return {"overrides": [], "hidden": []}
 
-    for e in entries or []:
+    if not isinstance(entries, list):
+        entries = []
+    if not isinstance(raw_hidden, list):
+        raw_hidden = []
+    for e in entries:
         try:
             overrides.append(normalize_entry(e))
         except (ValueError, TypeError, AttributeError):
             continue  # unparseable entry: skip rather than break reads
     seen = set()
-    for name in raw_hidden or []:
+    for name in raw_hidden:
         name = str(name or "").strip()
         if name and name not in seen:
             seen.add(name)
