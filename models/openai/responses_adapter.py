@@ -241,6 +241,10 @@ def build_responses_payload(
         payload["reasoning"] = {"effort": effort}
     if response_format and response_format.get("type") == "json_object":
         payload["text"] = {"format": {"type": "json_object"}}
+    elif response_format and response_format.get("type") == "json_schema":
+        descriptor = response_format.get("json_schema")
+        if isinstance(descriptor, dict):
+            payload["text"] = {"format": {**descriptor, "type": "json_schema"}}
     return payload
 
 
