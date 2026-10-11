@@ -23,11 +23,14 @@ def short_idle(monkeypatch):
     monkeypatch.setattr(oc, "_STREAM_IDLE_TIMEOUT_SECONDS", 0.3, raising=False)
 
 
-@pytest.fixture
-def registry():
-    from agent.protocol import get_cancel_registry
+@pytest.fixture(autouse=True)
+def registry(monkeypatch):
+    from agent.protocol import CancelTokenRegistry
 
-    instance = get_cancel_registry()
+    # A released daemon worker can unregister after the next test starts.
+    # Keep its cleanup scoped to the test that created it, even with reused IDs.
+    instance = CancelTokenRegistry()
+    monkeypatch.setattr("agent.protocol.get_cancel_registry", lambda: instance)
     yield instance
     instance.unregister(COMPLETION_ID)
 
