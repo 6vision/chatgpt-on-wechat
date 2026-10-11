@@ -345,16 +345,19 @@ def get_cloud_headers(api_key: str) -> dict:
 _TAIL_CHUNK_BYTES = 8192
 
 
-def tail_lines(path, limit):
+def tail_lines(path, limit, end_offset=None):
     """Return the last *limit* lines of *path*, without reading the whole file.
 
     Lines keep their trailing newline (the last one may have none).
+    An optional byte offset limits replay to an already captured file boundary.
     """
     if limit <= 0:
         return []
     with open(path, "rb") as f:
         f.seek(0, os.SEEK_END)
         remaining = f.tell()
+        if end_offset is not None:
+            remaining = min(remaining, end_offset)
         blocks = []
         newlines = 0
         while remaining > 0 and newlines <= limit:
