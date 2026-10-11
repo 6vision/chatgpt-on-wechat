@@ -196,6 +196,7 @@ def tools_to_responses(tools: Optional[List[Dict[str, Any]]]) -> Optional[List[D
                 "name": fn.get("name"),
                 "description": fn.get("description"),
                 "parameters": fn.get("parameters") or {},
+                "strict": fn.get("strict"),
             }
         else:
             # Already internally tagged / Claude-shaped fallback.
@@ -204,6 +205,7 @@ def tools_to_responses(tools: Optional[List[Dict[str, Any]]]) -> Optional[List[D
                 "name": tool.get("name"),
                 "description": tool.get("description"),
                 "parameters": tool.get("parameters") or tool.get("input_schema") or {},
+                "strict": tool.get("strict"),
             }
         converted.append({k: v for k, v in entry.items() if v is not None})
     return converted or None
@@ -233,7 +235,12 @@ def build_responses_payload(
     r_tools = tools_to_responses(tools)
     if r_tools:
         payload["tools"] = r_tools
-        payload["tool_choice"] = tool_choice or "auto"
+        choice = tool_choice or "auto"
+        if isinstance(choice, dict) and choice.get("type") == "function":
+            function = choice.get("function")
+            if isinstance(function, dict):
+                choice = {"type": "function", "name": function.get("name")}
+        payload["tool_choice"] = choice
     if max_output_tokens:
         payload["max_output_tokens"] = max_output_tokens
     effort = normalize_effort(reasoning_effort, model)
