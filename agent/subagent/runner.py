@@ -12,7 +12,7 @@ import copy
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -198,17 +198,22 @@ def _close_run(store, run_id: str, result: Dict[str, Any]) -> None:
         logger.debug(f"[SubAgent] could not close run {run_id}: {e}")
 
 
+_POLL_SECONDS = 0.1
+_PARENT_CANCELLED = "The parent run was cancelled."
+
+
+def _unfinished(index: int, template, status: str, error: str, on_state=None) -> Dict[str, Any]:
+    """Result for a task that was stopped or timed out instead of finishing."""
+    result = {"task_index": index, "subagent_type": template.name,
+              "status": status, "error": error}
+    _notify(on_state, index, result)
+    return result
+
+
 def _run_one(parent, template, task: SubagentTask, index: int, cancel_event,
              on_state=None, on_event=None) -> Dict[str, Any]:
     if cancel_event.is_set():
-        result = {
-            "task_index": index,
-            "subagent_type": template.name,
-            "status": "cancelled",
-            "error": "The task was cancelled before it started.",
-        }
-        _notify(on_state, index, result)
-        return result
+        return _unfinished(index, template, "cancelled", _PARENT_CANCELLED, on_state)
     started = time.time()
     run_id = uuid.uuid4().hex[:12]
     # Before identity_scope below, so the parent's run id is still ambient.
@@ -285,18 +290,8 @@ def run_tasks(
         resolved.append(templates[name] if name in templates else templates[_default_name(templates)])
 
     if cancel_event is not None and cancel_event.is_set():
-        cancelled = [
-            {
-                "task_index": index,
-                "subagent_type": template.name,
-                "status": "cancelled",
-                "error": "The parent run was cancelled.",
-            }
-            for index, template in enumerate(resolved)
-        ]
-        for index, result in enumerate(cancelled):
-            _notify(on_state, index, result)
-        return cancelled
+        return [_unfinished(i, t, "cancelled", _PARENT_CANCELLED, on_state)
+                for i, t in enumerate(resolved)]
 
     pool = ThreadPoolExecutor(
         max_workers=min(len(tasks), settings.max_concurrent),
@@ -318,51 +313,35 @@ def run_tasks(
 
         deadline = time.time() + settings.timeout_seconds
         results: List[Optional[Dict[str, Any]]] = [None] * len(tasks)
-        parent_stopped = False
-        for index, future in enumerate(futures):
-            while True:
-                if cancel_event is not None and cancel_event.is_set():
-                    parent_stopped = True
-                    for child_cancel in cancel_events:
-                        child_cancel.set()
-                    for pending_index in range(index, len(futures)):
-                        pending = futures[pending_index]
-                        if pending.done() and not pending.cancelled():
-                            results[pending_index] = pending.result()
-                            continue
-                        pending.cancel()
-                        results[pending_index] = {
-                            "task_index": pending_index,
-                            "subagent_type": resolved[pending_index].name,
-                            "status": "cancelled",
-                            "error": "The parent run was cancelled.",
-                        }
-                        _notify(on_state, pending_index, results[pending_index])
-                    break
-                remaining = max(0.0, deadline - time.time())
-                try:
-                    # A bounded wait lets user Stop reach the child events even
-                    # while a worker is blocked on its model or a tool.
-                    wait_seconds = min(remaining, 0.05) if cancel_event is not None else remaining
-                    results[index] = future.result(timeout=wait_seconds)
-                    break
-                except FutureTimeout:
-                    if time.time() < deadline:
-                        continue
-                    cancel_events[index].set()
-                    results[index] = {
-                        "task_index": index,
-                        "subagent_type": resolved[index].name,
-                        "status": "timeout",
-                        "error": (
-                            f"Exceeded the {settings.timeout_seconds:g}s sub agent budget. "
-                            f"Split the task or raise subagent.timeout_seconds."
-                        ),
-                    }
-                    _notify(on_state, index, results[index])
-                    break
-            if parent_stopped:
+        pending = dict(enumerate(futures))
+        while True:
+            for index in [i for i, f in pending.items() if f.done()]:
+                results[index] = pending.pop(index).result()
+            if not pending:
                 break
+            stopped = cancel_event is not None and cancel_event.is_set()
+            remaining = deadline - time.time()
+            if stopped or remaining <= 0:
+                timeout_error = (
+                    f"Exceeded the {settings.timeout_seconds:g}s sub agent budget. "
+                    f"Split the task or raise subagent.timeout_seconds."
+                )
+                for index, future in pending.items():
+                    # Tell the run to stop and close it out here: the worker winds
+                    # down at its next checkpoint, which may be a whole LLM
+                    # response away, and will not report this itself.
+                    future.cancel()
+                    cancel_events[index].set()
+                    results[index] = _unfinished(
+                        index, resolved[index],
+                        "cancelled" if stopped else "timeout",
+                        _PARENT_CANCELLED if stopped else timeout_error,
+                        on_state,
+                    )
+                break
+            # Bounded so a user Stop reaches the children while they still run.
+            wait(list(pending.values()), timeout=min(remaining, _POLL_SECONDS),
+                 return_when=FIRST_COMPLETED)
     finally:
         # Deliberately not waiting: a `with` block would join the very threads
         # we just gave up on, so the tool call would overrun the budget it is
