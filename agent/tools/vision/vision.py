@@ -18,6 +18,7 @@ Provider resolution:
 
 import base64
 import os
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -544,23 +545,41 @@ class Vision(BaseTool):
         vendor-foreign model name is forwarded.
 
         Resolution order:
-          1. If the bot explicitly declares `supports_vision`, trust it.
+          1. The user ticked vision for the main model in the model catalog
+             (the only way to declare it for a custom provider's models).
+          2. If the bot explicitly declares `supports_vision`, trust it.
              This lets bots opt in or out based on their own runtime
              configuration (e.g. the currently selected model).
-          2. Otherwise, fall back to a model-name prefix heuristic: trust
+          3. Otherwise, fall back to a model-name prefix heuristic: trust
              call_vision when the main model looks like an OpenAI family
              model or matches a known multimodal vendor prefix.
         """
         if bot is None:
             return False
+        if self._catalog_declares_vision():
+            return True
         if hasattr(bot, "supports_vision"):
             return bool(getattr(bot, "supports_vision"))
         main_model = self._current_main_model().lower()
         if not main_model:
             return False
-        if main_model.startswith(_OPENAI_MODEL_PREFIXES):
-            return True
-        return self._infer_provider_from_model(main_model) is not None
+        # Gateways namespace upstream models ("cn:glm-5v", "openai/gpt-4o").
+        # The bot still sends the full name; only the match uses the tail.
+        for name in {main_model, re.split(r"[:/]", main_model)[-1]}:
+            if name.startswith(_OPENAI_MODEL_PREFIXES) or self._infer_provider_from_model(name):
+                return True
+        return False
+
+    def _catalog_declares_vision(self) -> bool:
+        """Positive only: catalog entries default to text, so a missing tag is no verdict."""
+        meta = getattr(self.model, "catalog_model_meta", None)
+        if not callable(meta):
+            return False
+        try:
+            caps = (meta() or {}).get("capabilities")
+        except Exception:
+            return False
+        return isinstance(caps, list) and "vision" in caps
 
     def _build_main_model_provider(self) -> Optional[VisionProvider]:
         """
