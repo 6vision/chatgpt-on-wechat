@@ -79,12 +79,13 @@ class TaskStore:
         store_dir = os.path.dirname(self.store_path) or "."
         os.makedirs(store_dir, exist_ok=True)
     
-    def load_tasks(self) -> Dict[str, dict]:
+    def load_tasks(self, strict: bool = False) -> Dict[str, dict]:
         """
         Load all tasks from storage
         
         Returns:
-            Dictionary of task_id -> task_data
+            Dictionary of task_id -> task_data. An unreadable store reads as
+            empty, or raises ValueError when ``strict``.
         """
         with self.lock:
             if not os.path.exists(self.store_path) and not os.path.exists(f"{self.store_path}.bak"):
@@ -99,6 +100,8 @@ class TaskStore:
                 backup_text, tasks = _read_tasks(f"{self.store_path}.bak")
             except Exception as e:
                 print(f"Error loading task backup: {e}")
+                if strict:
+                    raise ValueError(f"unrecoverable task store: {self.store_path}") from e
                 return {}
 
             # Repair the primary before a later save copies it into .bak.
@@ -160,25 +163,12 @@ class TaskStore:
             True if successful
         """
         with self.lock:
-            tasks = self.load_tasks()
+            # Strict: saving over a store that failed to load would erase it.
+            tasks = self.load_tasks(strict=True)
             task_id = task.get("id")
 
             if not task_id:
                 raise ValueError("Task must have an 'id' field")
-
-            if not tasks:
-                paths = (self.store_path, f"{self.store_path}.bak")
-                if any(os.path.exists(path) for path in paths):
-                    # The read-only fallback also returns {} for corrupt data.
-                    # A new task must not silently replace that unrecovered store.
-                    for path in paths:
-                        try:
-                            tasks = _read_tasks(path)[1]
-                            break
-                        except (OSError, ValueError):
-                            continue
-                    else:
-                        raise ValueError("Cannot add a task: unrecoverable task store")
 
             if task_id in tasks:
                 raise ValueError(f"Task with id '{task_id}' already exists")

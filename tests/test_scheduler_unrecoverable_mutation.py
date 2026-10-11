@@ -99,21 +99,3 @@ def test_other_mutations_already_fail_without_overwriting_corrupt_data(tmp_path,
             store.delete_task("old")
     assert path.read_bytes() == original
     assert not path.with_suffix(".json.bak").exists()
-
-
-def test_revalidation_keeps_tasks_restored_after_the_read_fallback(tmp_path, monkeypatch):
-    path = tmp_path / "tasks.json"
-    path.write_text("{unfinished", encoding="utf-8")
-    store = TaskStore(str(path))
-    real_load = store.load_tasks
-
-    def load_then_repair_file():
-        tasks = real_load()
-        path.write_text(json.dumps({"tasks": {"restored": {"id": "restored"}}}), encoding="utf-8")
-        return tasks
-
-    monkeypatch.setattr(store, "load_tasks", load_then_repair_file)
-    assert store.add_task({"id": "new"}) is True
-    assert json.loads(path.read_text(encoding="utf-8"))["tasks"] == {
-        "restored": {"id": "restored"}, "new": {"id": "new"},
-    }
