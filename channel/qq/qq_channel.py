@@ -8,6 +8,7 @@ Supports:
 """
 
 import base64
+import hashlib
 import json
 import os
 import threading
@@ -33,6 +34,34 @@ QQ_FILE_TYPE_VOICE = 3
 QQ_FILE_TYPE_FILE = 4
 
 QQ_API_BASE = "https://api.sgroup.qq.com"
+
+# Direct binary uploads (the base64 file_data field) are capped at 5MB by the
+# gateway; anything larger trips a 500/{850012} at the edge before the API ever
+# sees it, so bigger files must go through the chunked (upload_prepare) path.
+QQ_BINARY_UPLOAD_LIMIT = 5 * 1024 * 1024
+
+# Per-type rich-media size policy, enforced by QQ server-side (official Rich
+# Media docs). A file past its type's SOFT limit is downgraded BY QQ to a plain
+# file (file_type=4) automatically; past the 200MB HARD limit the API errors out
+# (code 850031). The client must therefore NOT downgrade the type itself — just
+# upload with the real file_type and let QQ apply the policy.
+#   file_type=1 image (png/jpg)  soft 20MB   hard 200MB
+#   file_type=2 video (mp4)      soft 30MB   hard 200MB
+#   file_type=3 voice (silk)     soft 20MB   hard 200MB
+#   file_type=4 file (any)       soft 200MB  hard 200MB
+#
+# The 200MB hard limit is universal across types; QQ refuses anything larger
+# (code 850012), so refuse it locally and tell the user instead of round-tripping.
+QQ_HARD_LIMIT_BYTES = 200 * 1024 * 1024
+
+# upload_prepare's md5_10m is the MD5 of the first 10002432 bytes (not a round
+# 10MB) of the file, per the official spec.
+QQ_MD5_10M_BYTES = 10002432
+
+# Chunked-upload tuning. block_size is taken from upload_prepare at runtime;
+# these only bound the transfer itself.
+QQ_UPLOAD_CHUNK_RETRIES = 3
+QQ_UPLOAD_PART_TIMEOUT = 120
 
 # Intents: GROUP_AND_C2C_EVENT(1<<25) | PUBLIC_GUILD_MESSAGES(1<<30)
 DEFAULT_INTENTS = (1 << 25) | (1 << 30)
@@ -871,6 +900,231 @@ class QQChannel(ChatChannel):
             logger.error(f"[QQ] Rich media upload (base64) error: {e}")
             return ""
 
+    @staticmethod
+    def _resolve_upload_base(msg: QQMessage, event_type: str) -> str:
+        """Return the per-scene upload base URL (…/v2/groups/{id} or
+        …/v2/users/{id}), or "" when the event type has no rich-media endpoint."""
+        if event_type == "GROUP_AT_MESSAGE_CREATE":
+            group_openid = msg._rawmsg.get("group_openid", "")
+            return f"{QQ_API_BASE}/v2/groups/{group_openid}" if group_openid else ""
+        if event_type == "C2C_MESSAGE_CREATE":
+            user_openid = (msg._rawmsg.get("author", {}).get("user_openid", "")
+                           or msg.from_user_id)
+            return f"{QQ_API_BASE}/v2/users/{user_openid}" if user_openid else ""
+        return ""
+
+    @staticmethod
+    def _file_hashes(file_path: str):
+        """Return (md5, sha1, md5_10m) hex digests for a file.
+
+        md5_10m covers only the first QQ_MD5_10M_BYTES bytes (the whole file
+        when it is shorter than that), matching upload_prepare's spec."""
+        md5 = hashlib.md5()
+        sha1 = hashlib.sha1()
+        md5_10m = hashlib.md5()
+        remaining_10m = QQ_MD5_10M_BYTES
+        with open(file_path, "rb") as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                md5.update(chunk)
+                sha1.update(chunk)
+                if remaining_10m > 0:
+                    head = chunk[:remaining_10m]
+                    md5_10m.update(head)
+                    remaining_10m -= len(head)
+        return md5.hexdigest(), sha1.hexdigest(), md5_10m.hexdigest()
+
+    def _upload_rich_media_chunked(self, file_path: str, file_type: int, msg: QQMessage,
+                                   event_type: str, file_name: str = "") -> str:
+        """Upload a local file via QQ's four-step chunked upload and return
+        file_info. This is the only path that survives the gateway's ~5MB
+        request-body cap, so it backs every large local-file upload."""
+        upload_base = self._resolve_upload_base(msg, event_type)
+        if not upload_base:
+            logger.warning(f"[QQ] Chunked upload not supported for event_type: {event_type}")
+            return ""
+
+        file_name = file_name or os.path.basename(file_path)
+        try:
+            file_size = os.path.getsize(file_path)
+            md5, sha1, md5_10m = self._file_hashes(file_path)
+        except OSError as e:
+            logger.error(f"[QQ] Failed to read file for chunked upload: {e}")
+            return ""
+
+        # 1. Pre-upload: trade the hashes for an upload_id + per-part URLs.
+        try:
+            resp = requests.post(
+                f"{upload_base}/upload_prepare",
+                headers=self._get_auth_headers(), timeout=30,
+                json={
+                    "file_type": file_type,
+                    "file_size": str(file_size),
+                    "file_name": file_name,
+                    "md5": md5,
+                    "sha1": sha1,
+                    "md5_10m": md5_10m,
+                },
+            )
+        except Exception as e:
+            logger.error(f"[QQ] upload_prepare error: {e}")
+            return ""
+        if resp.status_code not in (200, 201):
+            logger.error(f"[QQ] upload_prepare failed: status={resp.status_code}, body={resp.text}")
+            return ""
+        try:
+            prepared = resp.json()
+        except ValueError:
+            logger.error(f"[QQ] upload_prepare returned non-JSON: {resp.text}")
+            return ""
+
+        upload_id = prepared.get("upload_id", "")
+        # Keep only dict entries: a malformed part would break the sort key and
+        # escape as an AttributeError out of this method, past every guard here.
+        parts = [p for p in (prepared.get("parts") or []) if isinstance(p, dict)]
+        if not upload_id or not parts:
+            # Log only the response's keys: ``prepared`` may carry presigned
+            # URLs, which are signed credentials and must not reach the log.
+            keys = sorted(prepared.keys()) if isinstance(prepared, dict) else type(prepared).__name__
+            logger.error(f"[QQ] upload_prepare returned no upload_id/parts (keys={keys})")
+            return ""
+
+        # Apply parts in index order: the file is read sequentially, so a
+        # mis-ordered response would otherwise hand each part the wrong bytes.
+        parts = sorted(parts, key=lambda p: p.get("index", 0))
+        logger.info(f"[QQ] Chunked upload prepared: upload_id={upload_id}, "
+                    f"parts={len(parts)}, block_size={prepared.get('block_size', '')}, "
+                    f"size={file_size} bytes, file_type={file_type}")
+
+        # 2 & 3. PUT each part to its presigned URL, then confirm with
+        # upload_part_finish. The presigned URL carries its own signature, so no
+        # Authorization header goes on the PUT.
+        try:
+            with open(file_path, "rb") as f:
+                # Count parts by loop position, not by ``index``: QQ returns a
+                # 1-based index in practice while the docs say 0-based, so
+                # ``index + 1`` produced nonsense progress like "part 5/4".
+                for seq, part in enumerate(parts, start=1):
+                    index = part.get("index", 0)
+                    block_size = int(part.get("block_size") or prepared.get("block_size") or 0)
+                    chunk = f.read(block_size) if block_size > 0 else b""
+                    if not chunk:
+                        logger.error(f"[QQ] Upload part {index} has no data (block_size={block_size})")
+                        return ""
+
+                    ok = False
+                    for attempt in range(1, QQ_UPLOAD_CHUNK_RETRIES + 1):
+                        try:
+                            put = requests.put(
+                                part["presigned_url"], data=chunk,
+                                timeout=QQ_UPLOAD_PART_TIMEOUT,
+                            )
+                            # Accept any 2xx: a success misread as failure would
+                            # make us re-PUT a part QQ already stored.
+                            if 200 <= put.status_code < 300:
+                                ok = True
+                                break
+                            logger.warning(f"[QQ] Part {index} PUT attempt {attempt} failed: "
+                                           f"status={put.status_code}")
+                        except Exception as e:
+                            logger.warning(f"[QQ] Part {index} PUT attempt {attempt} error: {e}")
+                    if not ok:
+                        logger.error(f"[QQ] Part {index} upload failed after "
+                                     f"{QQ_UPLOAD_CHUNK_RETRIES} attempts")
+                        return ""
+
+                    finish = requests.post(
+                        f"{upload_base}/upload_part_finish",
+                        headers=self._get_auth_headers(), timeout=30,
+                        json={
+                            "upload_id": upload_id,
+                            "part_index": index,
+                            "block_size": str(len(chunk)),
+                            "md5": hashlib.md5(chunk).hexdigest(),
+                        },
+                    )
+                    if finish.status_code not in (200, 201, 202, 204):
+                        logger.error(f"[QQ] upload_part_finish failed for part {index}: "
+                                     f"status={finish.status_code}, body={finish.text}")
+                        return ""
+                    logger.info(f"[QQ] Chunked part {seq}/{len(parts)} uploaded "
+                                f"({len(chunk)} bytes)")
+        except Exception as e:
+            logger.error(f"[QQ] Failed while uploading parts: {e}")
+            return ""
+
+        # 4. Merge: hand upload_id to the files endpoint to obtain file_info.
+        # file_name is mandatory on the chunked/merge path.
+        try:
+            resp = requests.post(
+                f"{upload_base}/files",
+                headers=self._get_auth_headers(), timeout=60,
+                json={
+                    "file_type": file_type,
+                    "srv_send_msg": False,
+                    "file_name": file_name,
+                    "upload_id": upload_id,
+                },
+            )
+        except Exception as e:
+            logger.error(f"[QQ] Chunked merge error: {e}")
+            return ""
+        if resp.status_code in (200, 201):
+            try:
+                data = resp.json()
+                file_info = data.get("file_info", "")
+            except (ValueError, AttributeError):
+                logger.error(f"[QQ] Chunked merge returned an unexpected body: {resp.text}")
+                return ""
+            logger.info(f"[QQ] Rich media uploaded (chunked): upload_id={upload_id}, "
+                        f"file_type={file_type}, size={file_size} bytes, "
+                        f"file_uuid={data.get('file_uuid', '')}")
+            return file_info
+        logger.error(f"[QQ] Chunked merge failed: status={resp.status_code}, body={resp.text}")
+        return ""
+
+    def _reject_oversized_local_file(self, file_path: str, msg: QQMessage,
+                                     event_type: str, msg_id: str) -> bool:
+        """Refuse a local file over QQ's 200MB hard limit and tell the user.
+
+        Returns True when the file was rejected (a notice has been sent), so the
+        caller stops before attempting an upload QQ would refuse anyway."""
+        try:
+            size = os.path.getsize(file_path)
+        except OSError:
+            return False
+        if size <= QQ_HARD_LIMIT_BYTES:
+            return False
+        limit_mb = QQ_HARD_LIMIT_BYTES // (1024 * 1024)
+        logger.warning(f"[QQ] File {size / 1048576:.1f}MB exceeds the {limit_mb}MB hard "
+                       f"limit, not uploading")
+        self._send_text(f"[File too large] {size / 1048576:.1f}MB exceeds QQ's {limit_mb}MB limit",
+                        msg, event_type, msg_id)
+        return True
+
+    def _upload_local_file(self, file_path: str, file_type: int, msg: QQMessage,
+                           event_type: str, file_name: str = "") -> str:
+        """Upload a local file, choosing the transport by size.
+
+        Small files use the single-request base64 path (fastest); anything past
+        the gateway's 5MB body cap goes through chunked upload. The per-type
+        soft/hard size policy is applied by QQ itself (see the note near
+        QQ_BINARY_UPLOAD_LIMIT), so the file_type is passed through untouched."""
+        try:
+            size = os.path.getsize(file_path)
+        except OSError as e:
+            logger.error(f"[QQ] Cannot stat file for upload: {e}")
+            return ""
+
+        if size <= QQ_BINARY_UPLOAD_LIMIT:
+            return self._upload_rich_media_base64(file_path, file_type, msg, event_type, file_name)
+
+        logger.info(f"[QQ] File {size / 1048576:.1f}MB > "
+                    f"{QQ_BINARY_UPLOAD_LIMIT // 1048576}MB gateway limit, using chunked upload")
+        return self._upload_rich_media_chunked(file_path, file_type, msg, event_type, file_name)
+
     def _send_media_msg(self, file_info: str, msg: QQMessage, event_type: str, msg_id: str):
         """Send a message with msg_type=7 (rich media) using file_info."""
         url, body, _, _ = self._build_msg_url_and_base_body(msg, event_type, msg_id)
@@ -893,7 +1147,9 @@ class QQChannel(ChatChannel):
             file_info = self._upload_rich_media(
                 img_path_or_url, QQ_FILE_TYPE_IMAGE, msg, event_type)
         elif os.path.exists(img_path_or_url):
-            file_info = self._upload_rich_media_base64(
+            if self._reject_oversized_local_file(img_path_or_url, msg, event_type, msg_id):
+                return
+            file_info = self._upload_local_file(
                 img_path_or_url, QQ_FILE_TYPE_IMAGE, msg, event_type)
         else:
             logger.error(f"[QQ] Image not found: {img_path_or_url}")
@@ -919,7 +1175,9 @@ class QQChannel(ChatChannel):
             file_info = self._upload_rich_media(
                 file_path_or_url, QQ_FILE_TYPE_FILE, msg, event_type, file_name=file_name)
         elif os.path.exists(file_path_or_url):
-            file_info = self._upload_rich_media_base64(
+            if self._reject_oversized_local_file(file_path_or_url, msg, event_type, msg_id):
+                return
+            file_info = self._upload_local_file(
                 file_path_or_url, QQ_FILE_TYPE_FILE, msg, event_type, file_name=file_name)
         else:
             logger.error(f"[QQ] File not found: {file_path_or_url}")
@@ -944,7 +1202,9 @@ class QQChannel(ChatChannel):
         if path_or_url.startswith(("http://", "https://")):
             file_info = self._upload_rich_media(path_or_url, file_type, msg, event_type)
         elif os.path.exists(path_or_url):
-            file_info = self._upload_rich_media_base64(path_or_url, file_type, msg, event_type)
+            if self._reject_oversized_local_file(path_or_url, msg, event_type, msg_id):
+                return
+            file_info = self._upload_local_file(path_or_url, file_type, msg, event_type)
         else:
             logger.error(f"[QQ] Media not found: {path_or_url}")
             return
