@@ -205,19 +205,17 @@ def sanitize_claude_messages(messages: List[Dict]) -> int:
                     and b.get("tool_use_id") in bad_result for b in content
                 )
                 if has_bad:
-                    if not _has_block_type(content, "text"):
-                        logger.warning("⚠️ Removing user msg with unmatched tool_result")
+                    before = len(content)
+                    msg["content"] = [
+                        b for b in content
+                        if not (isinstance(b, dict) and b.get("type") == "tool_result"
+                                and b.get("tool_use_id") in bad_result)
+                    ]
+                    pass_removed += before - len(msg["content"])
+                    if not msg["content"]:
+                        logger.warning("⚠️ Removing empty user msg after unmatched tool_result")
                         messages.pop(i)
-                        pass_removed += 1
                         continue
-                    else:
-                        before = len(content)
-                        msg["content"] = [
-                            b for b in content
-                            if not (isinstance(b, dict) and b.get("type") == "tool_result"
-                                    and b.get("tool_use_id") in bad_result)
-                        ]
-                        pass_removed += before - len(msg["content"])
 
             i += 1
 
