@@ -204,6 +204,8 @@ class McpClient:
             self._raise_for_rpc_error(resp)
             content = (resp.get("result") or {}).get("content", [])
             parts = [item.get("text", "") for item in content if item.get("type") == "text"]
+            if not parts and "structuredContent" in (resp.get("result") or {}):
+                return json.dumps(resp["result"]["structuredContent"], ensure_ascii=False)
             return "\n".join(parts)
         except Exception as e:
             logger.warning(f"[MCP:{self.name}] call_tool({name}) failed: {e}")
