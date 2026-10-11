@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -56,11 +57,13 @@ def create_backup(workspace_dir: Path, files: List[Path]) -> Optional[str]:
     if not existing:
         return None
 
-    backup_id = datetime.now().strftime("%Y%m%d-%H%M%S-") + str(int(time.time() * 1000) % 1000)
+    backup_id = datetime.now().strftime("%Y%m%d-%H%M%S-") + f"{time.time_ns()}{uuid.uuid4().int:039d}"
     root = _backups_root(workspace_dir)
     target = root / backup_id
+    created = False
     try:
-        target.mkdir(parents=True, exist_ok=True)
+        target.mkdir(parents=True, exist_ok=False)
+        created = True
         ws = Path(workspace_dir)
         manifest = []
         for idx, src in enumerate(existing):
@@ -83,7 +86,8 @@ def create_backup(workspace_dir: Path, files: List[Path]) -> Optional[str]:
     except Exception as e:
         logger.warning(f"[Evolution] Failed to create backup: {e}")
         # A half-written snapshot must not take one of the _MAX_BACKUPS slots.
-        _discard_incomplete(target)
+        if created:
+            _discard_incomplete(target)
         return None
 
 
