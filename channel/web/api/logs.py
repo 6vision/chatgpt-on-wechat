@@ -32,19 +32,21 @@ class LogsHandler:
                 yield b"data: {\"type\": \"error\", \"message\": \"run.log not found\"}\n\n"
                 return
 
-            # Read last lines for initial display
-            try:
-                chunk = ''.join(tail_lines(log_path, _TAIL_LINE_LIMIT))
-                payload = json.dumps({"type": "init", "content": chunk}, ensure_ascii=False)
-                yield f"data: {payload}\n\n".encode('utf-8')
-            except Exception as e:
-                yield f"data: {{\"type\": \"error\", \"message\": \"{e}\"}}\n\n".encode('utf-8')
-                return
-
-            # Tail new lines
+            # Replay and live tail share one boundary so lines appended while
+            # the client consumes the initial event are not skipped.
+            initialized = False
             try:
                 with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
-                    f.seek(0, 2)  # seek to end
+                    f.seek(0, 2)
+                    try:
+                        chunk = ''.join(tail_lines(log_path, _TAIL_LINE_LIMIT, end_offset=f.tell()))
+                        payload = json.dumps({"type": "init", "content": chunk}, ensure_ascii=False)
+                        initialized = True
+                        yield f"data: {payload}\n\n".encode('utf-8')
+                    except Exception as e:
+                        yield f"data: {{\"type\": \"error\", \"message\": \"{e}\"}}\n\n".encode('utf-8')
+                        return
+
                     deadline = time.time() + 600  # 10 min max
                     while time.time() < deadline:
                         line = f.readline()
@@ -56,7 +58,10 @@ class LogsHandler:
                             time.sleep(1)
             except GeneratorExit:
                 return
-            except Exception:
+            except Exception as e:
+                if not initialized:
+                    payload = json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)
+                    yield f"data: {payload}\n\n".encode('utf-8')
                 return
 
         return generate()
