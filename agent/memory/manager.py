@@ -841,13 +841,17 @@ class MemoryManager:
         reranked.sort(key=lambda r: r.score, reverse=True)
         return reranked
 
-    def _hit_boost_enabled(self) -> bool:
-        """True when the hit-popularity boost is on. It is opt-in: a retrieval
-        hit is not proof of usefulness, so with the default weight of 0 both
-        the re-ranking and the per-search hit write-back stay off."""
+    def _hit_boost_params(self):
+        """(weight, cap) of the hit-popularity boost; weight 0 means off."""
         config = getattr(self, "config", None)
-        weight = float(getattr(config, "hit_boost_weight", 0.0)) if config else 0.0
-        cap = float(getattr(config, "hit_boost_max", 1.25)) if config else 1.25
+        weight = float(getattr(config, "hit_boost_weight", 0.0) or 0.0)
+        cap = float(getattr(config, "hit_boost_max", 1.25) or 1.25)
+        return weight, cap
+
+    def _hit_boost_enabled(self) -> bool:
+        """Opt-in: a retrieval hit is not proof of usefulness, so by default
+        both the re-ranking and the per-search hit write-back stay off."""
+        weight, cap = self._hit_boost_params()
         return weight > 0 and cap > 1.0
 
     def _apply_hit_boost(
@@ -876,9 +880,7 @@ class MemoryManager:
         if not self._hit_boost_enabled():
             return results
 
-        config = getattr(self, "config", None)
-        weight = float(getattr(config, "hit_boost_weight", 0.0)) if config else 0.0
-        cap = float(getattr(config, "hit_boost_max", 1.25)) if config else 1.25
+        weight, cap = self._hit_boost_params()
 
         import math
         import time

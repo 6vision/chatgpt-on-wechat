@@ -836,19 +836,23 @@ class AgentInitializer:
             from agent.tools import MemorySearchTool, MemoryGetTool
             from config import conf
 
-            # Hit-popularity feedback is opt-in: the settings console toggles
-            # memory.hit_boost, and fine-tuning knobs (hit_boost_weight,
-            # hit_boost_max) live beside it for deployments that want them.
-            # Defaults keep ranking untouched: weight 0 skips both the
-            # re-ranking and the per-search hit write-back.
-            memory_settings = conf().get("memory") or {}
-            hit_boost_enabled = bool(memory_settings.get("hit_boost"))
+            # Opt-in via config.json: memory.hit_boost turns the retrieval-hit
+            # boost on, hit_boost_weight / hit_boost_max tune it. Off, ranking
+            # is unchanged and searches write nothing.
+            memory_settings = conf().get("memory")
+            if not isinstance(memory_settings, dict):
+                memory_settings = {}
+            enabled = bool(memory_settings.get("hit_boost"))
+            try:
+                weight = float(memory_settings.get("hit_boost_weight", 0.05 if enabled else 0.0))
+                cap = float(memory_settings.get("hit_boost_max", 1.25))
+            except (TypeError, ValueError):
+                logger.warning("[AgentInitializer] Invalid memory.hit_boost_* values, boost disabled")
+                weight, cap = 0.0, 1.25
             memory_config = MemoryConfig(
                 workspace_root=workspace_root,
-                hit_boost_weight=float(memory_settings.get(
-                    "hit_boost_weight", 0.05 if hit_boost_enabled else 0.0
-                )),
-                hit_boost_max=float(memory_settings.get("hit_boost_max", 1.25)),
+                hit_boost_weight=weight,
+                hit_boost_max=cap,
             )
             # Publish per workspace, not process-wide: this runs once per Agent,
             # and a single global slot would leave the last one to initialize
