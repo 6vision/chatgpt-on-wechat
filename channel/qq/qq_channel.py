@@ -917,9 +917,7 @@ class QQChannel(ChatChannel):
 
     def _upload_rich_media_chunked(self, file_path: str, file_type: int, msg: QQMessage,
                                    event_type: str, file_name: str = "") -> str:
-        """Upload a local file via QQ's four-step chunked upload and return
-        file_info. This is the only path that survives the gateway's ~5MB
-        request-body cap, so it backs every large local-file upload."""
+        """Upload a local file via QQ's four-step chunked upload and return file_info."""
         upload_base = self._resolve_upload_base(msg, event_type)
         if not upload_base:
             logger.warning(f"[QQ] Chunked upload not supported for event_type: {event_type}")
@@ -960,31 +958,24 @@ class QQChannel(ChatChannel):
             return ""
 
         upload_id = prepared.get("upload_id", "")
-        # Keep only dict entries: a malformed part would break the sort key and
-        # escape as an AttributeError out of this method, past every guard here.
         parts = [p for p in (prepared.get("parts") or []) if isinstance(p, dict)]
         if not upload_id or not parts:
-            # Log only the response's keys: ``prepared`` may carry presigned
-            # URLs, which are signed credentials and must not reach the log.
+            # Only the keys: presigned URLs are credentials and stay out of the log.
             keys = sorted(prepared.keys()) if isinstance(prepared, dict) else type(prepared).__name__
             logger.error(f"[QQ] upload_prepare returned no upload_id/parts (keys={keys})")
             return ""
 
-        # Apply parts in index order: the file is read sequentially, so a
-        # mis-ordered response would otherwise hand each part the wrong bytes.
+        # The file is read sequentially, so parts must be applied in index order.
         parts = sorted(parts, key=lambda p: p.get("index", 0))
         logger.info(f"[QQ] Chunked upload prepared: upload_id={upload_id}, "
                     f"parts={len(parts)}, block_size={prepared.get('block_size', '')}, "
                     f"size={file_size} bytes, file_type={file_type}")
 
-        # 2 & 3. PUT each part to its presigned URL, then confirm with
-        # upload_part_finish. The presigned URL carries its own signature, so no
-        # Authorization header goes on the PUT.
+        # 2 & 3. PUT each part to its presigned URL (no auth header: the URL is
+        # signed), then confirm it with upload_part_finish.
         try:
             with open(file_path, "rb") as f:
-                # Count parts by loop position, not by ``index``: QQ returns a
-                # 1-based index in practice while the docs say 0-based, so
-                # ``index + 1`` produced nonsense progress like "part 5/4".
+                # Progress counts by position: QQ's index is 1-based in practice.
                 for seq, part in enumerate(parts, start=1):
                     index = part.get("index", 0)
                     block_size = int(part.get("block_size") or prepared.get("block_size") or 0)
@@ -1000,8 +991,6 @@ class QQChannel(ChatChannel):
                                 part["presigned_url"], data=chunk,
                                 timeout=QQ_UPLOAD_PART_TIMEOUT,
                             )
-                            # Accept any 2xx: a success misread as failure would
-                            # make us re-PUT a part QQ already stored.
                             if 200 <= put.status_code < 300:
                                 ok = True
                                 break
@@ -1034,8 +1023,7 @@ class QQChannel(ChatChannel):
             logger.error(f"[QQ] Failed while uploading parts: {e}")
             return ""
 
-        # 4. Merge: hand upload_id to the files endpoint to obtain file_info.
-        # file_name is mandatory on the chunked/merge path.
+        # 4. Merge into file_info; file_name is mandatory here.
         try:
             resp = requests.post(
                 f"{upload_base}/files",
@@ -1085,12 +1073,7 @@ class QQChannel(ChatChannel):
 
     def _upload_local_file(self, file_path: str, file_type: int, msg: QQMessage,
                            event_type: str, file_name: str = "") -> str:
-        """Upload a local file, choosing the transport by size.
-
-        Small files use the single-request base64 path (fastest); anything past
-        the gateway's 5MB body cap goes through chunked upload. The per-type
-        soft/hard size policy is applied by QQ itself (see the note near
-        QQ_BINARY_UPLOAD_LIMIT), so the file_type is passed through untouched."""
+        """Upload a local file: base64 up to the gateway cap, chunked beyond it."""
         try:
             size = os.path.getsize(file_path)
         except OSError as e:

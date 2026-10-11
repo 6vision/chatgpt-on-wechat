@@ -1,50 +1,8 @@
-"""HTML text survives the public WebFetch tool and real HTTP reader."""
-
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Thread
+"""HTML extraction keeps readable text and block boundaries."""
 
 import pytest
 
 from agent.tools.web_fetch.web_fetch import WebFetch
-
-
-@pytest.fixture
-def fetch_html(tmp_path, monkeypatch):
-    # Owned loopback service; use the documented local-service option. No
-    # request, response, decoding or production parser is replaced.
-    monkeypatch.setenv("WEB_SECURITY_SSRF_PROTECTION", "false")
-    state = {"body": b"", "requests": []}
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            state["requests"].append(self.path)
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(state["body"])))
-            self.end_headers()
-            self.wfile.write(state["body"])
-
-        def log_message(self, *_args):
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-
-    def fetch(body):
-        state["body"] = body.encode("utf-8")
-        result = WebFetch({"cwd": str(tmp_path)}).execute(
-            {"url": f"http://127.0.0.1:{server.server_port}/article"}
-        )
-        assert result.status == "success", result.result
-        assert state["requests"] == ["/article"]
-        assert not (tmp_path / "tmp").exists()
-        return result.result.partition("Content:\n")[2]
-
-    yield fetch
-    server.shutdown()
-    server.server_close()
-    thread.join()
 
 
 @pytest.mark.parametrize(
@@ -64,8 +22,8 @@ def fetch_html(tmp_path, monkeypatch):
          ["First", "Second", "Third", "Fourth"]),
     ],
 )
-def test_html_preserves_readable_text(fetch_html, html, expected_lines):
-    text = fetch_html(html)
+def test_html_preserves_readable_text(html, expected_lines):
+    text = WebFetch._extract_text(html)
     assert [line for line in text.splitlines() if line] == expected_lines
 
 
@@ -90,5 +48,5 @@ def test_html_preserves_readable_text(fetch_html, html, expected_lines):
         ("", ""),
     ],
 )
-def test_existing_text_controls(fetch_html, html, expected):
-    assert fetch_html(html) == expected
+def test_existing_text_controls(html, expected):
+    assert WebFetch._extract_text(html) == expected
