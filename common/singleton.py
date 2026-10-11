@@ -1,9 +1,15 @@
+import threading
+
+
 def singleton(cls):
     instances = {}
+    initialization_lock = threading.Lock()
 
     def get_instance(*args, **kwargs):
         if cls not in instances:
-            instances[cls] = cls(*args, **kwargs)
+            with initialization_lock:
+                if cls not in instances:
+                    instances[cls] = cls(*args, **kwargs)
         return instances[cls]
 
     # Expose the undecorated class so callers that legitimately need more than
