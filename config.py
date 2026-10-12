@@ -578,6 +578,10 @@ def load_config():
         # skip comment fields starting with an underscore
         if name.startswith("_"):
             continue
+        # A blank value is a placeholder (docker-compose lists every key as
+        # ''), not a request to wipe what the user saved in config.json.
+        if value == "":
+            continue
         if name in available_setting:
             logger.info("[INIT] override config by environ args: {}={}".format(
                 name, drag_sensitive({name: value})[name]))
@@ -696,7 +700,7 @@ def load_config():
     }
     injected = 0
     for conf_key, env_key in _CONFIG_TO_ENV.items():
-        if env_key not in os.environ:
+        if not os.environ.get(env_key):
             val = config.get(conf_key, "")
             if val:
                 os.environ[env_key] = str(val)

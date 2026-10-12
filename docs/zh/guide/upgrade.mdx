@@ -76,55 +76,16 @@ nohup python3 app.py & tail -f nohup.out
 
 ## Docker 升级
 
-<Tip>
-  升级前先备份 `config.json`。
-</Tip>
-
-在包含 `docker-compose.yml` 的目录中执行下面每一步。Compose 从该目录挂载 `./cow-data`。在 `pull` 和 `up -d` 之前先把文件拷出来。重建后的容器拿不回这些文件。`docker cp` 对已停止的容器同样有效，所以在旧容器还在时拷贝。拷贝完成前不要执行 `docker compose down` 或 `docker rm`。已经设置 `COW_DATA_DIR` 时跳过拷贝：此时 `/app/config.json` 是镜像模板（`docker/Dockerfile.latest` 执行了 `cp config-template.json config.json`），拷贝会覆盖 `./cow-data/config.json`。没有 `COW_DATA_DIR` 时，保存的配置是可写层上的 `/app/config.json`，微信登录是 `/home/agent/.weixin_cow_credentials.json`。
-
-### 1. 拷出文件
-
-容器名不是 `chatgpt-on-wechat` 就换成你的名字。容器已经不在，文件也就没了。下面的命令如果打印出带路径的 `COW_DATA_DIR=`，跳过拷贝。空值不会有输出。没有输出时才拷贝。从未登录微信就删掉最后一行。
-
-```bash
-sudo docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' chatgpt-on-wechat | grep -E '^COW_DATA_DIR=.+'
-```
-
-```bash
-mkdir -p ./cow-data
-sudo docker cp chatgpt-on-wechat:/app/config.json ./cow-data/config.json
-sudo docker cp chatgpt-on-wechat:/home/agent/.weixin_cow_credentials.json ./cow-data/weixin_credentials.json
-```
-
-### 2. 在 `up -d` 之前加入 `COW_DATA_DIR` 和 `./cow-data` 数据卷
-
-把下面两项加进 compose 文件，或 NAS 的数据卷和环境变量设置。`docker compose pull` 不会修改已经保存的 compose 文件。每次启动时，compose 里已设置的环境变量会覆盖从 `config.json` 读入的同名配置。`CHANNEL_TYPE: 'web, weixin'` 以及 `DEEPSEEK_API_KEY: ''` 这种空字符串会替换文件中的值。要保留已保存的设置，就删掉或改掉这些变量。
-
-```yaml
-    environment:
-      COW_DATA_DIR: '/home/agent/.cow'
-    volumes:
-      - ./cow:/home/agent/cow
-      - ./cow-data:/home/agent/.cow
-```
-
-### 3. 拉取镜像，把文件交给 `agent`，再启动
-
-`sudo docker cp` 会保留模式 `0600`，并把属主设为 root。`docker/entrypoint.sh` 只 `chown` 挂载目录，然后以 `agent` 运行，因此读不了这个微信文件。`docker/Dockerfile.latest` 用 `useradd -r` 创建 `agent`，没有固定 uid。先读出 uid 和 gid，把两个数字填进 `UID:GID`，没拷贝的路径删掉。镜像名不同就换掉。先 `chown`，再执行 `up -d`。
+在 `docker-compose.yml` 所在目录下执行：
 
 ```bash
 sudo docker compose pull
-sudo docker run --rm --entrypoint id zhayujie/chatgpt-on-wechat -u agent
-sudo docker run --rm --entrypoint id zhayujie/chatgpt-on-wechat -g agent
-```
-
-```bash
-sudo chown UID:GID ./cow-data/config.json ./cow-data/weixin_credentials.json
-```
-
-```bash
 sudo docker compose up -d
 ```
+
+<Tip>
+  升级前建议备份 `config.json` 配置文件。配置和渠道登录信息保存在挂载的 `./cow-data` 目录，工作空间保存在 `./cow` 目录，重建容器不会丢失。`docker-compose.yml` 中填写了值的环境变量会在每次启动时覆盖控制台里的同名配置。
+</Tip>
 
 ## 客户端升级
 

@@ -49,55 +49,16 @@ nohup python3 app.py & tail -f nohup.out
 
 ## Docker アップグレード
 
-<Tip>
-  アップグレード前に `config.json` のバックアップを取ってください。
-</Tip>
-
-`docker-compose.yml` があるディレクトリで、以下の各手順を実行します。Compose はこのディレクトリから `./cow-data` をマウントします。`pull` と `up -d` の前にファイルをコピーします。作り直したコンテナからは取り出せません。`docker cp` は停止したコンテナでも動くので、古いコンテナが残っているあいだにコピーします。コピーが終わるまで `docker compose down` と `docker rm` は実行しないでください。`COW_DATA_DIR` が設定済みのときはコピーしません。そのときの `/app/config.json` はイメージのテンプレート（`docker/Dockerfile.latest` が `cp config-template.json config.json` を実行しています）で、`./cow-data/config.json` を上書きします。`COW_DATA_DIR` がない場合、保存された設定は書き込み可能レイヤーの `/app/config.json`、WeChat ログインは `/home/agent/.weixin_cow_credentials.json` です。
-
-### 1. ファイルをコピーする
-
-コンテナ名が `chatgpt-on-wechat` でなければ置き換えてください。コンテナが既になければ、ファイルもありません。次のコマンドがパス付きの `COW_DATA_DIR=` を表示したら、コピーは飛ばします。空の値は何も表示しません。何も表示しなかったときだけコピーします。WeChat に一度もログインしていなければ、最後の行は消します。
-
-```bash
-sudo docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' chatgpt-on-wechat | grep -E '^COW_DATA_DIR=.+'
-```
-
-```bash
-mkdir -p ./cow-data
-sudo docker cp chatgpt-on-wechat:/app/config.json ./cow-data/config.json
-sudo docker cp chatgpt-on-wechat:/home/agent/.weixin_cow_credentials.json ./cow-data/weixin_credentials.json
-```
-
-### 2. `up -d` の前に `COW_DATA_DIR` と `./cow-data` ボリュームを足す
-
-次の 2 つを compose ファイル、または NAS のボリュームと環境変数の設定に追加します。`docker compose pull` は保存済みの compose ファイルを変更しません。起動のたびに、compose で設定された環境変数は `config.json` から読み込んだ同名の設定を上書きします。`CHANNEL_TYPE: 'web, weixin'` と、`DEEPSEEK_API_KEY: ''` のような空の文字列は、ファイルの値を置き換えます。保存した設定を残すには、これらの変数を削除するか編集します。
-
-```yaml
-    environment:
-      COW_DATA_DIR: '/home/agent/.cow'
-    volumes:
-      - ./cow:/home/agent/cow
-      - ./cow-data:/home/agent/.cow
-```
-
-### 3. イメージを pull し、`agent` に chown してから起動する
-
-`sudo docker cp` はモード `0600` を保ち、所有者を root にします。`docker/entrypoint.sh` はマウント先ディレクトリだけを `chown` し、その後 `agent` で動くため、この WeChat ファイルを読めません。`docker/Dockerfile.latest` は `useradd -r` で `agent` を作り、uid を固定しません。uid と gid を読み、表示された 2 つの数字を `UID:GID` に入れ、コピーしていないパスは消します。イメージ名が違えば置き換えてください。`chown` のあとで `up -d` を実行します。
+`docker-compose.yml` があるディレクトリで以下を実行します：
 
 ```bash
 sudo docker compose pull
-sudo docker run --rm --entrypoint id zhayujie/chatgpt-on-wechat -u agent
-sudo docker run --rm --entrypoint id zhayujie/chatgpt-on-wechat -g agent
-```
-
-```bash
-sudo chown UID:GID ./cow-data/config.json ./cow-data/weixin_credentials.json
-```
-
-```bash
 sudo docker compose up -d
 ```
+
+<Tip>
+  アップグレード前に `config.json` 設定ファイルのバックアップを推奨します。設定とチャネルのログイン情報はマウントされた `./cow-data` ディレクトリに、ワークスペースは `./cow` に保存されるため、コンテナを再作成しても失われません。`docker-compose.yml` で値を設定した環境変数は、起動のたびにコンソールの同名設定を上書きします。
+</Tip>
 
 ## デスクトップクライアントのアップグレード
 
