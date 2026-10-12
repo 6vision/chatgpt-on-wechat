@@ -27,7 +27,7 @@ CowAgent は軽量でデプロイしやすく、拡張性に優れています�
   <a href="https://docs.cowagent.ai/ja/guide/quick-start">🚀 クイックスタート</a> &nbsp;·&nbsp;
   <a href="https://skills.cowagent.ai/">🧩 Skill Hub</a> &nbsp;·&nbsp;
   <a href="https://cowagent.ai/download/">💻 ダウンロード</a> &nbsp;·&nbsp;
-  <a href="https://link-ai.tech/cowagent/create">☁️ オンラインで試す</a>
+  <a href="https://link-ai.tech/cowagent/create?utm_source=cowagent&utm_medium=readme&utm_campaign=nav">☁️ オンラインで試す</a>
 </p>
 
 <br/>
@@ -260,7 +260,7 @@ CowAgent は主要な LLM プロバイダーすべてに対応しています。
 
 GitHub で [Issue を報告](https://github.com/zhayujie/CowAgent/issues) したり、下記 QR コードをスキャンして WeChat コミュニティに参加することもできます：
 
-<img width="130" src="https://img-1317903499.cos.ap-guangzhou.myqcloud.com/docs/open-community.png" />
+<img width="130" src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/community/open-community.png" />
 
 <br/>
 
@@ -274,9 +274,9 @@ GitHub で [Issue を報告](https://github.com/zhayujie/CowAgent/issues) した
 
 ## 🏢 エンタープライズサービス
 
-[**LinkAI**](https://link-ai.tech/) は企業や開発者向けのワンストップ AI Agent プラットフォームで、CowAgent にマネージドホスティングとエンタープライズグレードのサポートを提供します：
+[**LinkAI**](https://link-ai.tech/?utm_source=cowagent&utm_medium=readme&utm_campaign=enterprise) は企業や開発者向けのワンストップ AI Agent プラットフォームで、CowAgent にマネージドホスティングとエンタープライズグレードのサポートを提供します：
 
-- **🚀 デプロイ不要のホスト型ランタイム** — [CowAgent オンラインアシスタント](https://link-ai.tech/cowagent/create) を 1 分以内に起動、サーバー不要
+- **🚀 デプロイ不要のホスト型ランタイム** — [CowAgent オンラインアシスタント](https://link-ai.tech/cowagent/create?utm_source=cowagent&utm_medium=readme&utm_campaign=enterprise) を 1 分以内に起動、サーバー不要
 - **🧠 Agent インフラ** — 主要 LLM・ナレッジベース・データベース・Skill・ワークフローへの統一アクセス。CowAgent の機能を拡張する、すぐに使えるビルディングブロック
 - **🏢 チーム & エンタープライズ機能** — ワークスペース、ロールベースのアクセス制御、監査ログ、本番運用向けプライベートデプロイ
 

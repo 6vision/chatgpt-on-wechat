@@ -5,7 +5,7 @@ import time
 from typing import Optional
 
 import requests
-from models.bot import Bot
+from models.bot import Bot, read_error_body
 from models.session_manager import SessionManager
 from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
@@ -100,7 +100,8 @@ class DoubaoBot(Bot):
                 "Content-Type": "application/json",
                 "Authorization": "Bearer " + self.api_key
             }
-            body = args.copy()
+            # Session titles and prompt optimisation call reply_text without args.
+            body = dict(args) if args else dict(self.args)
             body["messages"] = session.messages
             # Disable thinking by default for better efficiency
             body["thinking"] = {"type": "disabled"}
@@ -118,8 +119,7 @@ class DoubaoBot(Bot):
                     "content": response["choices"][0]["message"]["content"]
                 }
             else:
-                response = res.json()
-                error = response.get("error", {})
+                error = read_error_body(res)
                 logger.error(f"[DOUBAO] chat failed, status_code={res.status_code}, "
                              f"msg={error.get('message')}, type={error.get('type')}")
 

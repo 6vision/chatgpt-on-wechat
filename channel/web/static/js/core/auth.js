@@ -144,6 +144,7 @@ window.fetch = function(...args) {
 
 function initApp() {
     applyI18n();
+    menuLoad();
     _applyInputTooltips();
     _restoreSessionPanel();
     refreshWorkspaceSelector();
@@ -164,9 +165,9 @@ function initApp() {
             update_supported: !!data.update_supported,
             unsupported_reason: data.unsupported_reason || ''
         };
-        _setSidebarVersionLabel(`CowAgent ${APP_VERSION}`);
+        _setSidebarVersionLabel(APP_VERSION);
     }).catch(() => {
-        _setSidebarVersionLabel('CowAgent');
+        _setSidebarVersionLabel('');
     });
     chatInput.focus();
     // Last, and only from here: initApp() runs once auth has settled, on all

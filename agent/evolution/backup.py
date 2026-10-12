@@ -8,6 +8,8 @@ can restore it. File-level restore only — simple and reliable.
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
 import time
 from datetime import datetime
@@ -18,12 +20,31 @@ from common.log import logger
 
 _BACKUP_DIRNAME = ".evolution_backups"
 _MANIFEST_NAME = "manifest.json"
+_BACKUP_ID_RE = re.compile(r"^\d{8}-\d{6}-\d+$")
 # Keep only the most recent N backups to bound disk usage.
 _MAX_BACKUPS = 10
 
 
 def _backups_root(workspace_dir: Path) -> Path:
     return Path(workspace_dir) / "memory" / _BACKUP_DIRNAME
+
+
+def _is_within_workspace(workspace: Path, candidate: Path) -> bool:
+    """Whether ``candidate`` really lands inside ``workspace``."""
+    root = os.path.realpath(workspace)
+    try:
+        return os.path.commonpath([root, os.path.realpath(candidate)]) == root
+    except ValueError:
+        return False
+
+
+def _discard_incomplete(target: Path) -> None:
+    """Drop a snapshot directory that never got a usable manifest. Never raises."""
+    try:
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+    except OSError as e:  # pragma: no cover - rmtree already swallows most
+        logger.debug(f"[Evolution] Could not remove incomplete backup: {e}")
 
 
 def create_backup(workspace_dir: Path, files: List[Path]) -> Optional[str]:
@@ -35,11 +56,23 @@ def create_backup(workspace_dir: Path, files: List[Path]) -> Optional[str]:
     if not existing:
         return None
 
-    backup_id = datetime.now().strftime("%Y%m%d-%H%M%S-") + str(int(time.time() * 1000) % 1000)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-") + f"{int(time.time() * 1000) % 1000:03d}"
     root = _backups_root(workspace_dir)
-    target = root / backup_id
+    target = None
     try:
-        target.mkdir(parents=True, exist_ok=True)
+        root.mkdir(parents=True, exist_ok=True)
+        # Snapshots taken in the same millisecond must not share a directory,
+        # or undoing one would restore the other's files.
+        for attempt in range(100):
+            backup_id = stamp + (f"{attempt:02d}" if attempt else "")
+            try:
+                (root / backup_id).mkdir()
+            except FileExistsError:
+                continue
+            target = root / backup_id
+            break
+        else:
+            raise FileExistsError(f"no free backup id for {stamp}")
         ws = Path(workspace_dir)
         manifest = []
         for idx, src in enumerate(existing):
@@ -61,12 +94,15 @@ def create_backup(workspace_dir: Path, files: List[Path]) -> Optional[str]:
         return backup_id
     except Exception as e:
         logger.warning(f"[Evolution] Failed to create backup: {e}")
+        # A half-written snapshot must not take one of the _MAX_BACKUPS slots.
+        if target is not None:
+            _discard_incomplete(target)
         return None
 
 
 def restore_backup(workspace_dir: Path, backup_id: str) -> bool:
     """Restore all files captured under ``backup_id``. Returns success."""
-    if not backup_id:
+    if not backup_id or not _BACKUP_ID_RE.match(backup_id):
         return False
     target = _backups_root(workspace_dir) / backup_id
     manifest_path = target / _MANIFEST_NAME
@@ -90,6 +126,9 @@ def restore_backup(workspace_dir: Path, backup_id: str) -> bool:
                 raise ValueError("invalid backup manifest entry")
             bak = target / entry["bak"]
             dst = ws / entry["rel"]
+            # The manifest is a workspace file, so its paths are untrusted.
+            if not _is_within_workspace(target, bak) or not _is_within_workspace(ws, dst):
+                raise ValueError(f"backup entry escapes its directory: {entry}")
             if not bak.is_file():
                 raise FileNotFoundError(f"missing backup payload: {entry['bak']}")
             restores.append((bak, dst))
@@ -104,13 +143,22 @@ def restore_backup(workspace_dir: Path, backup_id: str) -> bool:
 
 
 def _prune_old_backups(root: Path) -> None:
-    """Drop the oldest backups beyond _MAX_BACKUPS (sorted by name = chronological)."""
+    """Drop the oldest backups beyond _MAX_BACKUPS (sorted by name = chronological).
+
+    Only restorable snapshots consume a slot. A directory without a manifest
+    cannot be restored, so keeping it would evict a snapshot the user can still
+    undo -- either crash debris or a failure from an older create_backup that
+    predates _discard_incomplete.
+    """
     try:
         dirs = sorted(
             [d for d in root.iterdir() if d.is_dir()],
             key=lambda p: p.name,
         )
-        for old in dirs[:-_MAX_BACKUPS]:
+        complete = [d for d in dirs if (d / _MANIFEST_NAME).is_file()]
+        for debris in [d for d in dirs if d not in complete]:
+            shutil.rmtree(debris, ignore_errors=True)
+        for old in complete[:-_MAX_BACKUPS]:
             shutil.rmtree(old, ignore_errors=True)
     except Exception as e:
         logger.debug(f"[Evolution] Backup prune skipped: {e}")

@@ -51,7 +51,7 @@ def _stats() -> str:
         rel_root = os.path.relpath(root, knowledge_dir)
         category = rel_root.split(os.sep)[0] if rel_root != "." else "root"
         for f in files:
-            if f.endswith(".md") and f not in ("index.md", "log.md"):
+            if f.lower().endswith(".md") and f not in ("index.md", "log.md"):
                 total_files += 1
                 total_bytes += os.path.getsize(os.path.join(root, f))
                 cat_count[category] = cat_count.get(category, 0) + 1
@@ -82,32 +82,46 @@ def _tree() -> str:
 
     tree_lines = ["  knowledge/"]
 
-    subdirs = sorted([
-        d for d in os.listdir(knowledge_dir)
-        if os.path.isdir(os.path.join(knowledge_dir, d)) and not d.startswith(".")
-    ])
+    def scan(directory, is_root=False, ancestors=()):
+        names = sorted(os.listdir(directory))
+        # Keep directory links bounded to their existing shallow display:
+        # recursively following them can revisit a parent indefinitely.
+        children = []
+        canonical = os.path.normcase(os.path.realpath(directory))
+        if (is_root or not os.path.islink(directory)) and canonical not in ancestors:
+            for name in names:
+                path = os.path.join(directory, name)
+                if not name.startswith(".") and os.path.isdir(path):
+                    child = scan(path, ancestors=(*ancestors, canonical))
+                    children.append((name, child))
+        files = [
+            name for name in names
+            if name.lower().endswith(".md") and not name.startswith(".")
+            and os.path.isfile(os.path.join(directory, name))
+            and not (is_root and name in ("index.md", "log.md"))
+        ]
+        count = len(files) + sum(child[2] for _, child in children)
+        return children, files, count
 
-    for i, subdir in enumerate(subdirs):
-        is_last_dir = (i == len(subdirs) - 1)
-        branch = "└── " if is_last_dir else "├── "
-        subdir_path = os.path.join(knowledge_dir, subdir)
-        md_files = sorted([
-            f for f in os.listdir(subdir_path)
-            if f.endswith(".md") and not f.startswith(".")
-        ])
-        tree_lines.append(f"  {branch}{subdir}/ ({len(md_files)})")
-
-        child_prefix = "      " if is_last_dir else "  │   "
+    def render(tree, prefix):
+        children, files, _ = tree
         max_show = 15
-        for j, fname in enumerate(md_files[:max_show]):
-            is_last_file = (j == len(md_files[:max_show]) - 1) and len(md_files) <= max_show
-            fb = "└── " if is_last_file else "├── "
-            name = fname.replace(".md", "")
-            tree_lines.append(f"{child_prefix}{fb}{name}")
-        if len(md_files) > max_show:
-            tree_lines.append(f"{child_prefix}└── ... +{len(md_files) - max_show} more")
+        items = [(name, child) for name, child in children]
+        items.extend((name[:-3], None) for name in files[:max_show])
+        if len(files) > max_show:
+            items.append((f"... +{len(files) - max_show} more", None))
+        for index, (name, child) in enumerate(items):
+            is_last = index == len(items) - 1
+            branch = "└── " if is_last else "├── "
+            suffix = f"/ ({child[2]})" if child is not None else ""
+            tree_lines.append(f"{prefix}{branch}{name}{suffix}")
+            if child is not None:
+                render(child, prefix + ("    " if is_last else "│   "))
 
-    if not subdirs:
+    tree = scan(knowledge_dir, is_root=True)
+    if tree[0] or tree[1]:
+        render(tree, "  ")
+    else:
         tree_lines.append("  (empty)")
 
     return "\n" + "\n".join(tree_lines) + "\n"

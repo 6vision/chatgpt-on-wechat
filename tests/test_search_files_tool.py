@@ -691,3 +691,20 @@ def test_invalid_target_is_rejected(tmp_path):
     result = _make_tool(tmp_path).execute({"pattern": "x", "target": "nope"})
     assert result.status == "error"
     assert "target must be" in str(result.result)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX filenames containing colons and newlines")
+@pytest.mark.parametrize("filename", ["release:notes.md", "release\nnotes.md", " release notes.md "])
+@pytest.mark.parametrize("mode", ["content", "files", "count"])
+def test_external_search_preserves_filename_boundaries(backend_tool, tmp_path, filename, mode):
+    path = tmp_path / filename
+    path.write_text("needle\n", encoding="utf-8")
+    result = backend_tool.execute({"pattern": "needle", "output_mode": mode})
+    assert result.status == "success", result.result
+    assert result.result["match_count"] == 1, result.result
+    if mode == "content":
+        assert result.result["matches"] == [{"file": filename, "line": 1, "match": "needle"}]
+    elif mode == "files":
+        assert result.result["files"] == [filename]
+    else:
+        assert result.result["counts"] == [{"file": filename, "count": 1}]

@@ -145,3 +145,9 @@ def test_interrupted_image_stream_is_not_uploaded(monkeypatch):
     assert result is None
     assert post.calls == []
     assert response.closed
+
+
+def test_image_url_download_is_guarded():
+    with patch("channel.feishu.feishu_channel.download_bytes", side_effect=ValueError("blocked")) as dl:
+        assert _channel()._upload_image_url(IMG_URL, "token") is None
+    assert dl.call_args.kwargs["guarded"] is True

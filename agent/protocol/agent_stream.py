@@ -8,7 +8,7 @@ import copy
 import json
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from typing import List, Dict, Any, Optional, Callable, Tuple
 
 from agent.protocol.cancel import AgentCancelledError
@@ -43,6 +43,18 @@ MAX_STORED_REASONING_CHARS = 4 * 1024  # 4 KB
 
 # Marker inserted between head and tail when reasoning is truncated.
 _REASONING_TRUNCATE_MARKER = "\n\n... [reasoning truncated, {omitted} chars omitted] ...\n\n"
+
+# How often the parallel-tool prefetch wakes up to notice a cancel.
+PARALLEL_POLL_SECONDS = 0.5
+
+# ids of the model objects driving a run_stream that is still in progress in
+# this context. A sub agent shares its parent's model object and inherits this
+# through copy_context, which is how it knows the fallback it sees belongs to a
+# live outer run. An ambient run id cannot tell the two apart: the bridge opens
+# a run (and sets its id) before every top-level turn as well.
+_ACTIVE_RUN_MODELS: contextvars.ContextVar = contextvars.ContextVar(
+    "agent_active_run_models", default=frozenset()
+)
 
 # --------------------------------------------------------------------------
 # Fatal-error classification.
@@ -131,10 +143,25 @@ def _cache_hit_tokens(usage: Dict[str, Any]) -> int:
         return 0
 
 
+def _nonnegative_int(value: Any) -> int:
+    """Coerce a provider-supplied count to a non-negative integer."""
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 # Cap for the 429 incremental backoff. The base curve is 30 + retry_count*15,
 # which without a cap crosses the web channel's 600s SSE idle timeout by the
 # 8th retry; capping each wait at 60s keeps the cumulative sleep in bounds.
 RATE_LIMIT_MAX_WAIT = 60  # seconds
+
+
+# Once a trim is due, history is cut to this share of the token budget and of
+# the turn cap. Trimming to the exact limit would drop the oldest turn on every
+# new message, changing the start of the history each request so the
+# provider's prefix cache never hits for a long session.
+TRIM_TARGET_RATIO = 0.8
 
 
 # Appended only for the file-writing tools, where "send less" needs to say how.
@@ -287,6 +314,57 @@ class AgentStreamExecutor:
         # Absolute paths already reported as artifacts, so a write-then-edit
         # sequence on the same file only surfaces one card in the UI.
         self._emitted_artifacts = set()
+
+        # Provider usage summed over every model call of this run; StepWriter
+        # stamps it on the stored answer.
+        self.run_usage: Optional[Dict[str, int]] = None
+
+    @staticmethod
+    def _normalize_stream_usage(stream_usage: Dict[str, Any]) -> Dict[str, int]:
+        """Normalize one provider usage payload to the console's field names."""
+        if not isinstance(stream_usage, dict):
+            return {}
+        prompt = _nonnegative_int(stream_usage.get("prompt_tokens"))
+        completion = _nonnegative_int(stream_usage.get("completion_tokens"))
+        total = _nonnegative_int(stream_usage.get("total_tokens")) or prompt + completion
+        cache_hit = min(prompt, max(0, _cache_hit_tokens(stream_usage)))
+        if not any((prompt, completion, total, cache_hit)):
+            return {}
+        return {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": total,
+            "prompt_cache_hit_tokens": cache_hit,
+            "prompt_cache_miss_tokens": max(0, prompt - cache_hit),
+            "calls": 1,
+        }
+
+    @staticmethod
+    def _merge_usage(
+        first: Optional[Dict[str, Any]],
+        second: Optional[Dict[str, Any]],
+    ) -> Dict[str, int]:
+        """Add two normalized usage snapshots field by field."""
+        if not first:
+            return dict(second or {})
+        if not second:
+            return dict(first)
+        keys = (
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "prompt_cache_hit_tokens",
+            "prompt_cache_miss_tokens",
+            "calls",
+        )
+        return {
+            key: _nonnegative_int(first.get(key)) + _nonnegative_int(second.get(key))
+            for key in keys
+        }
+
+    def _record_stream_usage(self, snapshot: Optional[Dict[str, Any]]) -> None:
+        if snapshot:
+            self.run_usage = self._merge_usage(self.run_usage, snapshot)
 
     def _check_cancelled(self) -> None:
         """Raise AgentCancelledError if the user requested cancellation.
@@ -484,44 +562,64 @@ class AgentStreamExecutor:
                 logger.error(f"Event callback error: {e}")
 
     # Tools whose successful execution may have produced a user-facing file.
-    _ARTIFACT_TOOLS = ("write", "edit")
+    _ARTIFACT_TOOLS = ("write", "edit", "bash")
+
+    @staticmethod
+    def _artifact_paths(tool_call: dict, result: dict) -> list:
+        data = result.get("result")
+        if tool_call.get("name") == "bash":
+            files = data.get("files_written") if isinstance(data, dict) else None
+            return [p for p in files or [] if isinstance(p, str) and p]
+        path = data.get("path") if isinstance(data, dict) else None
+        if not path:
+            path = (tool_call.get("arguments") or {}).get("path")
+        return [path] if path else []
+
+    def _artifact_root(self):
+        """The session's working dir: the project dir in project mode, else
+        None so the default state_root applies."""
+        try:
+            eff = getattr(self.agent, "effective_cwd", None)
+            return eff() if callable(eff) else None
+        except Exception:
+            return None
+
+    def _sent_file_event(self, data: dict) -> dict:
+        """file_to_send event data, plus what clients need to show the file as
+        a card: its kind, size and path relative to the working dir."""
+        from agent.protocol.artifact import build_sent_artifact
+
+        try:
+            info = build_sent_artifact(str(data.get("path") or ""), self._artifact_root())
+        except Exception:
+            info = None
+        if not info:
+            return data
+        return dict(data, rel_path=info["rel_path"], kind=info["kind"],
+                    previewable=info["previewable"], size=info["size"])
 
     def _maybe_emit_artifact(self, tool_call: dict, result: dict) -> None:
-        """Report a file written by `write`/`edit` so clients can preview it."""
+        """Report files a tool wrote or changed so clients can preview them."""
         if not self.on_event:
             return
         if tool_call.get("name") not in self._ARTIFACT_TOOLS:
             return
         if result.get("status") != "success":
             return
-
-        data = result.get("result")
-        path = data.get("path") if isinstance(data, dict) else None
-        if not path:
-            path = (tool_call.get("arguments") or {}).get("path")
-        if not path:
+        paths = self._artifact_paths(tool_call, result)
+        if not paths:
             return
 
         from agent.protocol.artifact import safe_build_artifact
 
-        # Anchor artifact detection to the session's working dir. In project mode
-        # this is the project dir, so files written there surface as cards; the
-        # default state_root is used when no project is open.
-        art_root = None
-        try:
-            eff = getattr(self.agent, "effective_cwd", None)
-            if callable(eff):
-                art_root = eff()
-        except Exception:
-            art_root = None
-        artifact = safe_build_artifact(path, art_root)
-        if not artifact:
-            return
-        if artifact["path"] in self._emitted_artifacts:
-            return
-        self._emitted_artifacts.add(artifact["path"])
-        logger.info(f"🗂  Artifact: {artifact['rel_path']} ({artifact['kind']})")
-        self._emit_event("artifact", artifact)
+        art_root = self._artifact_root()
+        for path in paths:
+            artifact = safe_build_artifact(path, art_root)
+            if not artifact or artifact["path"] in self._emitted_artifacts:
+                continue
+            self._emitted_artifacts.add(artifact["path"])
+            logger.info(f"🗂  Artifact: {artifact['rel_path']} ({artifact['kind']})")
+            self._emit_event("artifact", artifact)
 
     def _is_thinking_enabled(self) -> bool:
         """Whether deep-thinking mode is on at the model layer.
@@ -566,8 +664,9 @@ class AgentStreamExecutor:
 
         - When inline thinking rendering is allowed (Web + thinking enabled):
           remove only the tags, keep the content inside.
-        - Otherwise (IM channels, or thinking disabled globally): remove both
-          the tags and the content entirely.
+        - Otherwise (IM channels, or thinking disabled globally): remove paired
+          blocks entirely. A tag without a partner is literal text, so it is kept
+          in full-width form (``＜think＞``) instead of swallowing the reply.
         """
         if not text:
             return text
@@ -577,9 +676,104 @@ class AgentStreamExecutor:
             text = re.sub(r'</think>', '', text)
         else:
             text = re.sub(r'<think>[\s\S]*?</think>', '', text)
-            # Also strip unclosed <think> tag at the end (streaming partial)
-            text = re.sub(r'<think>[\s\S]*$', '', text)
+            text = text.replace('</think>', '＜/think＞')
+            if '<think>' in text:
+                logger.warning("[Agent] unclosed literal <think> tag in final text; kept as full-width")
+                text = text.replace('<think>', '＜think＞')
         return text
+
+    # Streaming needs state: a per-delta regex leaks tags split across chunks,
+    # and channels that use the accumulated deltas as the final text (wecom_bot,
+    # terminal) never get a final-text pass to clean them up.
+    _THINK_OPEN = "<think>"
+    _THINK_CLOSE = "</think>"
+
+    @staticmethod
+    def _partial_tag_suffix_len(text: str, tag: str) -> int:
+        """Length of the suffix of ``text`` that is a proper prefix of ``tag``."""
+        for k in range(min(len(text), len(tag) - 1), 0, -1):
+            if text.endswith(tag[:k]):
+                return k
+        return 0
+
+    def _reset_think_stream(self) -> None:
+        """Reset before each LLM stream; one turn may run several."""
+        self._think_stream_state = "normal"
+        self._think_stream_tail = ""
+        self._think_buf = ""  # reasoning so far, handed back if never closed
+        # Inline mode keeps the reasoning text, so it never swallows a block.
+        self._think_inline = self._should_render_thinking_inline()
+
+    def _filter_think_stream(self, delta: str) -> str:
+        """Return the part of this delta that is safe to emit.
+
+        A trailing fragment that could start a tag (``<``, ``</th``...) is held
+        back until the next delta, so a split tag never reaches the user in half.
+        """
+        buf = getattr(self, "_think_stream_tail", "") + (delta or "")
+        state = getattr(self, "_think_stream_state", "normal")
+        swallow = not getattr(self, "_think_inline", False)
+        out = []
+        i, n = 0, len(buf)
+        while i < n:
+            if state == "in_think":
+                j = buf.find(self._THINK_CLOSE, i)
+                if j == -1:
+                    hold = self._partial_tag_suffix_len(buf[i:], self._THINK_CLOSE)
+                    seg_end = n - hold
+                    if seg_end > i:
+                        self._think_buf += buf[i:seg_end]
+                    self._think_stream_tail = buf[seg_end:]
+                    self._think_stream_state = "in_think"
+                    return "".join(out)
+                self._think_buf = ""
+                i = j + len(self._THINK_CLOSE)
+                state = "normal"
+                continue
+            j_open = buf.find(self._THINK_OPEN, i)
+            j_close = buf.find(self._THINK_CLOSE, i)
+            hits = [x for x in (j_open, j_close) if x != -1]
+            if not hits:
+                hold = max(
+                    self._partial_tag_suffix_len(buf[i:], self._THINK_OPEN),
+                    self._partial_tag_suffix_len(buf[i:], self._THINK_CLOSE),
+                )
+                seg_end = n - hold
+                if seg_end > i:
+                    out.append(buf[i:seg_end])
+                self._think_stream_tail = buf[seg_end:]
+                self._think_stream_state = "normal"
+                return "".join(out)
+            j = min(hits)
+            if j > i:
+                out.append(buf[i:j])
+            if j == j_open:
+                i = j + len(self._THINK_OPEN)
+                state = "in_think" if swallow else "normal"
+            else:
+                # An orphan closing tag is literal text, as in the final-text pass.
+                if swallow:
+                    out.append('＜/think＞')
+                i = j + len(self._THINK_CLOSE)
+        self._think_stream_tail = ""
+        self._think_stream_state = state
+        return "".join(out)
+
+    def _flush_think_stream(self) -> str:
+        """End of stream: emit whatever is still buffered.
+
+        A block still open here was never closed, so it was a literal tag and its
+        text is handed back rather than lost.
+        """
+        state = getattr(self, "_think_stream_state", "normal")
+        think_buf = getattr(self, "_think_buf", "")
+        tail = getattr(self, "_think_stream_tail", "")
+        self._reset_think_stream()
+        if state == "in_think":
+            return self._filter_think_tags(self._THINK_OPEN + think_buf + tail)
+        if not tail:
+            return ""
+        return self._filter_think_tags(tail)
 
     @staticmethod
     def _split_content_blocks(content) -> Tuple[str, str]:
@@ -703,25 +897,6 @@ class AgentStreamExecutor:
         Returns:
             Final response text
         """
-        # Log user message with model info. Truncate very long messages (e.g.
-        # injected transcripts / large prompts) so logs stay readable.
-        thinking_enabled = self._is_thinking_enabled()
-        thinking_label = " | 💭 thinking" if thinking_enabled else ""
-        # When deep thinking is on, also surface the resolved reasoning effort
-        # (per-model aware) so the operator can confirm the effective intensity.
-        effort_label = ""
-        if thinking_enabled:
-            try:
-                effort = self.model._normalized_reasoning_effort()
-                if effort:
-                    effort_label = f" | effort={effort}"
-            except Exception:
-                effort_label = ""
-        _log_msg = user_message if len(user_message) <= 500 else (
-            user_message[:500] + f" …(+{len(user_message) - 500} chars)"
-        )
-        logger.info(f"🤖 {self.model.model}{thinking_label}{effort_label} | 👤 {_log_msg}")
-        
         # Add user message (Claude format - use content blocks for consistency)
         self.run_user_message = {
             "role": "user",
@@ -754,6 +929,7 @@ class AgentStreamExecutor:
 
         final_response = ""
         turn = 0
+        self.run_usage = None
 
         # Respect a run id an outer scope already set (a subagent spawn or a
         # delegated task passes one down); only mint a fresh one when this turn
@@ -761,10 +937,8 @@ class AgentStreamExecutor:
         # outbound header-tagging path and RuntimeIdentity on the same id.
         import uuid as _uuid
         from common.utils import set_agent_run_id, clear_agent_run_id, current_agent_run_id
-        # Captured before minting: once this run sets its own id, nothing
-        # downstream can tell whether it was nested. A sub agent inherits the
-        # parent's run id through identity_scope, so an id already being
-        # present is exactly what "nested" means.
+        # An id already in scope came from the bridge (which opens a run for
+        # every turn), a sub agent spawn or a delegation; this run adopts it.
         _nested_run = bool(current_agent_run_id())
         _run_token = None
         if not _nested_run:
@@ -779,12 +953,36 @@ class AgentStreamExecutor:
         # one wasted primary call per step). The primary gets a fresh chance on
         # the next user message.
         #
-        # Must run *after* the run id above, not before: the reset is a no-op
-        # for a nested run (see _reset_model_fallback), and only the id tells
-        # the two apart. A nested run keeps the parent's fallback engaged — the
-        # sub agent is running inside the same outage and should inherit the
-        # backup rather than start over on the provider that just failed.
-        self._reset_model_fallback(nested_run=_nested_run)
+        # A run is nested for fallback purposes only when an outer run in this
+        # context is still driving the *same* model object — a sub agent built
+        # with model=parent.model. That run keeps the parent's fallback engaged:
+        # it is running inside the same outage and should inherit the backup
+        # rather than start over on the provider that just failed.
+        _active_models = _ACTIVE_RUN_MODELS.get()
+        _model_key = id(self.model)
+        _shares_outer_model = _model_key in _active_models
+        _active_token = _ACTIVE_RUN_MODELS.set(_active_models | {_model_key})
+        self._reset_model_fallback(nested_run=_shares_outer_model)
+
+        # Log user message with model info, after the reset so it names the
+        # model this run starts on. Truncate very long messages (e.g. injected
+        # transcripts / large prompts) so logs stay readable.
+        thinking_enabled = self._is_thinking_enabled()
+        thinking_label = " | 💭 thinking" if thinking_enabled else ""
+        # When deep thinking is on, also surface the resolved reasoning effort
+        # (per-model aware) so the operator can confirm the effective intensity.
+        effort_label = ""
+        if thinking_enabled:
+            try:
+                effort = self.model._normalized_reasoning_effort()
+                if effort:
+                    effort_label = f" | effort={effort}"
+            except Exception:
+                effort_label = ""
+        _log_msg = user_message if len(user_message) <= 500 else (
+            user_message[:500] + f" …(+{len(user_message) - 500} chars)"
+        )
+        logger.info(f"🤖 {self.model.model}{thinking_label}{effort_label} | 👤 {_log_msg}")
 
         cancelled = False
         # An answer on the last allowed turn also leaves turn == max_turns.
@@ -971,7 +1169,7 @@ class AgentStreamExecutor:
                             if result_data.get("type") == "file_to_send":
                                 self.files_to_send.append(result_data)
                                 logger.info(f"📎 File queued for sending: {result_data.get('file_name', result_data.get('path'))}")
-                                self._emit_event("file_to_send", result_data)
+                                self._emit_event("file_to_send", self._sent_file_event(result_data))
 
                         # Surface user-facing files written by the agent
                         self._maybe_emit_artifact(tool_call, result)
@@ -1151,6 +1349,7 @@ class AgentStreamExecutor:
             raise
 
         finally:
+            _ACTIVE_RUN_MODELS.reset(_active_token)
             if _run_token is not None:
                 clear_agent_run_id(_run_token)
             if self.steer_inbox is not None:
@@ -1323,19 +1522,15 @@ class AgentStreamExecutor:
     def _reset_model_fallback(self, nested_run: bool = False) -> None:
         """Drop any fallback routing so the next call uses the primary model.
 
-        ``nested_run`` marks a run that inherited its run id from an outer
-        scope — a sub agent spawn or a delegated task. Those must leave the
-        parent's routing alone: a sub agent is built with the parent's *same*
-        model object, so resetting here would clear the fallback the parent is
-        mid-way through relying on and send both of them back to the provider
-        that just failed.
+        ``nested_run`` marks a run whose model object is still driving a live
+        outer run — a sub agent is built with the parent's *same* model object.
+        Those must leave the parent's routing alone: resetting here would clear
+        the fallback the parent is mid-way through relying on and send both of
+        them back to the provider that just failed.
 
         Fallback is opt-in and this is a no-op on models that don't support it,
         so it is safe to call unconditionally at the top of a run.
         """
-        # The caller captures this *before* minting its own run id — once that
-        # id is set, nothing downstream can tell a nested run from a top-level
-        # one, so the distinction has to be passed in.
         if nested_run:
             return
 
@@ -1462,6 +1657,7 @@ class AgentStreamExecutor:
 
         # Streaming response
         full_content = ""
+        self._reset_think_stream()
         full_reasoning = ""
         tool_calls_buffer = {}  # {index: {id, name, arguments}}
         gemini_raw_parts = None  # Preserve Gemini thoughtSignature for round-trip
@@ -1570,7 +1766,17 @@ class AgentStreamExecutor:
                     if finish_reason:
                         stop_reason = finish_reason
 
-                    reasoning_delta = delta.get("reasoning_content") or ""
+                    # Providers name the reasoning field differently.
+                    reasoning_delta = (
+                        delta.get("reasoning_content")
+                        or delta.get("reasoning")
+                        or delta.get("thinking")
+                        or ""
+                    )
+                    if isinstance(reasoning_delta, list):
+                        _, reasoning_delta = self._split_content_blocks(reasoning_delta)
+                    if not isinstance(reasoning_delta, str):
+                        reasoning_delta = ""
                     if reasoning_delta:
                         full_reasoning += reasoning_delta
                         if self._is_thinking_enabled():
@@ -1590,7 +1796,7 @@ class AgentStreamExecutor:
                                 self._emit_event("reasoning_update", {"delta": thinking_text})
                     if content_delta:
                         # Filter out <think> tags from content
-                        filtered_delta = self._filter_think_tags(content_delta)
+                        filtered_delta = self._filter_think_stream(content_delta)
                         full_content += filtered_delta
                         if filtered_delta:  # Only emit if there's content after filtering
                             self._emit_event("message_update", {"delta": filtered_delta})
@@ -1623,6 +1829,11 @@ class AgentStreamExecutor:
                         gemini_raw_parts = delta["_gemini_raw_parts"]
                     elif isinstance(choice, dict) and choice.get("_gemini_raw_parts"):
                         gemini_raw_parts = choice["_gemini_raw_parts"]
+
+            _think_tail_out = self._flush_think_stream()
+            if _think_tail_out:
+                full_content += _think_tail_out
+                self._emit_event("message_update", {"delta": _think_tail_out})
 
         except AgentCancelledError:
             # Must propagate untouched; never treat as a retryable error.
@@ -1804,6 +2015,8 @@ class AgentStreamExecutor:
         # tools + history — which is exactly the "used" the chart wants.
         if stream_usage is not None:
             try:
+                usage_snapshot = self._normalize_stream_usage(stream_usage)
+                self._record_stream_usage(usage_snapshot)
                 # Fingerprint the history this usage describes. get_context_usage
                 # compares it against the live history estimate: if trimming /
                 # compaction (or new turns) has since changed the history, the
@@ -1812,12 +2025,7 @@ class AgentStreamExecutor:
                     self.agent._estimate_message_tokens(m) for m in self.messages
                 )
                 self.agent.last_usage = {
-                    "prompt_tokens": int(stream_usage.get("prompt_tokens") or 0),
-                    "completion_tokens": int(stream_usage.get("completion_tokens") or 0),
-                    "total_tokens": int(stream_usage.get("total_tokens") or 0),
-                    # Server-side prefix cache hits; providers that don't
-                    # report it leave this at 0, which reads as "unknown".
-                    "prompt_cache_hit_tokens": _cache_hit_tokens(stream_usage),
+                    **usage_snapshot,
                     # History estimate at capture time (freshness fingerprint).
                     "_est_history": est_history,
                 }
@@ -1981,6 +2189,9 @@ class AgentStreamExecutor:
         assigning `cancel_event` and `progress_callback` before a call and
         clearing them after, which two concurrent calls on one instance would
         do to each other.
+
+        The wait polls `cancel_event`, so a cancel returns control without
+        waiting for the slowest call; each tool keeps its own timeout.
         """
         eligible = [
             call for call in tool_calls
@@ -2003,9 +2214,36 @@ class AgentStreamExecutor:
                 futures[call["id"]] = pool.submit(
                     ctx.run, self._execute_tool, call, copy.copy(self.tools[call["name"]])
                 )
-            return {call_id: future.result() for call_id, future in futures.items()}
+            return self._collect_parallel_results(futures)
         finally:
+            # Workers stop at their own next checkpoint; joining would delay the cancel.
             pool.shutdown(wait=False)
+
+    def _collect_parallel_results(
+        self, futures: Dict[str, "Future"]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Wait for the prefetched calls; on cancel, report the unfinished ones as errors."""
+        pending = dict(futures)
+        results: Dict[str, Dict[str, Any]] = {}
+        while pending:
+            wait(list(pending.values()), timeout=PARALLEL_POLL_SECONDS)
+            for call_id in [cid for cid, f in pending.items() if f.done()]:
+                try:
+                    results[call_id] = pending.pop(call_id).result()
+                except Exception as e:
+                    results[call_id] = {"status": "error", "result": f"Tool call failed: {e}"}
+            if pending and self.cancel_event is not None and self.cancel_event.is_set():
+                logger.info(
+                    f"[Agent] Cancelled while waiting for parallel tool calls; "
+                    f"{len(pending)} call(s) abandoned"
+                )
+                break
+        for call_id in pending:
+            results[call_id] = {
+                "status": "error",
+                "result": "This call was still running when the turn was cancelled; its result was discarded.",
+            }
+        return results
 
     def _execute_tool(self, tool_call: Dict, tool_override: Optional[BaseTool] = None) -> Dict[str, Any]:
         """
@@ -2232,6 +2470,7 @@ class AgentStreamExecutor:
                 arguments,
                 cwd=agent.effective_cwd(),
                 write_roots=agent.write_roots(),
+                protected_paths=agent.protected_paths(),
             )
             return None if decision.allowed else decision.reason
         except Exception as e:
@@ -2607,9 +2846,11 @@ class AgentStreamExecutor:
             return
 
         # Primary: token-budget-first trim. Walk turns newest -> oldest and keep
-        # the longest suffix that fits the budget (removes only the minimum
-        # turns needed, not a blind "remove half").
-        kept_turns, discarded_turns = self._token_budget_trim(turns, budget)
+        # the longest suffix that fits the target, which leaves headroom below
+        # the budget so the next turns append without another trim.
+        target_budget = int(budget * TRIM_TARGET_RATIO)
+        target_turns = max(1, int(self.max_context_turns * TRIM_TARGET_RATIO))
+        kept_turns, discarded_turns = self._token_budget_trim(turns, target_budget)
 
         if budget <= 0:
             logger.warning(
@@ -2631,12 +2872,11 @@ class AgentStreamExecutor:
             discarded_turns = turns[:-2]
 
         # Secondary: turn-count cap acts as an explicit cost safety net. Even
-        # when the kept turns fit the token budget, never keep more than
-        # max_context_turns of them.
-        if len(kept_turns) > self.max_context_turns:
-            extra = kept_turns[:len(kept_turns) - self.max_context_turns]
+        # when the kept turns fit the token budget, cut them to the turn target.
+        if len(kept_turns) > target_turns:
+            extra = kept_turns[:len(kept_turns) - target_turns]
             discarded_turns = extra + discarded_turns
-            kept_turns = kept_turns[-self.max_context_turns:]
+            kept_turns = kept_turns[-target_turns:]
 
         if not discarded_turns and not kept_previous:
             # Nothing needed discarding (a single oversized newest turn is kept

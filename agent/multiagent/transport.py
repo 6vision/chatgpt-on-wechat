@@ -72,6 +72,9 @@ class InvokeRequest:
     ``history`` (``{"role", "text", "agent_id"}`` entries, oldest first);
     :data:`MODE_CLEAR` runs no turn and drops the teammate's context for
     ``root_session_id``.
+
+    ``permission_mode`` is the calling Agent's mode; the far side may only
+    narrow its own mode with it. Empty leaves the far side's default.
     """
 
     request_id: str
@@ -87,6 +90,7 @@ class InvokeRequest:
     timeout_seconds: float = 600.0
     mode: str = MODE_DELEGATE
     history: Tuple[dict, ...] = ()
+    permission_mode: str = ""
 
 
 @dataclass

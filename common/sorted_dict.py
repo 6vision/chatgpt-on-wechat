@@ -37,6 +37,44 @@ class SortedDict(dict):
                 break
         self.sorted_keys = None
 
+    def clear(self):
+        super().clear()
+        self.heap.clear()
+        self.sorted_keys = None
+
+    def update(self, *args, **kwargs):
+        for key, value in dict(*args, **kwargs).items():
+            self[key] = value
+
+    def setdefault(self, key, default=None):
+        if key not in self:
+            self[key] = default
+        return self[key]
+
+    def pop(self, key, *defaults):
+        if len(defaults) > 1:
+            raise TypeError(f"pop expected at most 2 arguments, got {1 + len(defaults)}")
+        if key not in self:
+            if defaults:
+                return defaults[0]
+            raise KeyError(key)
+        value = self[key]
+        del self[key]
+        return value
+
+    def popitem(self):
+        if not self:
+            raise KeyError("popitem(): dictionary is empty")
+        key = next(reversed(super().keys()))
+        return key, self.pop(key)
+
+    def __ior__(self, other):
+        self.update(other)
+        return self
+
+    def values(self):
+        return [self[key] for key in self.keys()]
+
     def keys(self):
         if self.sorted_keys is None:
             self.sorted_keys = [k for _, k in sorted(self.heap, reverse=self.reverse)]

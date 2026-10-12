@@ -37,6 +37,7 @@ simply its whole model list and ``hidden`` stays empty.
 
 import json
 import os
+import threading
 
 from common.atomic_write import write_json_atomic
 from common.log import logger
@@ -79,7 +80,7 @@ def normalize_entry(raw) -> dict:
         raise ValueError(f"capabilities for {name} must be a list")
     # Silently drop unrecognized tags (e.g. hand-edited config) instead of
     # rejecting the whole entry — the UI only ever offers valid ones.
-    caps = [str(c).strip().lower() for c in caps if str(c).strip() in VALID_CAPABILITIES]
+    caps = [c for c in (str(x).strip().lower() for x in caps) if c in VALID_CAPABILITIES]
     # A model with no tags would be unreachable everywhere (not text, not any
     # capability), so an empty set falls back to the default: text.
     if not caps:
@@ -92,7 +93,7 @@ def normalize_entry(raw) -> dict:
             continue
         try:
             value = int(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             raise ValueError(f"{key} for {name} must be a positive integer")
         if value <= 0:
             raise ValueError(f"{key} for {name} must be a positive integer")
@@ -116,13 +117,17 @@ def _normalize_provider_doc(raw) -> dict:
     else:
         return {"overrides": [], "hidden": []}
 
-    for e in entries or []:
+    if not isinstance(entries, list):
+        entries = []
+    if not isinstance(raw_hidden, list):
+        raw_hidden = []
+    for e in entries:
         try:
             overrides.append(normalize_entry(e))
         except (ValueError, TypeError, AttributeError):
             continue  # unparseable entry: skip rather than break reads
     seen = set()
-    for name in raw_hidden or []:
+    for name in raw_hidden:
         name = str(name or "").strip()
         if name and name not in seen:
             seen.add(name)
@@ -225,18 +230,21 @@ def _write_store(store: dict) -> None:
 # In-memory cache so the budget/request paths (called every LLM turn) don't hit
 # disk. Invalidated on every write, which all goes through this module.
 _cache = None
+_store_lock = threading.RLock()
 
 
 def _load() -> dict:
     global _cache
-    if _cache is None:
-        _cache = _read_store()
-    return _cache
+    with _store_lock:
+        if _cache is None:
+            _cache = _read_store()
+        return _cache
 
 
 def _invalidate() -> None:
     global _cache
-    _cache = None
+    with _store_lock:
+        _cache = None
 
 
 def get_catalog_map() -> dict:
@@ -301,14 +309,16 @@ def save_catalog(provider_id, models, hidden=None) -> list:
             seen.add(name)
             tombstones.append(name)
 
-    store = _read_store()  # read fresh so a concurrent edit isn't clobbered
-    providers = store["providers"]
-    if entries or tombstones:
-        providers[provider_id] = {"overrides": entries, "hidden": tombstones}
-    else:
-        providers.pop(provider_id, None)
-    _write_store(store)
-    _invalidate()
+    # Serialize the whole read-modify-write interval, including invalidation.
+    with _store_lock:
+        store = _read_store()
+        providers = store["providers"]
+        if entries or tombstones:
+            providers[provider_id] = {"overrides": entries, "hidden": tombstones}
+        else:
+            providers.pop(provider_id, None)
+        _write_store(store)
+        _invalidate()
 
     logger.info(
         f"[ModelCatalog] provider {provider_id} saved: "

@@ -24,7 +24,9 @@ from common.log import logger
 from common.media_download import MAX_FILE_BYTES, MediaTooLargeError, save_response
 from common.tmp_dir import TmpDir
 from config import conf
-from models.custom_provider import _find_provider_by_id, get_custom_providers, parse_custom_bot_type
+from models.custom_provider import (
+    _find_provider_by_id, get_custom_providers, parse_custom_bot_type, resolve_custom_headers,
+)
 from voice.voice import Voice
 
 # Bound every outbound call. A vendor that stalls would otherwise leave the
@@ -55,6 +57,13 @@ class CustomVoice(Voice):
             return entry.get("api_key", ""), entry.get("api_base") or ""
         return conf().get("custom_api_key", ""), conf().get("custom_api_base") or ""
 
+    def _extra_headers(self) -> dict:
+        try:
+            return resolve_custom_headers(self.voice_type)
+        except Exception as e:
+            logger.warning(f"[Custom] failed to resolve provider headers: {e}")
+            return {}
+
     def voiceToText(self, voice_file):
         try:
             api_key, api_base = self._resolve_credentials()
@@ -69,7 +78,7 @@ class CustomVoice(Voice):
             with open(voice_file, "rb") as f:
                 response = requests.post(
                     url,
-                    headers={"Authorization": "Bearer " + api_key},
+                    headers={"Authorization": "Bearer " + api_key, **self._extra_headers()},
                     files={"file": f},
                     data={"model": model},
                     timeout=REQUEST_TIMEOUT,
@@ -105,6 +114,7 @@ class CustomVoice(Voice):
                 headers={
                     "Authorization": "Bearer " + api_key,
                     "Content-Type": "application/json",
+                    **self._extra_headers(),
                 },
                 json={
                     "model": model,

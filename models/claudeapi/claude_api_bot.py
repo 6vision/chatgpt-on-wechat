@@ -2,6 +2,8 @@
 
 import json
 import re
+import socket
+import threading
 import time
 from typing import Optional
 
@@ -56,6 +58,101 @@ BUDGET_THINKING_MODELS = (
 # Upper bound for the legacy budget so a large max_tokens does not license an
 # unbounded thinking pass.
 MAX_THINKING_BUDGET = 16000
+
+# Prompt caching uses explicit block-level breakpoints: the top-level
+# ``cache_control`` shorthand is not accepted by every Anthropic-compatible
+# endpoint. The API rejects a request carrying more than 4 breakpoints.
+CACHE_CONTROL = {"type": "ephemeral"}
+# A 1h entry must precede every 5m entry in the prompt.
+CACHE_TTL_1H = "1h"
+MAX_CACHE_BREAKPOINTS = 4
+UNCACHEABLE_BLOCK_TYPES = ("thinking", "redacted_thinking")
+
+# Without it the API buffers a tool argument until the whole value is complete,
+# so a large `write` streams nothing but a ping every 30s for minutes, and
+# networks that drop quiet connections throw the whole generation away.
+EAGER_INPUT_STREAMING = "eager_input_streaming"
+
+# With thinking summaries and eager tool input, a healthy stream is never quiet
+# for long. Some connections go silent mid-generation yet stay open for half an
+# hour, outliving the socket read timeout, so a stream with no event for this
+# long is cut and retried.
+STREAM_STALL_SECONDS = 90
+
+
+# While thinking the API may send nothing at all, so a long think looks exactly
+# like a dead connection, and some networks cut it at that point. Thinking less
+# is what makes the retry finish.
+_LOWER_EFFORT = {"max": "medium", "xhigh": "medium", "high": "medium", "medium": "low"}
+_MIN_THINKING_BUDGET = 1024
+
+
+def _lower_thinking(params: dict) -> Optional[dict]:
+    """Return params asking for less thinking, or None when it cannot go lower."""
+    thinking = params.get("thinking") or {}
+    if thinking.get("type") == "enabled":
+        budget = thinking.get("budget_tokens") or 0
+        if budget <= _MIN_THINKING_BUDGET:
+            return None
+        return dict(params, thinking=dict(thinking, budget_tokens=max(_MIN_THINKING_BUDGET, budget // 2)))
+    if not thinking:
+        return None
+    output_config = params.get("output_config") or {}
+    lower = _LOWER_EFFORT.get(output_config.get("effort") or "high")
+    if not lower:
+        return None
+    return dict(params, output_config=dict(output_config, effort=lower))
+
+
+def _abort_response(response) -> None:
+    """Unblock a reader stuck in recv() on this response's socket."""
+    raw = getattr(response, "raw", None)
+    getters = (
+        lambda: raw._fp.fp.raw._sock,
+        lambda: raw._connection.sock,
+        lambda: raw.connection.sock,
+    )
+    for get_sock in getters:
+        try:
+            sock = get_sock()
+        except Exception:
+            continue
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            break
+    try:
+        response.close()
+    except Exception:
+        pass
+
+
+class _StallWatchdog:
+    """Cuts a streaming response that has received no event for ``limit`` seconds."""
+
+    def __init__(self, response, limit: Optional[float] = None):
+        self.response = response
+        self.limit = STREAM_STALL_SECONDS if limit is None else limit
+        self.interval = min(5.0, self.limit / 3)
+        self.tripped = False
+        self._last = time.monotonic()
+        self._stop = threading.Event()
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def beat(self) -> None:
+        self._last = time.monotonic()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval):
+            if time.monotonic() - self._last > self.limit:
+                self.tripped = True
+                _abort_response(self.response)
+                return
 
 
 # OpenAI对话模型API (可用)
@@ -410,7 +507,17 @@ class ClaudeAPIBot(Bot, OpenAIImage):
             request_params["system"] = system_prompt
 
         if tools:
+            if stream:
+                tools = [dict(t, **{EAGER_INPUT_STREAMING: True}) if isinstance(t, dict) and "input_schema" in t else t
+                         for t in tools]
             request_params["tools"] = tools
+            # Agent turns resend the same long prefix on every step of the tool
+            # loop, so cache it; one-off calls without tools are left alone.
+            system, request_params["messages"] = self._apply_prompt_cache(
+                request_params.get("system"), claude_messages, tools,
+                system_ttl=conf().get("claude_cache_ttl", CACHE_TTL_1H))
+            if system:
+                request_params["system"] = system
 
         # Claude exposes effort under output_config rather than the generic
         # reasoning_effort field used by OpenAI-compatible providers.
@@ -426,6 +533,11 @@ class ClaudeAPIBot(Bot, OpenAIImage):
         )
         if thinking_params:
             request_params["thinking"] = thinking_params
+        elif stream and (actual_model or "").lower().startswith(ADAPTIVE_THINKING_MODELS):
+            # These models think even when the field is omitted, but then stream
+            # nothing until the thinking ends; summaries keep the connection busy
+            # so networks that cut idle streams do not drop the request.
+            request_params["thinking"] = {"type": "adaptive", "display": "summarized"}
 
         try:
             if stream:
@@ -452,6 +564,96 @@ class ClaudeAPIBot(Bot, OpenAIImage):
                     "message": str(e),
                     "status_code": 500
                 }
+
+    @staticmethod
+    def _can_mark_cache(block) -> bool:
+        if not isinstance(block, dict) or block.get("cache_control"):
+            return False
+        if block.get("type") in UNCACHEABLE_BLOCK_TYPES:
+            return False
+        # An empty text block cannot carry cache_control.
+        return block.get("type") != "text" or bool(block.get("text"))
+
+    @staticmethod
+    def _count_cache_breakpoints(system, messages, tools) -> int:
+        blocks = list(tools or [])
+        if isinstance(system, list):
+            blocks.extend(system)
+        for msg in messages or []:
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            blocks.extend(content)
+            for blk in content:
+                if isinstance(blk, dict) and isinstance(blk.get("content"), list):
+                    blocks.extend(blk["content"])
+        return sum(1 for blk in blocks if isinstance(blk, dict) and blk.get("cache_control"))
+
+    @staticmethod
+    def _system_cache_control(system, tools, system_ttl) -> dict:
+        """cache_control for the system breakpoint.
+
+        Tools + system are shared by every session and turn of an agent, and users
+        often come back after more than 5 minutes, so they get the 1h TTL by default.
+        It is skipped when an earlier block already carries a shorter-lived
+        breakpoint, since the API rejects a 1h entry placed after a 5m one.
+        """
+        if system_ttl != CACHE_TTL_1H:
+            return CACHE_CONTROL
+        earlier = list(tools or []) + (list(system) if isinstance(system, list) else [])
+        for blk in earlier:
+            cc = blk.get("cache_control") if isinstance(blk, dict) else None
+            if cc and cc.get("ttl") != CACHE_TTL_1H:
+                return CACHE_CONTROL
+        return dict(CACHE_CONTROL, ttl=CACHE_TTL_1H)
+
+    @classmethod
+    def _apply_prompt_cache(cls, system, messages: list, tools, system_ttl=None):
+        """Place cache breakpoints at the end of the system prompt and of the conversation.
+
+        Tools render before system, so the system breakpoint caches tools + system,
+        which stay identical across turns even when the history does not. The
+        message breakpoint follows the growing history; the next step of the tool
+        loop finds it through the API's 20-block lookback, so it keeps the cheaper
+        5m TTL. Breakpoints already present count against the limit of 4. Returns
+        new (system, messages) without mutating the inputs, which are shared with
+        the agent's history.
+        """
+        budget = MAX_CACHE_BREAKPOINTS - cls._count_cache_breakpoints(system, messages, tools)
+        if budget > 0 and system:
+            system_cc = cls._system_cache_control(system, tools, system_ttl)
+            blocks = [{"type": "text", "text": system}] if isinstance(system, str) else list(system)
+            if cls._can_mark_cache(blocks[-1]):
+                blocks[-1] = dict(blocks[-1], cache_control=system_cc)
+                system = blocks
+                budget -= 1
+        if budget > 0 and messages:
+            last = messages[-1]
+            content = last.get("content")
+            if isinstance(content, str):
+                content = [{"type": "text", "text": content}]
+            if isinstance(content, list) and content and cls._can_mark_cache(content[-1]):
+                content = content[:-1] + [dict(content[-1], cache_control=CACHE_CONTROL)]
+                messages = messages[:-1] + [dict(last, content=content)]
+        return system, messages
+
+    @staticmethod
+    def _build_usage(input_tokens, output_tokens, cache_write, cache_read) -> dict:
+        """OpenAI-shaped usage whose prompt_tokens is the whole prompt.
+
+        Anthropic's ``input_tokens`` excludes cached tokens, but the agent reads
+        prompt_tokens as everything the model saw this turn (context indicator,
+        trimming decisions), so cache writes and reads are added back. The cache
+        fields are passed through for the agent's hit-rate logging.
+        """
+        prompt_tokens = (input_tokens or 0) + (cache_write or 0) + (cache_read or 0)
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": output_tokens or 0,
+            "total_tokens": prompt_tokens + (output_tokens or 0),
+            "cache_creation_input_tokens": cache_write or 0,
+            "cache_read_input_tokens": cache_read or 0,
+        }
 
     @staticmethod
     def _sanitize_message(msg: dict) -> dict:
@@ -546,16 +748,41 @@ class ClaudeAPIBot(Bot, OpenAIImage):
                     "finish_reason": claude_response.get("stop_reason", "stop")
                 }
             ],
-            "usage": {
-                "prompt_tokens": usage.get("input_tokens", 0),
-                "completion_tokens": usage.get("output_tokens", 0),
-                "total_tokens": usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
-            }
+            "usage": self._build_usage(
+                usage.get("input_tokens"), usage.get("output_tokens"),
+                usage.get("cache_creation_input_tokens"), usage.get("cache_read_input_tokens"))
         }
 
         return formatted_response
 
     def _handle_stream_response(self, request_params):
+        """Stream a response; if it stalls while the model is still thinking, retry with less effort.
+
+        A request that stalls during silent thinking stalls again when resent
+        unchanged, so the agent-level retry alone would fail the same way.
+        """
+        while True:
+            visible = False
+            stalled_chunk = None
+            for chunk in self._stream_once(request_params):
+                if chunk.get("error") and chunk.get("stalled") and not visible:
+                    stalled_chunk = chunk
+                    break
+                delta = ((chunk.get("choices") or [{}])[0] or {}).get("delta") or {}
+                if delta.get("content") or delta.get("tool_calls"):
+                    visible = True
+                yield chunk
+            if stalled_chunk is None:
+                return
+            lowered = _lower_thinking(request_params)
+            if lowered is None:
+                yield stalled_chunk
+                return
+            logger.warning(f"[Claude] Stream went silent while thinking; retrying with "
+                           f"{lowered.get('output_config', {}).get('effort') or lowered.get('thinking')}")
+            request_params = lowered
+
+    def _stream_once(self, request_params):
         """Handle streaming Claude API response using HTTP requests"""
         # Prepare headers
         headers = {
@@ -576,6 +803,9 @@ class ClaudeAPIBot(Bot, OpenAIImage):
         # Surfaced as a final usage chunk so the agent can show a real count.
         usage_input_tokens = 0
         usage_output_tokens = 0
+        usage_cache_write = 0
+        usage_cache_read = 0
+        watchdog = None
 
         try:
             # Make streaming HTTP request
@@ -588,6 +818,22 @@ class ClaudeAPIBot(Bot, OpenAIImage):
                 stream=True,
                 timeout=180
             )
+
+            if response.status_code == 400 and EAGER_INPUT_STREAMING in response.text:
+                # Some Anthropic-compatible gateways reject the field; drop it and resend.
+                logger.warning("[Claude] Endpoint rejected eager_input_streaming, retrying without it")
+                request_params["tools"] = [
+                    {k: v for k, v in t.items() if k != EAGER_INPUT_STREAMING} if isinstance(t, dict) else t
+                    for t in request_params.get("tools") or []
+                ]
+                response = requests.post(
+                    f"{self.api_base}/messages",
+                    headers=headers,
+                    json=request_params,
+                    proxies=proxies,
+                    stream=True,
+                    timeout=180
+                )
 
             if response.status_code != 200:
                 error_text = response.text
@@ -605,10 +851,12 @@ class ClaudeAPIBot(Bot, OpenAIImage):
                 return
 
             # Process streaming response
+            watchdog = _StallWatchdog(response)
             for line in response.iter_lines():
                 if line:
                     line = line.decode('utf-8')
                     if line.startswith('data: '):
+                        watchdog.beat()
                         line = line[6:]  # Remove 'data: ' prefix
                         if line == '[DONE]':
                             break
@@ -621,6 +869,8 @@ class ClaudeAPIBot(Bot, OpenAIImage):
                                 msg_usage = (event.get("message", {}) or {}).get("usage", {}) or {}
                                 usage_input_tokens = msg_usage.get("input_tokens", 0) or 0
                                 usage_output_tokens = msg_usage.get("output_tokens", 0) or usage_output_tokens
+                                usage_cache_write = msg_usage.get("cache_creation_input_tokens", 0) or 0
+                                usage_cache_read = msg_usage.get("cache_read_input_tokens", 0) or 0
 
                             elif event_type == "content_block_start":
                                 # New content block
@@ -681,6 +931,8 @@ class ClaudeAPIBot(Bot, OpenAIImage):
                                 md_usage = event.get("usage", {}) or {}
                                 if md_usage.get("output_tokens"):
                                     usage_output_tokens = md_usage.get("output_tokens")
+                                usage_cache_write = md_usage.get("cache_creation_input_tokens") or usage_cache_write
+                                usage_cache_read = md_usage.get("cache_read_input_tokens") or usage_cache_read
                                 
                                 # Message complete - yield tool calls if any
                                 if tool_uses_map:
@@ -721,27 +973,37 @@ class ClaudeAPIBot(Bot, OpenAIImage):
                                         "created": int(time.time()),
                                         "model": request_params["model"],
                                         "choices": [],
-                                        "usage": {
-                                            "prompt_tokens": usage_input_tokens,
-                                            "completion_tokens": usage_output_tokens,
-                                            "total_tokens": usage_input_tokens + usage_output_tokens,
-                                        },
+                                        "usage": self._build_usage(
+                                            usage_input_tokens, usage_output_tokens,
+                                            usage_cache_write, usage_cache_read),
                                     }
 
                         except json.JSONDecodeError:
                             continue
 
-        except requests.RequestException as e:
-            logger.error(f"Claude streaming request error: {e}")
-            yield {
-                "error": True,
-                "message": f"Connection error: {str(e)}",
-                "status_code": 0
-            }
+            if watchdog.tripped:
+                raise requests.ConnectionError("stream ended after the stall watchdog fired")
+
         except Exception as e:
-            logger.error(f"Claude streaming error: {e}")
+            stalled = watchdog is not None and watchdog.tripped
+            if stalled:
+                message = f"Connection error: stream stalled (no data for {STREAM_STALL_SECONDS}s), aborted for retry"
+                logger.error(f"Claude {message}")
+                status_code = 0
+            elif isinstance(e, requests.RequestException):
+                logger.error(f"Claude streaming request error: {e}")
+                message = f"Connection error: {str(e)}"
+                status_code = 0
+            else:
+                logger.error(f"Claude streaming error: {e}")
+                message = str(e)
+                status_code = 500
             yield {
                 "error": True,
-                "message": str(e),
-                "status_code": 500
+                "message": message,
+                "status_code": status_code,
+                "stalled": stalled,
             }
+        finally:
+            if watchdog is not None:
+                watchdog.stop()

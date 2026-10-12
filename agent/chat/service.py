@@ -762,9 +762,22 @@ class ChatService:
                 continue
             entry = {"role": message["role"], "text": text}
             if message["role"] == "assistant":
-                entry["agent_id"] = message.get("agent_id") or owner.id
+                entry["agent_id"] = self._outside_agent_id(
+                    message.get("agent_id") or owner.id
+                )
             history.append(entry)
         return history
+
+    def _outside_agent_id(self, agent_id):
+        """The default Agent goes out under the reserved alias, as speaker chunks do."""
+        try:
+            from agent.registry import DEFAULT_AGENT_ALIAS
+
+            if agent_id and agent_id == self.agent_bridge.agent_registry.default_agent_id:
+                return DEFAULT_AGENT_ALIAS
+        except Exception as e:
+            logger.debug(f"[ChatService] alias lookup failed: {e}")
+        return agent_id
 
     def _owner_workspace(self, owner_agent_id: str, agent) -> str:
         """Workspace whose store holds the conversation: the owner's."""
@@ -828,9 +841,18 @@ class ChatService:
             pass
         try:
             from agent.memory import get_conversation_store
-            return get_conversation_store(workspace_root).append_messages(
+            store = get_conversation_store(workspace_root)
+            stored = store.append_messages(
                 session_id, new_messages, channel_type=channel_type
             )
+            if stored:
+                from agent.protocol.artifact import index_message_artifacts
+                index_message_artifacts(
+                    store, session_id, new_messages,
+                    workspace_root=workspace_root,
+                    agent_id=getattr(store, "_agent_id", None) or None,
+                )
+            return stored
         except Exception as e:
             logger.warning(
                 f"[ChatService] Failed to persist messages for session={session_id}: {e}"

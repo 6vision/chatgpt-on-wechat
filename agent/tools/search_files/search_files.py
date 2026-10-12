@@ -27,8 +27,10 @@ is worth a word.
 """
 
 import fnmatch
+from functools import lru_cache
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -54,6 +56,7 @@ DEFAULT_MAX_RESULTS = 50
 MAX_RESULTS_CAP = 500
 MAX_FILE_BYTES = 2 * 1024 * 1024
 SEARCH_TIMEOUT_SECONDS = 30
+MAX_GLOB_ALTERNATIVES = 256
 REGEX_MATCH_TIMEOUT_SECONDS = 1  # caps one regex.search() call in the python backend
 
 _IS_WIN = sys.platform == "win32"
@@ -83,6 +86,97 @@ def _ps_quote(value: str) -> str:
     successful search reporting zero matches for text that was there.
     """
     return "'" + value.replace("'", "''") + "'"
+
+
+def _brace_group(pattern: str):
+    """Find a comma-separated brace group outside escaped text/character classes."""
+    groups = []
+    escaped = False
+    class_start = None
+    for index, char in enumerate(pattern):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if class_start is not None:
+            # A class may start with a literal ']', after optional negation.
+            first_member = class_start + 1
+            if pattern[first_member:first_member + 1] in ("!", "^"):
+                first_member += 1
+            if char == "]" and index > first_member:
+                class_start = None
+            continue
+        if char == "[":
+            class_start = index
+        else:
+            if char == "{":
+                groups.append((index, []))
+            elif char == "," and groups:
+                groups[-1][1].append(index)
+            elif char == "}" and groups:
+                start, commas = groups.pop()
+                if commas:
+                    boundaries = [start] + commas + [index]
+                    alternatives = [pattern[a + 1:b] for a, b in zip(boundaries, boundaries[1:])]
+                    return start, index, alternatives
+    return None
+
+
+def _expand_glob_braces(pattern: str) -> List[str]:
+    """Expand existing ``*.{ts,tsx}`` alternatives without invoking a shell."""
+    pending = [pattern]
+    expanded = []
+    while pending:
+        current = pending.pop()
+        group = _brace_group(current)
+        if group is None:
+            expanded.append(current)
+            continue
+        start, end, alternatives = group
+        if len(expanded) + len(pending) + len(alternatives) > MAX_GLOB_ALTERNATIVES:
+            raise ValueError(f"file_glob exceeds {MAX_GLOB_ALTERNATIVES} expanded alternatives; use a narrower filter")
+        pending.extend(current[:start] + choice + current[end + 1:] for choice in reversed(alternatives))
+    return list(dict.fromkeys(expanded))
+
+
+def _python_file_glob(pattern: str) -> str:
+    """Translate escaped glob literals to fnmatch's literal-character syntax."""
+    translated = []
+    escaped = False
+    for char in pattern:
+        if escaped:
+            translated.append({"[": "[[]", "]": "[]]", "*": "[*]", "?": "[?]"}.get(char, char))
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        else:
+            translated.append(char)
+    if escaped:
+        translated.append("\\")
+    return "".join(translated)
+
+
+def _matches_file_glob(relative_path: str, pattern: str) -> bool:
+    """Match directory-aware globs while keeping basename filters recursive."""
+    if "/" not in pattern:
+        return fnmatch.fnmatch(relative_path.rsplit("/", 1)[-1], pattern)
+    path_parts = relative_path.split("/")
+    glob_parts = pattern.split("/")
+
+    @lru_cache(maxsize=None)
+    def match(path_index, glob_index):
+        if glob_index == len(glob_parts):
+            return path_index == len(path_parts)
+        segment = glob_parts[glob_index]
+        if segment == "**":
+            return (match(path_index, glob_index + 1)
+                    or (path_index < len(path_parts) and match(path_index + 1, glob_index)))
+        return (path_index < len(path_parts) and fnmatch.fnmatch(path_parts[path_index], segment)
+                and match(path_index + 1, glob_index + 1))
+
+    return match(0, 0)
 
 
 def _pruned_dirs(root: str, max_depth: int = 2) -> List[str]:
@@ -192,7 +286,10 @@ class SearchFiles(BaseTool):
         Results are ordered most-recently-modified first - when several files
         match, the one just worked on is almost always the one wanted.
         """
-        matcher = fnmatch.fnmatch if ignore_case else fnmatch.fnmatchcase
+        # fnmatch.fnmatch normalizes case only on Windows. Honor the explicit
+        # option on every platform while keeping the default case-sensitive.
+        if ignore_case:
+            pattern = pattern.casefold()
         # A bare "report" is far more likely to mean "name contains report"
         # than an exact filename; a pattern with no wildcard would otherwise
         # match nothing and look like the file does not exist.
@@ -219,12 +316,15 @@ class SearchFiles(BaseTool):
                 if self._is_credential_path(os.path.join(dirpath, d)):
                     continue
                 kept.append(d)
-            dirnames[:] = sorted(kept)
+            # An explicit file path scopes this search to that one file, not
+            # nested files that happen to have the same basename.
+            dirnames[:] = [] if only else sorted(kept)
 
             for filename in filenames:
                 if only and filename != only:
                     continue
-                if not matcher(filename, pattern):
+                candidate = filename.casefold() if ignore_case else filename
+                if not fnmatch.fnmatchcase(candidate, pattern):
                     continue
                 full = os.path.join(dirpath, filename)
                 if self._is_credential_path(full):
@@ -281,6 +381,11 @@ class SearchFiles(BaseTool):
         file_glob = args.get("file_glob", "*") or "*"
         if not isinstance(file_glob, str):
             return ToolResult.fail(f"Error: file_glob must be a string, got: {file_glob!r}")
+
+        try:
+            _expand_glob_braces(file_glob)
+        except ValueError as exc:
+            return ToolResult.fail(f"Error: {exc}")
 
         output_mode = args.get("output_mode", "content") or "content"
         if output_mode not in ("content", "files", "count"):
@@ -391,14 +496,16 @@ class SearchFiles(BaseTool):
 
     # ------------------------------------------------------------- rg backend
     def _backend_rg(self, opts: "_SearchOptions") -> "_BackendResult":
-        cmd = ["rg", "--line-number", "--no-heading", "--with-filename", "--color", "never"]
+        cmd = ["rg", "--null", "--line-number", "--no-heading", "--with-filename", "--color", "never"]
         # Exclude the same VCS/dependency dirs the other backends hardcode, so a
         # repo WITHOUT a .gitignore still gives identical results across backends
         # (rg alone would otherwise only skip what .gitignore lists).
         if not opts.no_ignore:
             for d in _SKIP_DIR_NAMES:
                 cmd += ["--glob", f"!{d}"]
-        cmd += ["--max-columns", "1000"]
+        # Keep a bounded source preview instead of rg's omission placeholder;
+        # truncate_line applies the same display limit as the other backends.
+        cmd += ["--max-columns", "1000", "--max-columns-preview"]
         if opts.ignore_case:
             cmd.append("-i")
         if opts.no_ignore:
@@ -419,30 +526,34 @@ class SearchFiles(BaseTool):
         # -H forces filename even for a single-file target; -r recurses; -E = ERE
         # (aligns alternation/quantifier syntax with rg). -n is added only in
         # content mode — mixing it with -c/-l corrupts their output.
-        cmd = ["grep", "-rH", "-E"]
+        cmd = ["grep", "--null", "-rH", "-E"]
         if not opts.no_ignore:
             for d in _SKIP_DIR_NAMES:
                 cmd.append(f"--exclude-dir={d}")
         if opts.ignore_case:
             cmd.append("-i")
         if opts.file_glob and opts.file_glob != "*":
-            cmd.append(f"--include={opts.file_glob}")
+            for pattern in _expand_glob_braces(opts.file_glob):
+                cmd.append(f"--include={pattern}")
         if opts.output_mode == "files":
             cmd.append("-l")
-        elif opts.output_mode == "count":
-            cmd.append("-c")
         else:
             cmd.append("-n")
         cmd += ["-e", opts.pattern, opts.root]
-        rows, timed_out = self._run_external(cmd, opts)
+        # BSD grep ignores --null with -c; aggregate framed matching lines instead.
+        rows, timed_out = self._run_external(cmd, opts, count_from_content=opts.output_mode == "count")
         return _BackendResult(rows, timed_out)
 
     # ------------------------------------------------ powershell backend (win)
     def _backend_powershell(self, opts: "_SearchOptions") -> "_BackendResult":
+        if len(_expand_glob_braces(opts.file_glob)) > 1:
+            # PowerShell -Filter accepts one wildcard, not brace alternatives.
+            # The existing Python backend implements this documented filter.
+            return self._backend_python(opts)
         shell = shutil.which("powershell") or shutil.which("pwsh")
         # Select-String has no per-mode output flags like grep's -l/-c, so it
         # always emits `path:line:content`; files/count are aggregated from that
-        # in _parse_powershell (NOT the shared _parse_lines, whose files/count
+        # in _parse_powershell (NOT the shared _parse_null_output, whose files/count
         # parsers assume grep-native shapes). Emit an explicit \t between path
         # and line:content so a Windows drive-letter colon (C:\...) never gets
         # mistaken for the field separator.
@@ -521,67 +632,68 @@ class SearchFiles(BaseTool):
         return rows[:opts.max_results]
 
     # ----------------------------------------------- external runner + parser
-    def _run_external(self, cmd: List[str], opts: "_SearchOptions") -> Tuple[List[dict], bool]:
+    def _run_external(
+        self, cmd: List[str], opts: "_SearchOptions", count_from_content: bool = False,
+    ) -> Tuple[List[dict], bool]:
         remaining = max(0.1, opts.deadline - time.monotonic())
         try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=remaining,
-            )
+            proc = subprocess.run(cmd, capture_output=True, timeout=remaining)
         except subprocess.TimeoutExpired:
             return [], True
-        rows = self._parse_lines((proc.stdout or "").splitlines(), opts)
+        # Binary capture avoids universal-newline conversion inside filenames.
+        output = (proc.stdout or b"").decode("utf-8", errors="replace")
+        rows = self._parse_null_output(output, opts, count_from_content)
         # Exit 1 is "no matches". Exit 2 with rows is a partial result (an
         # unreadable file); without rows it is a real failure, e.g. ripgrep
         # rejecting lookaround, and execute() falls back to Python.
         if not rows and proc.returncode not in (0, 1):
-            diagnostic = (proc.stderr or "").strip()[:1000]
+            diagnostic = (proc.stderr or b"").decode("utf-8", errors="replace").strip()[:1000]
             raise RuntimeError(f"search process exited {proc.returncode}: {diagnostic}")
         return rows, False
 
-    def _parse_lines(self, lines: List[str], opts: "_SearchOptions") -> List[dict]:
-        """Parse `path:line:content` (content) / `path` (files) / `path:count`
-        (count) output shared by rg, grep and the PowerShell shim. Drops the
-        backend's own diagnostic lines (rg:/grep: prefixes) so they never reach
-        the model."""
+    def _parse_null_output(
+        self, output: str, opts: "_SearchOptions", count_from_content: bool = False,
+    ) -> List[dict]:
+        """Both external tools delimit filenames with NUL, never ':' or LF."""
         rows: List[dict] = []
-        for line in lines:
-            if not line or line.startswith(("rg:", "grep:")):
-                continue
+        counts: Dict[str, int] = {}
+        offset = 0
+        while offset < len(output):
+            separator = output.find("\0", offset)
+            if separator < 0:
+                break
+            path = output[offset:separator]
+            offset = separator + 1
             if opts.output_mode == "files":
-                p = line.strip()
-                if p:
-                    rows.append({"file": self._rel(p, opts.root)})
+                rows.append({"file": self._rel(path, opts.root)})
                 continue
-            if opts.output_mode == "count":
-                # path:count — split from the right to tolerate ':' in paths.
-                # grep -c emits a line for EVERY scanned file including :0, while
-                # rg -c only lists files with matches; drop zeros so both align.
-                head, sep, tail = line.rpartition(":")
-                if sep and tail.isdigit() and int(tail) > 0:
-                    rows.append({"file": self._rel(head, opts.root), "count": int(tail)})
+            end = output.find("\n", offset)
+            if end < 0:
+                end = len(output)
+            body = output[offset:end]
+            if body.endswith("\r"):
+                body = body[:-1]
+            offset = end + 1
+            if opts.output_mode == "count" and not count_from_content:
+                if body.isdigit() and int(body) > 0:
+                    rows.append({"file": self._rel(path, opts.root), "count": int(body)})
                 continue
-            # content mode: path:line:content
-            first = line.find(":")
-            second = line.find(":", first + 1)
-            if first == -1 or second == -1:
+            line_no, separator, content = body.partition(":")
+            if not separator or not line_no.isdigit():
                 continue
-            file_part = line[:first]
-            line_no = line[first + 1:second]
-            content = line[second + 1:]
-            if not line_no.isdigit():
-                continue
-            truncated, _ = truncate_line(content)
-            rows.append({
-                "file": self._rel(file_part, opts.root),
-                "line": int(line_no),
-                "match": truncated,
-            })
+            if count_from_content:
+                file = self._rel(path, opts.root)
+                counts[file] = counts.get(file, 0) + 1
+            else:
+                truncated, _ = truncate_line(content)
+                rows.append({"file": self._rel(path, opts.root), "line": int(line_no), "match": truncated})
+        if count_from_content:
+            rows = [{"file": file, "count": count} for file, count in counts.items()]
         # Deterministic order across backends.
         if opts.output_mode == "content":
-            rows.sort(key=lambda r: (r["file"], r["line"]))
+            rows.sort(key=lambda row: (row["file"], row["line"]))
         else:
-            rows.sort(key=lambda r: r["file"])
+            rows.sort(key=lambda row: row["file"])
         return rows[:opts.max_results]
 
     # ------------------------------------------------------- python fallback
@@ -591,6 +703,7 @@ class SearchFiles(BaseTool):
         rows: List[dict] = []
         pattern_timeout = False
         root = opts.root
+        file_globs = [_python_file_glob(pattern) for pattern in _expand_glob_braces(opts.file_glob)]
 
         walk_root = root if os.path.isdir(root) else os.path.dirname(root)
         single_file = None if os.path.isdir(root) else os.path.basename(root)
@@ -603,7 +716,8 @@ class SearchFiles(BaseTool):
                 if self._is_credential_path(os.path.join(dirpath, d)):
                     continue
                 kept.append(d)
-            dirnames[:] = sorted(kept)
+            # A file target is scoped to that file, not nested namesakes.
+            dirnames[:] = [] if single_file else sorted(kept)
 
             for filename in sorted(filenames):
                 if single_file and filename != single_file:
@@ -612,7 +726,7 @@ class SearchFiles(BaseTool):
                     return _BackendResult(self._python_finalize(rows, opts), False, pattern_timeout)
                 if time.monotonic() >= opts.deadline:
                     return _BackendResult(self._python_finalize(rows, opts), True, pattern_timeout)
-                if opts.file_glob and opts.file_glob != "*" and not fnmatch.fnmatch(filename, opts.file_glob):
+                if opts.file_glob and opts.file_glob != "*" and not any(_matches_file_glob(self._rel(os.path.join(dirpath, filename), root), pattern) for pattern in file_globs):
                     continue
                 fp = os.path.join(dirpath, filename)
                 if self._is_credential_path(fp):
@@ -627,7 +741,8 @@ class SearchFiles(BaseTool):
 
     def _python_scan_file(self, fp: str, compiled, opts: "_SearchOptions") -> Tuple[List[dict], bool, bool]:
         try:
-            if os.path.getsize(fp) > MAX_FILE_BYTES:
+            info = os.stat(fp)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_FILE_BYTES:
                 return [], False, False
         except OSError:
             return [], False, False

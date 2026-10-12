@@ -336,7 +336,17 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         for i in range(0, len(texts), step):
             chunk = texts[i:i + step]
             result = self._call_api(chunk)
-            out.extend(self._post_process(item["embedding"]) for item in result["data"])
+            items = result["data"]
+            if len(items) != len(chunk):
+                raise ValueError("Embedding batch response count does not match input count")
+            # Some gateways answer out of order; `index` is the request position.
+            if any("index" in item for item in items):
+                indices = [item.get("index") for item in items]
+                if (any(type(index) is not int for index in indices)
+                        or set(indices) != set(range(len(chunk)))):
+                    raise ValueError("Embedding batch indexes must cover every input exactly once")
+                items = sorted(items, key=lambda item: item["index"])
+            out.extend(self._post_process(item["embedding"]) for item in items)
         return out
 
     @property

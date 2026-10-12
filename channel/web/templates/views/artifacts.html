@@ -1,0 +1,92 @@
+                <!-- ====================================================== -->
+                <!-- VIEW: Artifacts (every file the conversations produced) -->
+                <!-- ====================================================== -->
+                <div id="view-artifacts" class="view">
+                    <div class="art-shell">
+                        <div id="art-scroll" class="art-scroll">
+                            <div class="art-inner">
+                                <div class="art-head">
+                                    <h2 class="text-xl font-bold text-slate-800 dark:text-slate-100" data-i18n="artifacts_title">产物</h2>
+                                    <p class="text-sm text-slate-500 dark:text-slate-400 mt-1" data-i18n="artifacts_desc">Agent 在对话中生成的网页、图片、视频和文档，按时间汇集在这里</p>
+                                </div>
+
+                                <div class="art-toolbar">
+                                    <div class="art-filters" role="tablist">
+                                        <button class="art-chip active" data-art-kind="" data-i18n="artifacts_filter_all">全部</button>
+                                        <button class="art-chip" data-art-kind="web" data-i18n="artifacts_filter_web">网页</button>
+                                        <button class="art-chip" data-art-kind="doc" data-i18n="artifacts_filter_doc">文档</button>
+                                        <button class="art-chip" data-art-kind="image" data-i18n="artifacts_filter_image">图片</button>
+                                        <button class="art-chip" data-art-kind="media" data-i18n="artifacts_filter_media">音视频</button>
+                                        <button class="art-chip" data-art-kind="other" data-i18n="artifacts_filter_other">其他</button>
+                                    </div>
+                                    <div class="art-toolbar-end">
+                                        <div id="art-scope-select" class="cfg-dropdown cfg-dropdown-avatar cfg-dropdown-sm hidden" tabindex="0">
+                                            <div class="cfg-dropdown-selected">
+                                                <span class="cfg-dropdown-face"></span>
+                                                <span class="cfg-dropdown-text">--</span>
+                                                <i class="fas fa-chevron-down cfg-dropdown-arrow"></i>
+                                            </div>
+                                            <div class="cfg-dropdown-menu"></div>
+                                        </div>
+                                        <label class="art-search">
+                                            <i class="fas fa-magnifying-glass"></i>
+                                            <input id="art-search-input" type="text" spellcheck="false" autocomplete="off"
+                                                   data-i18n-placeholder="artifacts_search" placeholder="搜索名称或路径">
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div id="art-list"></div>
+                                <div id="art-sentinel" class="art-sentinel"></div>
+                            </div>
+                        </div>
+
+                        <!-- Preview pane: opens beside the timeline on selection -->
+                        <aside id="art-preview" class="art-preview hidden" aria-hidden="true">
+                            <div id="art-resizer" class="workspace-resizer"></div>
+                            <div class="art-preview-head">
+                                <div class="art-preview-titles">
+                                    <div id="art-preview-name" class="art-preview-name"></div>
+                                    <div id="art-preview-path" class="art-preview-path"></div>
+                                </div>
+                                <div class="art-preview-actions">
+                                    <button id="art-btn-add" class="workspace-icon-btn art-add-btn hidden" onclick="artAddSelected()"
+                                            data-tip-key="artifacts_add" data-tip-float data-tooltip-pos="bottom">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                    <button id="art-btn-jump" class="workspace-icon-btn art-jump-btn" onclick="artJumpToSelected()"
+                                            data-tip-key="artifacts_jump" data-tip-float data-tooltip-pos="bottom">
+                                        <i class="fas fa-message"></i>
+                                    </button>
+                                    <button id="art-btn-menu" class="workspace-icon-btn" onclick="artAddSelectedToMenu()"
+                                            data-tip-key="menu_add_to_menu" data-tip-float data-tooltip-pos="bottom">
+                                        <i class="fas fa-bars-staggered"></i>
+                                    </button>
+                                    <button id="art-btn-external" class="workspace-icon-btn" onclick="artOpenSelectedExternally()"
+                                            data-tip-key="ws_open_external" data-tip-float data-tooltip-pos="bottom">
+                                        <i class="fas fa-up-right-from-square"></i>
+                                    </button>
+                                    <button id="art-btn-reveal" class="workspace-icon-btn hidden" onclick="artRevealSelected()"
+                                            data-tip-key="ws_reveal" data-tip-float data-tooltip-pos="bottom">
+                                        <i class="fas fa-folder-open"></i>
+                                    </button>
+                                    <button id="art-btn-download" class="workspace-icon-btn" onclick="artDownloadSelected()"
+                                            data-tip-key="ws_download" data-tip-float data-tooltip-pos="bottom">
+                                        <i class="fas fa-download"></i>
+                                    </button>
+                                    <button id="art-btn-remove" class="workspace-icon-btn" onclick="artRemoveSelected()"
+                                            data-tip-key="artifacts_remove" data-tip-float data-tooltip-pos="bottom">
+                                        <i class="fas fa-eye-slash"></i>
+                                    </button>
+                                    <span class="art-preview-sep"></span>
+                                    <button class="workspace-icon-btn" onclick="artClosePreview()"
+                                            data-tip-key="ws_close" data-tip-float data-tooltip-pos="bottom">
+                                        <i class="fas fa-xmark"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="art-preview-body" class="workspace-preview-content art-preview-body"></div>
+                            <div id="art-preview-meta" class="art-preview-meta"></div>
+                        </aside>
+                    </div>
+                </div>

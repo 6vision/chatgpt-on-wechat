@@ -137,6 +137,41 @@ def test_save_keeps_other_top_level_keys_of_mcp_json(tmp_path, monkeypatch):
     assert data["mcpServers"]["fetch"]["command"] == "npx"
 
 
+def test_overlapping_save_cannot_truncate_the_store(tmp_path, monkeypatch):
+    """A save running while another one is mid-write must not corrupt mcp.json."""
+    monkeypatch.setattr(
+        "agent.tools.mcp.service.mcp_config_path",
+        lambda workspace=None: str(tmp_path / "mcp.json"),
+    )
+
+    real_dump = json.dump
+    concurrent = [{"name": "concurrent", "command": "npx", "args": [
+        "-y", "@modelcontextprotocol/server-github",
+    ]}]
+    first_pass = {"running": True}
+
+    def overlapping_dump(obj, fp, **kwargs):
+        if not first_pass["running"]:
+            return real_dump(obj, fp, **kwargs)
+        first_pass["running"] = False
+        try:
+            # Write half of the outer payload, run a complete second save
+            # against the same store, then write the rest.
+            text = json.dumps(obj, **kwargs)
+            half = len(text) // 2
+            fp.write(text[:half])
+            save_servers(str(tmp_path), concurrent)
+            fp.write(text[half:])
+        finally:
+            first_pass["running"] = True
+
+    monkeypatch.setattr("agent.tools.mcp.service.json.dump", overlapping_dump)
+
+    save_servers(str(tmp_path), [{"name": "outer", "command": "uvx"}])
+
+    assert [item["name"] for item in load_servers(str(tmp_path))] == ["outer"]
+
+
 def test_get_does_not_spawn_servers(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "agent.tools.mcp.service.mcp_config_path",

@@ -20,9 +20,9 @@ def test_concurrent_adds_preserve_both_tasks(tmp_path):
     load_calls = 0
 
     def coordinated_load(real_load):
-        def load():
+        def load(**kwargs):
             nonlocal load_calls
-            tasks = real_load()
+            tasks = real_load(**kwargs)
             with calls_lock:
                 load_calls += 1
                 call_number = load_calls
@@ -85,9 +85,9 @@ def test_concurrent_updates_preserve_both_changes(tmp_path):
     load_calls = 0
 
     def coordinated_load(real_load):
-        def load():
+        def load(**kwargs):
             nonlocal load_calls
-            tasks = real_load()
+            tasks = real_load(**kwargs)
             with calls_lock:
                 load_calls += 1
                 call_number = load_calls
@@ -140,9 +140,9 @@ def test_concurrent_deletes_preserve_both_removals(tmp_path):
     load_calls = 0
 
     def coordinated_load(real_load):
-        def load():
+        def load(**kwargs):
             nonlocal load_calls
-            tasks = real_load()
+            tasks = real_load(**kwargs)
             with calls_lock:
                 load_calls += 1
                 call_number = load_calls

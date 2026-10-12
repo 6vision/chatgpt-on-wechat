@@ -1,15 +1,18 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Eye, FolderTree, ExternalLink, Download, Link2, Check, X,
-  Pencil, Save, RotateCcw, Loader2, AlertTriangle,
+  Pencil, Save, RotateCcw, Loader2, AlertTriangle, Layers,
 } from 'lucide-react'
 import { t } from '../i18n'
 import apiClient from '../api/client'
 import FilePreview from './FilePreview'
 import FileEditor from './FileEditor'
 import FileTree from './FileTree'
+import Tooltip from './Tooltip'
 import { isEditable } from '../lib/fileKind'
 import { useWorkspaceStore, WS_MIN_WIDTH } from '../store/workspaceStore'
+import { focusProduced } from '../store/artifactStore'
 
 const TabButton: React.FC<{
   active: boolean
@@ -33,16 +36,19 @@ const IconButton: React.FC<{ onClick: () => void; title: string; children: React
   title,
   children,
 }) => (
-  <button
-    onClick={onClick}
-    title={title}
-    className="w-7 h-7 flex items-center justify-center rounded-btn text-content-tertiary hover:text-content hover:bg-surface-2 cursor-pointer transition-colors"
-  >
-    {children}
-  </button>
+  <Tooltip label={title} placement="bottom">
+    <button
+      onClick={onClick}
+      aria-label={title}
+      className="w-7 h-7 flex items-center justify-center rounded-btn text-content-tertiary hover:text-content hover:bg-surface-2 cursor-pointer transition-colors"
+    >
+      {children}
+    </button>
+  </Tooltip>
 )
 
 const WorkspacePanel: React.FC = () => {
+  const navigate = useNavigate()
   const { open, tab, width, current, previewError, edit, editNotice } = useWorkspaceStore()
   const dismissEditNotice = useWorkspaceStore((s) => s.dismissEditNotice)
   const setTab = useWorkspaceStore((s) => s.setTab)
@@ -102,6 +108,22 @@ const WorkspacePanel: React.FC = () => {
       return
     }
     window.open(apiClient.getPreviewUrl(current.preview_url || ''), '_blank')
+  }
+
+  const viewInArtifacts = () => {
+    if (!current?.origin || !current.abs_path) return
+    focusProduced({
+      abs_path: current.abs_path,
+      file_name: current.name,
+      rel_path: current.path,
+      kind: current.kind,
+      size: current.size,
+      raw_url: current.raw_url,
+      preview_url: current.preview_url,
+      previewable: current.previewable,
+      origin: current.origin,
+    })
+    navigate('/artifacts')
   }
 
   const download = () => {
@@ -166,6 +188,12 @@ const WorkspacePanel: React.FC = () => {
             {showEditButton && (
               <IconButton onClick={startEdit} title={t('ws_edit')}>
                 <Pencil size={13} />
+              </IconButton>
+            )}
+            {/* Only files a conversation produced have a place in the artifacts view. */}
+            {showFileActions && current.origin && current.abs_path && (
+              <IconButton onClick={viewInArtifacts} title={t('artifacts_view_in')}>
+                <Layers size={13} />
               </IconButton>
             )}
             {showFileActions && (

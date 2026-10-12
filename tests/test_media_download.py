@@ -325,3 +325,12 @@ def test_minimax_tts_refuses_an_oversized_stream():
 
     assert reply.type == ReplyType.ERROR
     assert response.closed
+
+
+def test_remove_download_deletes_and_tolerates_missing_paths(tmp_path):
+    leftover = tmp_path / "leftover.png"
+    leftover.write_bytes(b"x")
+    media_download.remove_download(str(leftover))
+    media_download.remove_download(str(leftover))
+    media_download.remove_download("")
+    assert not leftover.exists()

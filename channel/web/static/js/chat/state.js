@@ -27,11 +27,11 @@ function updateEditButtonsState() {
     document.querySelectorAll('.edit-msg-btn, .delete-msg-btn').forEach(btn => {
         btn.disabled = active;
         if (btn.classList.contains('edit-msg-btn')) {
-            btn.title = active
+            btn.dataset.tooltip = active
                 ? t('edit_disabled_reply_active')
                 : t('edit_message');
         } else {
-            btn.title = active
+            btn.dataset.tooltip = active
                 ? t('delete_disabled_reply_active')
                 : t('delete_message_title');
         }

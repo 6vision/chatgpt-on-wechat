@@ -117,7 +117,7 @@ class XunFeiBot(Bot):
         ws.domain = self.domain
         ws.session_id = session_id
         ws.temperature = temperature
-        ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
+        ws.run_forever(sslopt={"context": ssl.create_default_context()})
 
     def gen_request_id(self, session_id: str):
         return session_id + "_" + str(int(time.time())) + "" + str(

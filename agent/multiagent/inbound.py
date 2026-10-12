@@ -9,6 +9,7 @@ import time
 import uuid
 from typing import Callable
 
+from agent.permission.policy import MODES, global_mode, normalize_mode
 from bridge.context import Context, ContextType
 from bridge.reply import ReplyType
 from common.log import logger
@@ -64,12 +65,6 @@ def serve_invoke(payload: dict, agent_bridge, send_chunk: Callable[[dict], None]
     except Exception:
         return fail(f"Target Agent '{addressed_id}' is not available")
 
-    if mode == MODE_CLEAR:
-        # Not a turn: no policy, no roster, nothing to stream.
-        return _serve_clear(
-            payload, send_chunk, target=target, request_id=request_id
-        )
-
     try:
         from config import conf
 
@@ -78,6 +73,21 @@ def serve_invoke(payload: dict, agent_bridge, send_chunk: Callable[[dict], None]
         return fail(f"Invalid delegation policy: {exc}", target.id, target.name)
     if not policy.enabled:
         return fail("Agent delegation is disabled", target.id, target.name)
+    # Enforce this side's allowlist too; a clear drops a transcript, so it is
+    # gated the same way.
+    if not policy.allows(source_id, target.id):
+        return fail(
+            f"Agent '{source_id}' is not allowed to delegate to '{target.id}'",
+            target.id,
+            target.name,
+        )
+
+    if mode == MODE_CLEAR:
+        # Not a turn: no roster, nothing to stream.
+        return _serve_clear(
+            payload, send_chunk, target=target, request_id=request_id
+        )
+
     if len(task) > policy.max_message_chars:
         return fail(
             f"Delegated task exceeds {policy.max_message_chars} characters", target.id, target.name
@@ -85,7 +95,13 @@ def serve_invoke(payload: dict, agent_bridge, send_chunk: Callable[[dict], None]
 
     # The caller may know this Agent by another id; fold every such alias onto
     # the local id so the chain and roster compare against what runs here.
+    # The default Agent is also reported under the reserved alias, so a chain
+    # may name it either way.
     aliases = {addressed_id, *(str(a).strip() for a in payload.get("target_aliases") or [] if a)}
+    if target.id == agent_bridge.agent_registry.default_agent_id:
+        from agent.registry import DEFAULT_AGENT_ALIAS
+
+        aliases.add(DEFAULT_AGENT_ALIAS)
     aliases.discard("")
 
     def local(agent_id) -> str:
@@ -98,10 +114,8 @@ def serve_invoke(payload: dict, agent_bridge, send_chunk: Callable[[dict], None]
     if target.id in trace[:-1]:
         return fail(f"Delegation cycle rejected: {' -> '.join(trace)}", target.id, target.name)
 
-    try:
-        depth = int(payload.get("depth") or (len(trace) - 1))
-    except (TypeError, ValueError):
-        depth = len(trace) - 1
+    # Derived from the chain, never from the payload's own depth field.
+    depth = len(trace) - 1
     if depth > policy.max_depth:
         return fail(
             f"Delegation depth {depth} exceeds the maximum {policy.max_depth}", target.id, target.name
@@ -130,10 +144,12 @@ def serve_invoke(payload: dict, agent_bridge, send_chunk: Callable[[dict], None]
             root_session_id=root_session_id,
         )
 
+    # A caller may ask for less than the local policy allows, never more.
     try:
-        timeout = float(payload.get("timeout") or policy.timeout_seconds)
+        claimed = float(payload["timeout"]) if "timeout" in payload else policy.timeout_seconds
     except (TypeError, ValueError):
-        timeout = policy.timeout_seconds
+        claimed = policy.timeout_seconds
+    timeout = min(max(claimed, 0.0), policy.timeout_seconds)
 
     session_id = AgentDelegateTool._session_id(source_id, target.id, root_session_id)
     from common.utils import current_agent_run_id
@@ -156,6 +172,14 @@ def serve_invoke(payload: dict, agent_bridge, send_chunk: Callable[[dict], None]
     context["run_id"] = run_id
     context["parent_run_id"] = current_agent_run_id() or ""
     context["task_source"] = TASK_SOURCE
+    # The caller's mode travels with the hand-off, but a remote caller can only
+    # narrow this instance's mode, never widen it.
+    inherited_mode = str(payload.get("permission_mode") or "").strip()
+    if inherited_mode:
+        local_mode = global_mode()
+        context["delegated_permission_mode"] = min(
+            normalize_mode(inherited_mode, local_mode), local_mode, key=MODES.index
+        )
 
     # The caller's side brackets and attributes these; here we only decide what
     # crosses the wire, and it is the same set a local hand-off relays.

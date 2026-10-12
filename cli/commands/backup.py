@@ -14,6 +14,7 @@ from typing import Iterable, Optional, Set
 
 import click
 
+from cli.config_json import merge_duplicate_keys
 from cli.utils import _ensure_project_on_path, get_project_root
 
 
@@ -53,7 +54,7 @@ def _read_config(data_root: Path) -> dict:
         return {}
     try:
         with path.open("r", encoding="utf-8-sig") as handle:
-            value = json.load(handle)
+            value = json.load(handle, object_pairs_hook=merge_duplicate_keys)
         return value if isinstance(value, dict) else {}
     except (OSError, ValueError):
         return {}
@@ -69,12 +70,12 @@ def _configured_workspaces(config: dict, fallback: Path):
         from agent.registry import AgentRegistry
 
         registry = AgentRegistry.from_config(config)
-        return registry.list(), True
+        return registry.list(), True, registry.default_agent_id
     from agent.registry import AgentProfile
 
     return [
         AgentProfile("default", "Default", str(Path(fallback).resolve()))
-    ], False
+    ], False, "default"
 
 
 def _legacy_user_data_path(data_root: Path, config: dict) -> Path:
@@ -136,7 +137,7 @@ def create_backup_archive(
         # being archived rather than from wherever config.json happens to point.
         config = _team().resolve({**config, "agent_workspace": str(workspace)})
     legacy_path = _legacy_user_data_path(data_root, config)
-    profiles, explicit_registry = _configured_workspaces(config, workspace)
+    profiles, explicit_registry, default_agent_id = _configured_workspaces(config, workspace)
     sources = {
         profile.id: Path(profile.workspace).expanduser().resolve()
         for profile in profiles
@@ -177,7 +178,7 @@ def create_backup_archive(
                 source
                 for profile, source, _, _, _ in workspace_entries
                 if profile.id
-                == (config.get("default_agent_id") if explicit_registry else "default")
+                == default_agent_id
             )
         ),
         "agents": [
@@ -435,7 +436,7 @@ def restore_backup_archive(
         archived_config = {}
         if archived_config_path.is_file():
             with archived_config_path.open("r", encoding="utf-8-sig") as handle:
-                value = json.load(handle)
+                value = json.load(handle, object_pairs_hook=merge_duplicate_keys)
             if not isinstance(value, dict):
                 raise ValueError("archived config.json must contain an object")
             archived_config = value
