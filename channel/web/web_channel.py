@@ -62,7 +62,8 @@ from channel.web.api.sessions import (  # noqa: F401
 )
 from channel.web.api.skills import (  # noqa: F401
     McpServerTestHandler, McpServersHandler,
-    SkillContentHandler, SkillsHandler, SkillUploadHandler, ToolsHandler,
+    SkillContentHandler, SkillCreateHandler, SkillFilesHandler,
+    SkillsHandler, SkillUploadHandler, ToolsHandler,
     _install_skill_for_agent,
 )
 from channel.web.api.update import (  # noqa: F401
@@ -130,6 +131,8 @@ URLS = (
     '/api/mcp/servers/test', 'McpServerTestHandler',
     '/api/skills', 'SkillsHandler',
     '/api/skills/content', 'SkillContentHandler',
+    '/api/skills/files', 'SkillFilesHandler',
+    '/api/skills/create', 'SkillCreateHandler',
     '/api/skills/upload', 'SkillUploadHandler',
     '/api/memory', 'MemoryHandler',
     '/api/memory/content', 'MemoryContentHandler',
