@@ -16,6 +16,7 @@ Implementation note:
 """
 
 import asyncio
+import concurrent.futures
 import os
 import re
 import threading
@@ -435,66 +436,65 @@ class DiscordChannel(ChatChannel):
             logger.warning("[Discord] no discord_channel_id in context, drop reply")
             return
 
-        coro = self._async_send(reply, channel_id)
+        progress = {"sent": False}
         try:
-            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+            future = asyncio.run_coroutine_threadsafe(
+                self._async_send(reply, channel_id, progress), self._loop
+            )
             future.result(timeout=180)
+        except concurrent.futures.TimeoutError:
+            # The send may still finish on the loop, so a retry could post it twice.
+            logger.error(f"[Discord] send timed out, not retrying (channel={channel_id})")
         except Exception as e:
-            logger.error(f"[Discord] send failed: {e}")
-            # Raise so chat_channel._send can retry; swallowing here loses
-            # the reply on a transient rate limit or API error.
-            raise
+            logger.error(f"[Discord] send failed: {e}", exc_info=True)
+            # chat_channel._send retries the whole reply: only worth it when nothing went out.
+            if not progress["sent"]:
+                raise
 
-    async def _async_send(self, reply: Reply, channel_id):
-        try:
-            import discord
+    async def _async_send(self, reply: Reply, channel_id, progress: dict = None):
+        import discord
 
-            channel = self._client.get_channel(channel_id)
-            if channel is None:
-                # Not in cache (e.g. DM channel); fetch it explicitly
-                channel = await self._client.fetch_channel(channel_id)
+        progress = {} if progress is None else progress
+        channel = self._client.get_channel(channel_id)
+        if channel is None:
+            # Not in cache (e.g. DM channel); fetch it explicitly
+            channel = await self._client.fetch_channel(channel_id)
 
-            rtype = reply.type
-            content = reply.content
+        rtype = reply.type
+        content = reply.content
 
-            if rtype in (ReplyType.TEXT, ReplyType.INFO, ReplyType.ERROR):
-                text = str(content) if content is not None else ""
-                if not text:
-                    return
-                for chunk in _split_text(text, DISCORD_MSG_LIMIT):
-                    await channel.send(chunk)
+        if rtype in (ReplyType.TEXT, ReplyType.INFO, ReplyType.ERROR):
+            text = str(content) if content is not None else ""
+            if not text:
+                return
+            for chunk in _split_text(text, DISCORD_MSG_LIMIT):
+                await channel.send(chunk)
+                progress["sent"] = True
 
-            elif rtype == ReplyType.IMAGE:
-                # Already a local BytesIO; send it directly
-                content.seek(0)
-                await channel.send(file=discord.File(content, filename="image.png"))
+        elif rtype == ReplyType.IMAGE:
+            # Already a local BytesIO; send it directly
+            content.seek(0)
+            await channel.send(file=discord.File(content, filename="image.png"))
 
-            elif rtype == ReplyType.IMAGE_URL:
-                url = str(content)
-                if url.startswith("file://"):
-                    local = url[7:]
-                    await channel.send(file=discord.File(local))
-                else:
-                    # Post the URL as text; Discord will unfurl it as an image preview
-                    await channel.send(url)
-
-            elif rtype in (ReplyType.VOICE, ReplyType.FILE, ReplyType.VIDEO):
-                local = content[7:] if isinstance(content, str) and content.startswith("file://") else content
-                caption = getattr(reply, "text_content", None) or None
-                await channel.send(content=caption, file=discord.File(local))
-
+        elif rtype == ReplyType.IMAGE_URL:
+            url = str(content)
+            if url.startswith("file://"):
+                local = url[7:]
+                await channel.send(file=discord.File(local))
             else:
-                # Fallback: send as plain text
-                await channel.send(str(content))
+                # Post the URL as text; Discord will unfurl it as an image preview
+                await channel.send(url)
 
-            logger.info(f"[Discord] sent reply (type={rtype}, channel={channel_id})")
+        elif rtype in (ReplyType.VOICE, ReplyType.FILE, ReplyType.VIDEO):
+            local = content[7:] if isinstance(content, str) and content.startswith("file://") else content
+            caption = getattr(reply, "text_content", None) or None
+            await channel.send(content=caption, file=discord.File(local))
 
-        except Exception as e:
-            logger.error(f"[Discord] _async_send error: {e}", exc_info=True)
-            # Propagate: send() only sees this failure through
-            # future.result(), so swallowing here would make the retry
-            # above unreachable.
-            raise
+        else:
+            # Fallback: send as plain text
+            await channel.send(str(content))
+
+        logger.info(f"[Discord] sent reply (type={rtype}, channel={channel_id})")
 
 
 def _split_text(text: str, limit: int):
