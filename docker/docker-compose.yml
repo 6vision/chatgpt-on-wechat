@@ -11,8 +11,8 @@ services:
       COW_LANG: 'auto'
       # Empty: web console only. Multiple: 'web, weixin, feishu'
       CHANNEL_TYPE: ''
-      # Overrides the model chosen in the web console when set
-      # MODEL: 'deepseek-flash'
+      # Empty: deepseek-flash
+      MODEL: ''
       DEEPSEEK_API_KEY: ''
       DEEPSEEK_API_BASE: 'https://api.deepseek.com/v1'
       MINIMAX_API_KEY: ''
