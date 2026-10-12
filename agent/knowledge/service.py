@@ -540,6 +540,8 @@ class KnowledgeService:
             if name.startswith("."):
                 continue
             full = os.path.join(dir_path, name)
+            if os.path.islink(full):
+                continue
             if os.path.isdir(full):
                 sub_files, sub_children = self._scan_dir(full, stats)
                 children.append({"dir": name, "files": sub_files, "children": sub_children})
