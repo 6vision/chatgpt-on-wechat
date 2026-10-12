@@ -38,6 +38,11 @@ _SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{0,63}$")
 # A plain YAML scalar cannot start with an indicator character, and cannot carry
 # ``: `` or `` #`` anywhere in it, without changing what it parses to. A
 # description written by a user reaches all of those, so it gets quoted instead.
+#
+# YAML 1.1 also resolves innocent-looking plain scalars to a non-string
+# (yes/no/on/off, null, sexagesimal and based integers, dates): such a
+# description reads back as bool/None/int and the loader drops the skill.
+# _plain_scalar_survives_yaml covers that family.
 _YAML_NEEDS_QUOTING = re.compile(r"""^[\s\-?:,\[\]{}#&*!|>'"%@`]|:\s|\s#|:$|[\n\r]""")
 
 
@@ -58,9 +63,49 @@ def normalize_skill_name(raw: Optional[str]) -> str:
     return slug
 
 
+# Mirrors PyYAML's resolvers for plain scalars that do not come back as
+# strings; consulted only when PyYAML cannot probe the value directly.
+_YAML_NON_STRING_RE = re.compile(
+    r"""^(?:
+        yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF
+        |null|Null|NULL|~
+        |[-+]?[0-9][0-9_]*
+        |[-+]?0x[0-9a-fA-F_]+
+        |[-+]?0o[0-7_]+
+        |[-+]?[0-9][0-9_]*(\.[0-9_]*)?([eE][-+]?[0-9]+)?
+        |[-+]?\.[0-9_]+([eE][-+]?[0-9]+)?
+        |[-+]?\.(?:inf|Inf|INF|nan|NaN|NAN)
+        |[0-9][0-9_]*(?::[0-5]?[0-9])+
+        |[0-9]{4}-[0-9]{2}-[0-9]{2}
+        |[0-9]{4}-[0-9]{2}-[0-9]{2}(?:[Tt]|[ \t]+)[0-9]{2}:[0-9]{2}:[0-9]{2}
+            (?:\.[0-9]*)?(?:Z|[-+][0-9]{2}:[0-9]{2})?
+    )$""",
+    re.VERBOSE,
+)
+
+
+def _plain_scalar_survives_yaml(value: str) -> bool:
+    """Whether a plain (unquoted) YAML scalar reads back as exactly *value*.
+
+    The check is the loader's own: parse the scalar the way the frontmatter
+    parser will and require the same string back. The regex above is the
+    fallback when PyYAML is missing, and errs towards quoting.
+    """
+    try:
+        import yaml
+    except ImportError:
+        return _YAML_NON_STRING_RE.search(value) is None
+    try:
+        parsed = yaml.safe_load(value)
+    except Exception:
+        return False
+    return isinstance(parsed, str) and parsed == value
+
+
 def _yaml_scalar(value: str) -> str:
     """A frontmatter value, quoted when a plain scalar would not survive YAML."""
-    if not value or _YAML_NEEDS_QUOTING.search(value):
+    if (not value or _YAML_NEEDS_QUOTING.search(value)
+            or not _plain_scalar_survives_yaml(value)):
         # A JSON string is a valid YAML double-quoted scalar, escapes included.
         return json.dumps(value, ensure_ascii=False)
     return value
