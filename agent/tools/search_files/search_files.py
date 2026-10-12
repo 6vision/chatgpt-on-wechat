@@ -27,6 +27,7 @@ is worth a word.
 """
 
 import fnmatch
+from functools import lru_cache
 import os
 import shutil
 import stat
@@ -155,6 +156,27 @@ def _python_file_glob(pattern: str) -> str:
     if escaped:
         translated.append("\\")
     return "".join(translated)
+
+
+def _matches_file_glob(relative_path: str, pattern: str) -> bool:
+    """Match directory-aware globs while keeping basename filters recursive."""
+    if "/" not in pattern:
+        return fnmatch.fnmatch(relative_path.rsplit("/", 1)[-1], pattern)
+    path_parts = relative_path.split("/")
+    glob_parts = pattern.split("/")
+
+    @lru_cache(maxsize=None)
+    def match(path_index, glob_index):
+        if glob_index == len(glob_parts):
+            return path_index == len(path_parts)
+        segment = glob_parts[glob_index]
+        if segment == "**":
+            return (match(path_index, glob_index + 1)
+                    or (path_index < len(path_parts) and match(path_index + 1, glob_index)))
+        return (path_index < len(path_parts) and fnmatch.fnmatch(path_parts[path_index], segment)
+                and match(path_index + 1, glob_index + 1))
+
+    return match(0, 0)
 
 
 def _pruned_dirs(root: str, max_depth: int = 2) -> List[str]:
@@ -704,7 +726,7 @@ class SearchFiles(BaseTool):
                     return _BackendResult(self._python_finalize(rows, opts), False, pattern_timeout)
                 if time.monotonic() >= opts.deadline:
                     return _BackendResult(self._python_finalize(rows, opts), True, pattern_timeout)
-                if opts.file_glob and opts.file_glob != "*" and not any(fnmatch.fnmatch(filename, pattern) for pattern in file_globs):
+                if opts.file_glob and opts.file_glob != "*" and not any(_matches_file_glob(self._rel(os.path.join(dirpath, filename), root), pattern) for pattern in file_globs):
                     continue
                 fp = os.path.join(dirpath, filename)
                 if self._is_credential_path(fp):
