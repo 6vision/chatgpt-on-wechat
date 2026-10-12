@@ -282,6 +282,14 @@ def _status_to_finish_reason(response: Dict[str, Any], has_tool_calls: bool) -> 
 
 def responses_to_chat_completion(response: Dict[str, Any]) -> Dict[str, Any]:
     """Convert a non-streaming Responses object into a Chat-Completions dict."""
+    if response.get("status") == "failed":
+        error = response.get("error") or {}
+        message = error.get("message") if isinstance(error, dict) else str(error)
+        return {
+            "error": error or True,
+            "message": message or "Responses request failed",
+            "status_code": 500,
+        }
     text_parts: List[str] = []
     tool_calls: List[Dict[str, Any]] = []
     for item in response.get("output") or []:
