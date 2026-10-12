@@ -58,9 +58,25 @@ def normalize_skill_name(raw: Optional[str]) -> str:
     return slug
 
 
+def _plain_scalar_survives_yaml(value: str) -> bool:
+    """Whether a plain scalar reads back as exactly *value* (YAML 1.1 turns
+    ``no`` / ``on`` / ``1:30`` into a bool or an int)."""
+    try:
+        import yaml
+    except ImportError:
+        # Without PyYAML the frontmatter parser reads every value as a string.
+        return True
+    try:
+        parsed = yaml.safe_load(value)
+    except Exception:
+        return False
+    return isinstance(parsed, str) and parsed == value
+
+
 def _yaml_scalar(value: str) -> str:
     """A frontmatter value, quoted when a plain scalar would not survive YAML."""
-    if not value or _YAML_NEEDS_QUOTING.search(value):
+    if (not value or _YAML_NEEDS_QUOTING.search(value)
+            or not _plain_scalar_survives_yaml(value)):
         # A JSON string is a valid YAML double-quoted scalar, escapes included.
         return json.dumps(value, ensure_ascii=False)
     return value
