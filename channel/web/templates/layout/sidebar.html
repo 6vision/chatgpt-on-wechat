@@ -103,7 +103,10 @@
                         <i class="fas fa-circle text-[6px] text-primary-400"></i>
                         <button type="button" id="sidebar-version" onclick="toggleUpdateMenu(event)"
                            class="update-version-btn hover:text-primary-400 transition-colors duration-150 cursor-pointer bg-transparent border-0 p-0 text-left"
-                           aria-haspopup="menu" aria-controls="update-menu" aria-expanded="false"></button>
+                           aria-haspopup="menu" aria-controls="update-menu" aria-expanded="false">
+                            <span id="sidebar-version-label"></span>
+                            <i class="fas fa-ellipsis" aria-hidden="true"></i>
+                        </button>
                     </div>
                     <!-- Rail toggle (desktop widths only; phones use the drawer) -->
                     <button type="button" id="sidebar-collapse-btn" class="sidebar-collapse-btn"
@@ -131,6 +134,10 @@
                         <span class="update-menu-icon"><i class="fas fa-file-lines"></i></span>
                         <span class="update-menu-label" data-i18n="update_changelog">版本说明</span>
                         <i class="fas fa-arrow-up-right-from-square update-menu-ext"></i>
+                    </button>
+                    <button type="button" class="update-menu-item" role="menuitem" onclick="openMenuEditorFromFooter()">
+                        <span class="update-menu-icon"><i class="fas fa-pen"></i></span>
+                        <span class="update-menu-label" data-i18n="menu_edit">自定义菜单</span>
                     </button>
                 </div>
             </div>

@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from 'react'
-import { ChevronDown, Plus, RotateCcw, Trash2 } from 'lucide-react'
-import { t } from '../../i18n'
+import React, { useEffect, useMemo, useState } from 'react'
+import { ChevronDown, CloudDownload, Loader2, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { t, tf } from '../../i18n'
 import type { ModelCapability, ModelCatalogEntry, ModelProvider } from '../../types'
 import { TextInput } from './primitives'
 import { apiClient } from '../../api/client'
@@ -147,6 +147,17 @@ export const ModelCatalogEditor: React.FC<ModelCatalogEditorProps> = ({
   const [open, setOpen] = useState(false)
   const [discovering, setDiscovering] = useState(false)
   const [discoverError, setDiscoverError] = useState('')
+  const [discoverNotice, setDiscoverNotice] = useState('')
+  const [discoverPick, setDiscoverPick] = useState<{
+    candidates: CatalogDraftRow[]
+    selected: string[]
+  } | null>(null)
+
+  useEffect(() => {
+    setDiscoverPick(null)
+    setDiscoverError('')
+    setDiscoverNotice('')
+  }, [providerId, provider?.id])
 
   const setRow = (idx: number, patch: Partial<CatalogDraftRow>) => {
     onRowsChange(rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
@@ -177,6 +188,7 @@ export const ModelCatalogEditor: React.FC<ModelCatalogEditorProps> = ({
   const discover = async () => {
     setDiscovering(true)
     setDiscoverError('')
+    setDiscoverNotice('')
     try {
       const key = apiKey && apiKey.includes('*') ? '' : (apiKey || '')
       const res = await apiClient.modelsAction({
@@ -187,22 +199,52 @@ export const ModelCatalogEditor: React.FC<ModelCatalogEditorProps> = ({
       })
       const found = Array.isArray(res.models) ? res.models : []
       const existing = new Set(rows.map((row) => row.name.trim()).filter(Boolean))
-      const next = rows.slice()
+      const candidates: CatalogDraftRow[] = []
       for (const item of found) {
-        const raw = item && typeof item === 'object' ? item : null
-        const name = String((raw && (raw as { name?: string }).name) || '').trim()
+        const raw = item && typeof item === 'object' ? (item as Record<string, unknown>) : null
+        const name = String((raw && raw.name) || '').trim()
         if (!name || existing.has(name)) continue
         existing.add(name)
-        const caps = (raw as { capabilities?: ModelCapability[] }).capabilities
+        const caps = raw && (raw.capabilities as ModelCapability[] | undefined)
         const capabilities = Array.isArray(caps) && caps.length ? caps.slice() : (['text'] as ModelCapability[])
-        next.push({ name, capabilities, context_window: '', max_output_tokens: '' })
+        candidates.push({
+          name,
+          capabilities,
+          context_window: raw && raw.context_window ? String(raw.context_window) : '',
+          max_output_tokens: raw && raw.max_output_tokens ? String(raw.max_output_tokens) : '',
+        })
       }
-      onRowsChange(next)
+      if (!candidates.length) {
+        setDiscoverPick(null)
+        setDiscoverNotice(t('models_catalog_discover_none'))
+        return
+      }
+      setDiscoverPick({
+        candidates,
+        selected: candidates.filter((row) => row.capabilities.includes('text')).map((row) => row.name),
+      })
     } catch (err) {
       setDiscoverError(err instanceof Error ? err.message : String(err))
     } finally {
       setDiscovering(false)
     }
+  }
+
+  const applyDiscoverPick = () => {
+    if (!discoverPick) return
+    const chosen = new Set(discoverPick.selected)
+    const existing = new Set(rows.map((row) => row.name.trim()).filter(Boolean))
+    const next = rows.slice()
+    let added = 0
+    for (const model of discoverPick.candidates) {
+      if (!chosen.has(model.name) || existing.has(model.name)) continue
+      existing.add(model.name)
+      next.push(model)
+      added += 1
+    }
+    onRowsChange(next)
+    setDiscoverPick(null)
+    setDiscoverNotice(tf('models_catalog_discovered', { n: added }))
   }
 
   const removeRow = (idx: number) => {
@@ -328,6 +370,7 @@ export const ModelCatalogEditor: React.FC<ModelCatalogEditorProps> = ({
                          text-content-secondary hover:bg-hover cursor-pointer transition-colors
                          disabled:opacity-50 disabled:cursor-not-allowed"
             >
+              {discovering ? <Loader2 size={12} className="animate-spin" /> : <CloudDownload size={12} />}
               {discovering ? t('models_catalog_discovering') : t('models_catalog_discover')}
             </button>
             {!isCustom && (
@@ -344,6 +387,66 @@ export const ModelCatalogEditor: React.FC<ModelCatalogEditorProps> = ({
           </div>
           {discoverError && (
             <p className="text-xs text-danger break-words">{discoverError}</p>
+          )}
+          {discoverNotice && !discoverPick && (
+            <p className="text-xs text-accent break-words">{discoverNotice}</p>
+          )}
+          {discoverPick && (
+            <div className="rounded-lg border border-default p-2.5 space-y-2">
+              <div className="text-xs font-medium text-content-secondary">
+                {t('models_catalog_discover_pick')}
+                <span className="font-normal text-content-tertiary">
+                  {' '}
+                  · {discoverPick.selected.length}/{discoverPick.candidates.length}
+                </span>
+              </div>
+              <div className="max-h-48 overflow-y-auto space-y-1">
+                {discoverPick.candidates.map((model) => {
+                  const on = discoverPick.selected.includes(model.name)
+                  return (
+                    <label key={model.name} className="flex items-start gap-2 py-1 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() =>
+                          setDiscoverPick({
+                            ...discoverPick,
+                            selected: on
+                              ? discoverPick.selected.filter((name) => name !== model.name)
+                              : [...discoverPick.selected, model.name],
+                          })
+                        }
+                        className="mt-0.5 cursor-pointer"
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-xs font-mono text-content break-all">{model.name}</span>
+                        <span className="block text-[10px] text-content-tertiary">
+                          {model.capabilities.map((cap) => t(CAP_TAG_KEYS[cap])).join(' · ')}
+                        </span>
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={applyDiscoverPick}
+                  className="inline-flex items-center px-2.5 py-1 rounded-btn text-xs font-medium
+                             text-accent bg-accent-soft hover:bg-accent-soft/70 cursor-pointer"
+                >
+                  {t('models_catalog_discover_apply')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDiscoverPick(null)}
+                  className="inline-flex items-center px-2.5 py-1 rounded-btn text-xs
+                             text-content-tertiary hover:bg-hover cursor-pointer"
+                >
+                  {t('models_catalog_discover_cancel')}
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}

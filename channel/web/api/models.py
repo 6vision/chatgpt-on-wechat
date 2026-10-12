@@ -9,7 +9,7 @@ class because the frontend asks for the whole page state in one request.
 """
 
 from collections import OrderedDict
-from typing import List
+from typing import Any, Dict, List, Optional
 import json
 import os
 
@@ -41,6 +41,26 @@ class ModelDiscoveryError(Exception):
     """A provider discovery request could not produce a usable model list."""
 
 
+# Names that are never useful in the catalog: moderation/rerank endpoints, and
+# realtime/session models that cannot be used as a chat or tool model here.
+_SKIP_NAME_WORDS = ("moderation", "rerank", "realtime")
+
+# LinkAI (and similar aggregators) send a comma-separated model_type. Mapped
+# onto the catalog tags the console already understands.
+_TYPE_TO_CAPS = {
+    "LLM": ["text"],
+    "REASONER": ["text"],
+    "VISION": ["text", "vision"],
+    "IMAGEN": ["image"],
+    "IMAGE": ["image"],
+    "VIDEO": ["video"],
+    "TTS": ["tts"],
+    "ASR": ["asr"],
+    "EMBEDDING": ["embedding"],
+    "VOICE_CLONE": ["tts"],
+}
+
+
 def _models_endpoint(provider_id: str, api_base: str) -> str:
     base = (api_base or "").strip().rstrip("/")
     if not base:
@@ -50,6 +70,11 @@ def _models_endpoint(provider_id: str, api_base: str) -> str:
     if provider_id == "gemini" and not base.endswith("/v1beta"):
         if not base.endswith("/v1"):
             base += "/v1beta"
+    # LinkAI's configured host is the origin (no /v1); the list lives under /v1.
+    if provider_id == "linkai" and not base.endswith(("/v1", "/models")):
+        base += "/v1"
+    if provider_id == "minimax" and not base.endswith(("/v1", "/models")):
+        base += "/v1"
     if base.endswith("/models"):
         return base
     return base + "/models"
@@ -66,27 +91,137 @@ def _same_base(a: str, b: str) -> bool:
     return (a or "").strip().rstrip("/") == (b or "").strip().rstrip("/")
 
 
-def _discovered_capabilities(name: str) -> List[str]:
-    """Best-effort capability tag from a model name; the user can edit it."""
+def _should_skip_name(name: str) -> bool:
+    lowered = name.lower()
+    return any(word in lowered for word in _SKIP_NAME_WORDS)
+
+
+def _positive_int(value) -> Optional[int]:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _budget_from_row(row: Dict[str, Any]) -> tuple:
+    """Read a context window / max-output pair from whatever the vendor sent."""
+    context_window = (
+        _positive_int(row.get("context_window"))
+        or _positive_int(row.get("max_input_tokens"))
+        or _positive_int(row.get("inputTokenLimit"))
+        or _positive_int(row.get("input_token_limit"))
+    )
+    max_output = (
+        _positive_int(row.get("max_output_tokens"))
+        or _positive_int(row.get("outputTokenLimit"))
+        or _positive_int(row.get("output_token_limit"))
+        or _positive_int(row.get("max_tokens"))
+    )
+    return context_window, max_output
+
+
+def _capabilities_from_model_type(value) -> List[str]:
+    if not isinstance(value, str) or not value.strip():
+        return []
+    caps: List[str] = []
+    seen = set()
+    for part in value.split(","):
+        for cap in _TYPE_TO_CAPS.get(part.strip().upper(), ()):
+            if cap not in seen:
+                seen.add(cap)
+                caps.append(cap)
+    return caps
+
+
+def _as_str_list(value) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).lower() for item in value if item]
+
+
+def _capabilities_from_modalities(row: Dict[str, Any]) -> List[str]:
+    """Map OpenAI-style input/output modality lists onto catalog tags."""
+    inp = _as_str_list(row.get("input_modalities") or row.get("inputModalities"))
+    out = _as_str_list(row.get("output_modalities") or row.get("outputModalities"))
+    if not inp and not out:
+        return []
+    caps: List[str] = []
+    if "text" in inp or "text" in out:
+        caps.append("text")
+    if "image" in inp and "vision" not in caps:
+        caps.append("vision")
+    if "image" in out:
+        caps.append("image")
+    if "video" in inp or "video" in out:
+        caps.append("video")
+    if "audio" in inp:
+        caps.append("asr")
+    if "audio" in out:
+        caps.append("tts")
+    return caps
+
+
+def _discovered_capabilities(name: str, row: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Tag a discovered model. Structured fields win; the name is the fallback.
+
+    The user can still edit the tags in the catalog after a discover pass.
+    """
+    if isinstance(row, dict):
+        typed = _capabilities_from_model_type(row.get("model_type") or row.get("modelType"))
+        if typed:
+            return typed
+        from_mod = _capabilities_from_modalities(row)
+        if from_mod:
+            return from_mod
+        methods = row.get("supportedGenerationMethods") or []
+        if isinstance(methods, list) and any(
+            str(method).lower().startswith("embed") for method in methods
+        ):
+            return ["embedding"]
+
     lowered = name.lower()
     if "embed" in lowered:
         return ["embedding"]
-    if "tts" in lowered:
+    if any(word in lowered for word in ("tts", "cosyvoice", "voiceclone", "voicedesign")):
         return ["tts"]
-    if "whisper" in lowered or "transcribe" in lowered:
+    if "speech" in lowered and "asr" not in lowered:
+        return ["tts"]
+    if any(word in lowered for word in ("whisper", "transcribe", "asr", "paraformer", "livetranslate")):
         return ["asr"]
-    if "dall-e" in lowered or "image" in lowered:
+    if any(word in lowered for word in ("video", "veo", "sora", "kling", "seedance")):
+        return ["video"]
+    if any(word in lowered for word in ("dall-e", "imagen", "seedream", "flux", "midjourney", "cogview")):
         return ["image"]
+    if "image" in lowered and "imagine" not in lowered:
+        return ["image"]
+    if "-vl" in lowered or "vl-" in lowered or "vision" in lowered:
+        return ["text", "vision"]
     return ["text"]
 
 
-def _discover_models(provider_id: str, api_key: str, api_base: str) -> List[str]:
+def _row_to_catalog_entry(name: str, row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    entry: Dict[str, Any] = {
+        "name": name,
+        "capabilities": _discovered_capabilities(name, row),
+    }
+    if isinstance(row, dict):
+        context_window, max_output = _budget_from_row(row)
+        if context_window:
+            entry["context_window"] = context_window
+        if max_output:
+            entry["max_output_tokens"] = max_output
+    return entry
+
+
+def _discover_models(provider_id: str, api_key: str, api_base: str) -> List[Dict[str, Any]]:
     """Fetch and normalize a provider's model list.
 
     Supports OpenAI-compatible ``/models`` endpoints, Anthropic's ``/models``
-    header contract, and Gemini's query-key response shape. Upstream failures
-    are converted to ModelDiscoveryError so the HTTP handler can return a
-    normal JSON error instead of a traceback.
+    header contract, and Gemini's query-key response shape. Each row is tagged
+    from structured fields when the vendor sends them, otherwise from the name.
+    Upstream failures become ModelDiscoveryError so the HTTP handler can return
+    a normal JSON error instead of a traceback.
     """
     url = _models_endpoint(provider_id, api_base)
     headers = {}
@@ -137,23 +272,30 @@ def _discover_models(provider_id: str, api_key: str, api_base: str) -> List[str]
     if not isinstance(rows, list):
         raise ModelDiscoveryError("provider response did not contain a model list")
 
-    models = []
+    models: List[Dict[str, Any]] = []
     seen = set()
     for row in rows:
+        extra = None
         if isinstance(row, str):
             name = row
         elif isinstance(row, dict):
             name = row.get("id") or row.get("name") or row.get("model") or ""
+            extra = row
         else:
             continue
         name = _strip_provider_model_name(name)
-        if any(word in name.lower() for word in ("moderation", "rerank")):
+        if not name or name in seen or _should_skip_name(name):
             continue
-        if name and name not in seen:
-            seen.add(name)
-            models.append(name)
-            if len(models) >= 1000:
-                break
+        # A judge-only model (LinkAI types Jev as JUDGE) has no chat/tool
+        # endpoint; structured type wins, the name would otherwise look like text.
+        if isinstance(extra, dict):
+            typed = {p.strip().upper() for p in str(extra.get("model_type") or extra.get("modelType") or "").split(",") if p.strip()}
+            if typed & {"JUDGE"} and not typed & {"LLM", "REASONER", "VISION"}:
+                continue
+        seen.add(name)
+        models.append(_row_to_catalog_entry(name, extra))
+        if len(models) >= 1000:
+            break
     if not models:
         raise ModelDiscoveryError("provider returned an empty model list")
     return models
@@ -1686,6 +1828,12 @@ class ModelsHandler:
             base_field = meta.get("api_base_key")
             stored_key = local_config.get(key_field, "") if key_field else ""
             stored_base = local_config.get(base_field, "") if base_field else ""
+            # These vendors keep the host in a config key the form does not
+            # expose (so the credential modal stays a key-only dialog).
+            if provider_id == "linkai":
+                stored_base = (local_config.get("linkai_api_base") or "").strip() or stored_base
+            elif provider_id == "minimax":
+                stored_base = (local_config.get("minimax_api_base") or "").strip() or stored_base
             stored_base = stored_base or meta.get("api_base_default") or ""
         else:
             stored_key = local_config.get("custom_api_key", "")
@@ -1703,14 +1851,14 @@ class ModelsHandler:
         if not api_key and effective_id != "custom":
             return json.dumps({"status": "error", "message": "API key is required"})
         try:
-            names = _discover_models(effective_id, api_key, api_base)
+            models = _discover_models(effective_id, api_key, api_base)
         except ModelDiscoveryError as exc:
             return json.dumps({"status": "error", "message": str(exc)})
         return json.dumps({
             "status": "success",
             "provider_id": provider_id,
-            "models": [{"name": name, "capabilities": _discovered_capabilities(name)} for name in names],
-            "count": len(names),
+            "models": models,
+            "count": len(models),
         }, ensure_ascii=False)
 
     def _handle_set_provider(self, data: dict) -> str:
