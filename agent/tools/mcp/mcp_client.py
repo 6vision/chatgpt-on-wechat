@@ -90,6 +90,10 @@ def _oauth_redirect_uri() -> str:
     return f"{base}/mcp/oauth/callback"
 
 
+class McpToolExecutionError(RuntimeError):
+    """The server executed the tool and reported a failed result."""
+
+
 class McpClient:
     """Single MCP Server client supporting stdio, SSE and Streamable HTTP transports."""
 
@@ -214,11 +218,17 @@ class McpClient:
         try:
             resp = self._send_request("tools/call", {"name": name, "arguments": arguments})
             self._raise_for_rpc_error(resp)
-            content = (resp.get("result") or {}).get("content", [])
+            result = resp.get("result") or {}
+            content = result.get("content", [])
             parts = [item.get("text", "") for item in content if item.get("type") == "text"]
-            if not parts and "structuredContent" in (resp.get("result") or {}):
-                return json.dumps(resp["result"]["structuredContent"], ensure_ascii=False)
-            return "\n".join(parts)
+            text = "\n".join(parts)
+            if not parts and "structuredContent" in result:
+                text = json.dumps(result["structuredContent"], ensure_ascii=False)
+            if result.get("isError"):
+                raise McpToolExecutionError(text or "MCP tool execution failed")
+            return text
+        except McpToolExecutionError:
+            raise
         except Exception as e:
             logger.warning(f"[MCP:{self.name}] call_tool({name}) failed: {e}")
             return f"Error: {e}"
