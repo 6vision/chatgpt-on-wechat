@@ -71,7 +71,7 @@ const Tooltip: React.FC<TooltipProps> = ({ label, placement = 'top', delay = 120
               pointerEvents: 'none',
               zIndex: 9999,
             }}
-            className="px-2 py-1 rounded-md bg-elevated border border-default shadow-lg text-[11px] leading-none text-content whitespace-nowrap max-w-[320px] overflow-hidden text-ellipsis"
+            className="px-2 py-1 rounded-md bg-elevated border border-default shadow-lg text-[11px] leading-none text-content whitespace-nowrap max-w-[480px] overflow-hidden text-ellipsis"
           >
             {label}
           </div>,

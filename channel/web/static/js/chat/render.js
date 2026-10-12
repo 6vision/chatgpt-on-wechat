@@ -88,10 +88,10 @@ function createUserMessageEl(content, timestamp, attachments) {
                 ${attachHtml}${textHtml}
             </div>
             <div class="flex items-center justify-end gap-2 mt-1.5">
-                <button class="edit-msg-btn text-xs text-slate-300 dark:text-slate-600 hover:text-primary-400 dark:hover:text-primary-400 transition-colors cursor-pointer" title="${t('edit_message')}">
+                <button class="edit-msg-btn text-xs text-slate-300 dark:text-slate-600 hover:text-primary-400 dark:hover:text-primary-400 transition-colors cursor-pointer" data-tip-float data-tooltip="${t('edit_message')}">
                     <i class="fas fa-pen-to-square"></i>
                 </button>
-                <button class="delete-msg-btn text-xs text-slate-300 dark:text-slate-600 hover:text-red-500 dark:hover:text-red-400 transition-colors cursor-pointer" title="${t('delete_message_title')}">
+                <button class="delete-msg-btn text-xs text-slate-300 dark:text-slate-600 hover:text-red-500 dark:hover:text-red-400 transition-colors cursor-pointer" data-tip-float data-tooltip="${t('delete_message_title')}">
                     <i class="fas fa-trash"></i>
                 </button>
                 <span class="text-xs text-slate-400 dark:text-slate-500">${formatTime(timestamp)}</span>
@@ -405,16 +405,9 @@ function evolutionContentKey(text) {
     return (text || '').replace(/\s+/g, ' ').trim();
 }
 
-// Format a token count compactly while keeping the exact values in the
-// tooltip. The composer donut answers current-window usage; this per-message
-// line answers "what did this reply cost?" even after a reload.
-function formatMessageTokens(value) {
-    const n = Math.max(0, Number(value) || 0);
-    if (n < 1000) return String(Math.round(n));
-    if (n < 10000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
-    return Math.round(n / 1000) + 'k';
-}
-
+// Per-reply provider usage, shown on hover so it stays out of the way. The
+// composer donut answers current-window usage; this answers "what did this
+// reply cost?" even after a reload.
 function renderMessageUsageHtml(usage) {
     if (!usage || typeof usage !== 'object') return '';
     const input = Math.max(0, Number(usage.prompt_tokens) || 0);
@@ -422,22 +415,18 @@ function renderMessageUsageHtml(usage) {
     const total = Math.max(0, Number(usage.total_tokens) || (input + output));
     if (!total && !input && !output) return '';
     const cached = Math.max(0, Number(usage.prompt_cache_hit_tokens) || 0);
-    const miss = Math.max(0, Number(usage.prompt_cache_miss_tokens) || (input - cached));
     const calls = Math.max(1, Number(usage.calls) || 1);
-    const title = [
-        t('msg_usage_total') + ': ' + total,
-        t('msg_usage_in') + ': ' + input,
-        t('msg_usage_out') + ': ' + output,
-        t('msg_usage_cached') + ': ' + cached,
-        t('msg_usage_cache_miss') + ': ' + miss,
-    ].join(' · ') + (calls > 1 ? ' · calls: ' + calls : '');
-    return '<span class="message-usage text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap cursor-help"' +
-        ' data-message-usage="1" title="' + escapeHtml(title) + '">' +
-        '<i class="fas fa-coins mr-1 opacity-70"></i>' +
-        formatMessageTokens(total) + ' ' + escapeHtml(t('msg_usage_tokens')) + ' · ' +
-        formatMessageTokens(input) + ' ' + escapeHtml(t('msg_usage_in')) + ' / ' +
-        formatMessageTokens(output) + ' ' + escapeHtml(t('msg_usage_out')) +
-        '</span>';
+    const fmt = (n) => n.toLocaleString();
+    const parts = [
+        t('msg_usage_total') + ' ' + fmt(total),
+        t('msg_usage_in') + ' ' + fmt(input),
+        t('msg_usage_out') + ' ' + fmt(output),
+    ];
+    if (cached && input) parts.push(t('msg_usage_cached') + ' ' + Math.round(cached * 100 / input) + '%');
+    if (calls > 1) parts.push(t('msg_usage_calls').replace('{n}', calls));
+    return '<span class="message-usage text-xs text-slate-300 dark:text-slate-600 hover:text-slate-500 dark:hover:text-slate-400 transition-colors cursor-pointer"' +
+        ' data-message-usage="1" data-tip-float data-tooltip="' + escapeHtml(parts.join(' · ')) + '">' +
+        '<i class="fas fa-coins"></i></span>';
 }
 
 function attachMessageUsage(botEl, usage) {
@@ -447,7 +436,10 @@ function attachMessageUsage(botEl, usage) {
     const old = footer.querySelector('[data-message-usage]');
     if (old) old.remove();
     const html = renderMessageUsageHtml(usage);
-    if (html) footer.insertAdjacentHTML('afterbegin', html);
+    if (!html) return;
+    const regen = footer.querySelector('.regenerate-msg-btn');
+    if (regen) regen.insertAdjacentHTML('beforebegin', html);
+    else footer.insertAdjacentHTML('beforeend', html);
 }
 
 function createBotMessageEl(content, timestamp, requestId, msg, peer) {
@@ -533,15 +525,15 @@ function createBotMessageEl(content, timestamp, requestId, msg, peer) {
                 <div class="bot-audio-slot"></div>
             </div>
             <div class="bot-message-meta flex items-center gap-2 mt-1.5 flex-wrap">
-                ${renderMessageUsageHtml(msg && msg.usage)}
                 <span class="text-xs text-slate-400 dark:text-slate-500">${formatTime(timestamp)}</span>
-                <button class="copy-msg-btn text-xs text-slate-300 dark:text-slate-600 hover:text-slate-500 dark:hover:text-slate-400 transition-colors cursor-pointer" title="${currentLang === 'zh' ? '复制' : 'Copy'}">
+                <button class="copy-msg-btn text-xs text-slate-300 dark:text-slate-600 hover:text-slate-500 dark:hover:text-slate-400 transition-colors cursor-pointer" data-tip-float data-tooltip="${currentLang === 'zh' ? '复制' : 'Copy'}">
                     <i class="fas fa-copy"></i>
                 </button>
-                <button class="speak-msg-btn text-xs text-slate-300 dark:text-slate-600 hover:text-slate-500 dark:hover:text-slate-400 transition-colors cursor-pointer" title="${t('speak_msg')}" style="display:none;">
+                <button class="speak-msg-btn text-xs text-slate-300 dark:text-slate-600 hover:text-slate-500 dark:hover:text-slate-400 transition-colors cursor-pointer" data-tip-float data-tooltip="${t('speak_msg')}" style="display:none;">
                     <i class="fas fa-volume-up"></i>
                 </button>
-                ${peer ? '' : `<button class="regenerate-msg-btn text-xs text-slate-300 dark:text-slate-600 hover:text-primary-400 dark:hover:text-primary-400 transition-colors cursor-pointer" title="${t('regenerate_response')}">
+                ${renderMessageUsageHtml(msg && msg.usage)}
+                ${peer ? '' : `<button class="regenerate-msg-btn text-xs text-slate-300 dark:text-slate-600 hover:text-primary-400 dark:hover:text-primary-400 transition-colors cursor-pointer" data-tip-float data-tooltip="${t('regenerate_response')}">
                     <i class="fas fa-rotate-right"></i>
                 </button>`}
             </div>
