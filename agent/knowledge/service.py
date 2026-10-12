@@ -64,21 +64,13 @@ class KnowledgeService:
 
         root = Path(self.knowledge_dir).resolve()
         candidate = root.joinpath(*parts)
-        # Resolve the nearest existing ancestor so a symlink cannot be used
-        # to escape when the final destination does not exist yet.
-        ancestor = candidate
-        while not ancestor.exists() and ancestor != root:
-            ancestor = ancestor.parent
+        # Resolve the final path too: exists() is false for a dangling
+        # symlink, even though opening it can create an out-of-root target.
         try:
-            ancestor.resolve().relative_to(root)
+            candidate.resolve().relative_to(root)
         except ValueError:
             raise ValueError("path outside knowledge dir")
-        if candidate.exists():
-            try:
-                candidate.resolve().relative_to(root)
-            except ValueError:
-                raise ValueError("path outside knowledge dir")
-        elif not allow_missing:
+        if not candidate.exists() and not allow_missing:
             raise FileNotFoundError(f"path not found: {rel_path}")
         return rel_path, candidate
 
@@ -286,6 +278,7 @@ class KnowledgeService:
         safe_name = self._sanitize_document_name(filename)
         destination = target_full / safe_name
         rel_path = f"{target_rel}/{safe_name}"
+        _, destination = self._resolve_path(rel_path, kind="document")
 
         if destination.exists():
             if conflict_strategy == "skip":
@@ -297,6 +290,7 @@ class KnowledgeService:
                     candidate = target_full / f"{stem}-{index}{suffix}"
                     if not candidate.exists():
                         candidate_rel = f"{target_rel}/{candidate.name}"
+                        _, candidate = self._resolve_path(candidate_rel, kind="document")
                         return candidate_rel, candidate, "write"
                 raise FileExistsError(f"target already exists: {rel_path}")
             if conflict_strategy != "overwrite":
