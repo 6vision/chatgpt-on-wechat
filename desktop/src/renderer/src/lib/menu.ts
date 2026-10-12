@@ -59,9 +59,9 @@ export const MENU_BUILTINS: Record<string, { path: string; labelKey: string; ico
   logs: { path: '/logs', labelKey: 'menu_logs', icon: ScrollText },
 }
 
-// The built-in menu. Until the user saves one the rail draws it flat, in this
-// order. The document is shared with the web console, so it keeps every page
-// the console has, footer ones included.
+// The built-in menu, drawn in these groups until the user saves their own.
+// The document is shared with the web console, so it keeps every page the
+// console has, footer ones included.
 export const MENU_DEFAULT: { id: string; views: string[] }[] = [
   { id: 'chat', views: ['chat', 'artifacts'] },
   { id: 'manage', views: ['agents', 'knowledge', 'memory', 'skills', 'channels', 'tasks', 'config'] },

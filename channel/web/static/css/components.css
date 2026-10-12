@@ -81,6 +81,10 @@
     align-items: center;
     gap: 6px;
 }
+.update-version-btn .fa-ellipsis {
+    font-size: 13px;
+    opacity: 0.75;
+}
 .update-menu {
     position: absolute;
     left: 12px;

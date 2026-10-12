@@ -1,7 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
-type Placement = 'top' | 'bottom'
+type Placement = 'top' | 'bottom' | 'right'
 
 interface TooltipProps {
   label: string
@@ -26,10 +26,14 @@ const Tooltip: React.FC<TooltipProps> = ({ label, placement = 'top', delay = 120
       if (timerRef.current) clearTimeout(timerRef.current)
       timerRef.current = setTimeout(() => {
         const r = el.getBoundingClientRect()
-        setPos({
-          x: r.left + r.width / 2,
-          y: placement === 'top' ? r.top - 8 : r.bottom + 8,
-        })
+        setPos(
+          placement === 'right'
+            ? { x: r.right + 8, y: r.top + r.height / 2 }
+            : {
+                x: r.left + r.width / 2,
+                y: placement === 'top' ? r.top - 8 : r.bottom + 8,
+              },
+        )
       }, delay)
     },
     [delay, placement],
@@ -67,7 +71,12 @@ const Tooltip: React.FC<TooltipProps> = ({ label, placement = 'top', delay = 120
               position: 'fixed',
               left: pos.x,
               top: pos.y,
-              transform: placement === 'top' ? 'translate(-50%, -100%)' : 'translate(-50%, 0)',
+              transform:
+                placement === 'right'
+                  ? 'translate(0, -50%)'
+                  : placement === 'top'
+                    ? 'translate(-50%, -100%)'
+                    : 'translate(-50%, 0)',
               pointerEvents: 'none',
               zIndex: 9999,
             }}

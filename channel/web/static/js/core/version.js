@@ -53,11 +53,17 @@ function _closeUpdateMenuOnOutside(event) {
     closeUpdateMenu();
 }
 
-// Set the sidebar version text. The red dot lives outside this button (as a
-// footer child), so plain textContent is safe.
+// Set the sidebar version text ("v2.2.0"). The kebab lives in the button
+// markup so this only touches the label span.
 function _setSidebarVersionLabel(text) {
-    const btn = document.getElementById('sidebar-version');
-    if (btn) btn.textContent = text || '';
+    const label = document.getElementById('sidebar-version-label');
+    if (label) label.textContent = text || '';
+}
+
+// Footer "more" menu: close it, then open the shared menu editor.
+function openMenuEditorFromFooter() {
+    closeUpdateMenu();
+    if (typeof menuEditorOpen === 'function') menuEditorOpen();
 }
 
 // "版本说明": open the GitHub releases page (keeps the old click-through behaviour).
@@ -232,7 +238,7 @@ function _waitForBackend() {
                     unsupported_reason: data.unsupported_reason || ''
                 };
                 APP_VERSION = `v${data.version}`;
-                _setSidebarVersionLabel(`CowAgent ${APP_VERSION}`);
+                _setSidebarVersionLabel(APP_VERSION);
                 UPDATE_CHECK = { up_to_date: true, newer_releases: [], latest: null, current_release: null };
                 _updateRunning = false;
                 _renderUpdateAction('up_to_date', t('update_done'));

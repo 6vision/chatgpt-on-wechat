@@ -30,6 +30,7 @@ import { useTheme } from '../hooks/useTheme'
 import { usePlatform } from '../hooks/usePlatform'
 import { useUpdateStore, hasPendingUpdate, hasAvailableUpdate } from '../store/updateStore'
 import UpdateBanner from '../components/UpdateBanner'
+import Tooltip from '../components/Tooltip'
 import { useMenuStore } from '../store/menuStore'
 import { groupLabel, itemIcon, itemLabel, itemRoute, itemShows } from '../lib/menu'
 import { product } from '@product'
@@ -78,14 +79,13 @@ const NavRail: React.FC<NavRailProps> = ({ onLangChange }) => {
     navigate(path)
   }
 
-  const savedMenu = useMenuStore((s) => s.saved)
   const menu = useMenuStore((s) => s.doc)
   const openMenuEditor = useMenuStore((s) => s.openEditor)
-  // Until the user saves a menu the rail stays the flat list it has always
-  // been; a saved one is drawn by group.
-  const sections: { group: MenuGroup | null; items: MenuItem[] }[] = savedMenu
-    ? menu.groups.map((group) => ({ group, items: group.items.filter(itemShows) })).filter((s) => s.items.length)
-    : [{ group: null, items: menu.groups.flatMap((g) => g.items).filter(itemShows) }]
+  // Always draw by group — the built-in menu is "Chat" / "Manage" until the
+  // user saves their own. Empty groups (e.g. footer-only Monitor) drop out.
+  const sections: { group: MenuGroup; items: MenuItem[] }[] = menu.groups
+    .map((group) => ({ group, items: group.items.filter(itemShows) }))
+    .filter((s) => s.items.length)
 
   const openItem = (item: MenuItem) => {
     if (item.type === 'url' && item.open === 'tab') {
@@ -204,12 +204,26 @@ const NavRail: React.FC<NavRailProps> = ({ onLangChange }) => {
       <nav className="flex-1 overflow-y-auto px-2 py-2">
         {sections.map(({ group, items }, index) => (
           <div
-            key={group?.id ?? 'flat'}
+            key={group.id}
             className={index ? (collapsed ? 'mt-1.5 pt-1.5 border-t border-subtle' : 'mt-2') : ''}
           >
-            {group && !collapsed && (
-              <div className="px-3 pt-1 pb-1 text-[11px] font-medium text-content-tertiary truncate select-none">
-                {groupLabel(group)}
+            {!collapsed && (
+              <div className="group/head relative flex items-center pr-1">
+                <div className="flex-1 min-w-0 px-3 pt-1 pb-1 text-[11px] font-medium text-content-tertiary truncate select-none">
+                  {groupLabel(group)}
+                </div>
+                <Tooltip label={t('menu_edit')} placement="right">
+                  <button
+                    type="button"
+                    onClick={() => openMenuEditor()}
+                    aria-label={t('menu_edit')}
+                    className="flex-shrink-0 w-6 h-6 inline-flex items-center justify-center rounded-md
+                               text-content-tertiary opacity-0 group-hover/head:opacity-100 hover:opacity-100
+                               hover:bg-surface-2 hover:text-content cursor-pointer transition-opacity"
+                  >
+                    <SquarePen size={11} />
+                  </button>
+                </Tooltip>
               </div>
             )}
             <div className="space-y-0.5">
