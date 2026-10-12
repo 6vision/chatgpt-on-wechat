@@ -165,6 +165,16 @@ export interface MessageStep {
 }
 
 /** Local UI message model (superset of backend history message). */
+/** Provider-reported token usage summed over one reply's model calls. */
+export interface MessageUsage {
+  prompt_tokens?: number
+  completion_tokens?: number
+  total_tokens?: number
+  prompt_cache_hit_tokens?: number
+  prompt_cache_miss_tokens?: number
+  calls?: number
+}
+
 export interface ChatMessage {
   id: string
   role: Role
@@ -183,6 +193,7 @@ export interface ChatMessage {
   /** Sequence numbers from backend (for delete/regenerate). */
   userSeq?: number
   botSeq?: number
+  usage?: MessageUsage
   /** Self-evolution bubble flag; 'divider' renders a context-cleared separator. */
   kind?: 'evolution' | 'divider'
   extras?: Record<string, unknown>
@@ -462,6 +473,8 @@ export interface StreamEvent {
   timestamp?: number
   user_seq?: number
   bot_seq?: number
+  /** `done`: usage of the reply just persisted. */
+  usage?: MessageUsage
   message?: string
 }
 
@@ -559,6 +572,7 @@ export interface HistoryMessage {
   artifacts?: Artifact[]
   /** Per-message sequence number used by delete/regenerate APIs. */
   _seq?: number
+  usage?: MessageUsage
   /** Set on an assistant turn whose run stopped short of its answer. */
   run_state?: RunState
 }
