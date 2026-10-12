@@ -35,6 +35,7 @@ A custom (OpenAI-compatible) provider has no presets, so its ``overrides`` are
 simply its whole model list and ``hidden`` stays empty.
 """
 
+from copy import deepcopy
 import json
 import os
 import threading
@@ -255,7 +256,7 @@ def get_catalog_map() -> dict:
     out = {}
     for pid, doc in _load()["providers"].items():
         if doc["overrides"]:
-            out[pid] = [dict(e) for e in doc["overrides"]]
+            out[pid] = [deepcopy(e) for e in doc["overrides"]]
     return out
 
 
@@ -274,7 +275,7 @@ def get_catalog(provider_id) -> list:
     if not provider_id:
         return []
     doc = _load()["providers"].get(provider_id)
-    return [dict(e) for e in doc["overrides"]] if doc else []
+    return [deepcopy(e) for e in doc["overrides"]] if doc else []
 
 
 def get_hidden(provider_id) -> list:
