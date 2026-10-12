@@ -79,6 +79,9 @@ class MinimaxVoice(Voice):
                 base_resp = event_data.get("base_resp") or {}
                 if base_resp:
                     last_base_resp = base_resp
+                    if base_resp.get("status_code") not in (None, 0):
+                        logger.error("[MINIMAX] synthesis stream failed: code=%s", base_resp.get("status_code"))
+                        return Reply(ReplyType.ERROR, "语音合成失败")
                 audio_hex = (event_data.get("data") or {}).get("audio")
                 if audio_hex:
                     try:
