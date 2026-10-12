@@ -9,9 +9,9 @@ services:
       - "9899:9899"
     environment:
       COW_LANG: 'auto'
-      CHANNEL_TYPE: 'web, weixin'
-      # Any value set here overrides the model chosen in the web console on
-      # every start. Unset, it defaults to deepseek-flash.
+      # Empty: web console only. Multiple: 'web, weixin, feishu'
+      CHANNEL_TYPE: ''
+      # Overrides the model chosen in the web console when set
       # MODEL: 'deepseek-flash'
       DEEPSEEK_API_KEY: ''
       DEEPSEEK_API_BASE: 'https://api.deepseek.com/v1'
