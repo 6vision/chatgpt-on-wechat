@@ -271,12 +271,12 @@ def _cc_usage(usage: Any) -> Optional[Dict[str, Any]]:
 
 def _status_to_finish_reason(response: Dict[str, Any], has_tool_calls: bool) -> str:
     status = response.get("status")
-    if has_tool_calls:
-        return "tool_calls"
     if status == "incomplete":
         details = response.get("incomplete_details") or {}
         if details.get("reason") == "max_output_tokens":
             return "length"
+    if has_tool_calls:
+        return "tool_calls"
     return "stop"
 
 
