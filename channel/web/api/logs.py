@@ -49,6 +49,8 @@ class LogsHandler:
 
                     deadline = time.time() + 600  # 10 min max
                     while time.time() < deadline:
+                        if os.fstat(f.fileno()).st_size < f.tell():
+                            f.seek(0)
                         line = f.readline()
                         if line:
                             payload = json.dumps({"type": "line", "content": line}, ensure_ascii=False)
