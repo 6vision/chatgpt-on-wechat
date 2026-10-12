@@ -37,6 +37,7 @@ simply its whole model list and ``hidden`` stays empty.
 
 import json
 import os
+import threading
 
 from common.atomic_write import write_json_atomic
 from common.log import logger
@@ -229,18 +230,21 @@ def _write_store(store: dict) -> None:
 # In-memory cache so the budget/request paths (called every LLM turn) don't hit
 # disk. Invalidated on every write, which all goes through this module.
 _cache = None
+_store_lock = threading.RLock()
 
 
 def _load() -> dict:
     global _cache
-    if _cache is None:
-        _cache = _read_store()
-    return _cache
+    with _store_lock:
+        if _cache is None:
+            _cache = _read_store()
+        return _cache
 
 
 def _invalidate() -> None:
     global _cache
-    _cache = None
+    with _store_lock:
+        _cache = None
 
 
 def get_catalog_map() -> dict:
@@ -305,14 +309,16 @@ def save_catalog(provider_id, models, hidden=None) -> list:
             seen.add(name)
             tombstones.append(name)
 
-    store = _read_store()  # read fresh so a concurrent edit isn't clobbered
-    providers = store["providers"]
-    if entries or tombstones:
-        providers[provider_id] = {"overrides": entries, "hidden": tombstones}
-    else:
-        providers.pop(provider_id, None)
-    _write_store(store)
-    _invalidate()
+    # Serialize the whole read-modify-write interval, including invalidation.
+    with _store_lock:
+        store = _read_store()
+        providers = store["providers"]
+        if entries or tombstones:
+            providers[provider_id] = {"overrides": entries, "hidden": tombstones}
+        else:
+            providers.pop(provider_id, None)
+        _write_store(store)
+        _invalidate()
 
     logger.info(
         f"[ModelCatalog] provider {provider_id} saved: "
