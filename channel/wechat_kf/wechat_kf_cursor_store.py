@@ -30,6 +30,7 @@ class CursorStore:
         self._file_path = file_path
         self._lock = threading.Lock()
         self._data = self._load()
+        self._dirty = False
 
     def _load(self) -> dict:
         try:
@@ -40,7 +41,7 @@ class CursorStore:
             logger.warning(f"[wechat_kf] failed to load cursor file {self._file_path}: {e}")
         return {}
 
-    def _flush_locked(self):
+    def _flush_locked(self) -> bool:
         # Atomic write: write to *.tmp first then rename, avoid corruption on crash.
         tmp_path = self._file_path + ".tmp"
         try:
@@ -54,6 +55,7 @@ class CursorStore:
                 os.chmod(self._file_path, 0o600)
             except Exception:
                 pass
+            return True
         except Exception as e:
             logger.warning(f"[wechat_kf] failed to flush cursor file {self._file_path}: {e}")
             try:
@@ -62,18 +64,24 @@ class CursorStore:
             except Exception:
                 pass
 
+        return False
+
     def get(self, open_kfid: str) -> Optional[str]:
         with self._lock:
+            # A callback can receive no newer cursor, so retry pending writes
+            # here rather than waiting indefinitely for another set().
+            if self._dirty:
+                self._dirty = not self._flush_locked()
             return self._data.get(open_kfid)
 
     def set(self, open_kfid: str, cursor: str):
         if not cursor:
             return
         with self._lock:
-            if self._data.get(open_kfid) == cursor:
+            if self._data.get(open_kfid) == cursor and not self._dirty:
                 return
             self._data[open_kfid] = cursor
-            self._flush_locked()
+            self._dirty = not self._flush_locked()
 
     def has(self, open_kfid: str) -> bool:
         with self._lock:
