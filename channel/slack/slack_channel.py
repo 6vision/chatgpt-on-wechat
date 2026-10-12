@@ -444,13 +444,18 @@ class SlackChannel(ChatChannel):
             logger.warning("[Slack] no slack_channel in context, drop reply")
             return
 
+        progress = {"sent": False}
         try:
-            self._do_send(reply, channel_id, thread_ts)
+            self._do_send(reply, channel_id, thread_ts, progress)
             logger.info(f"[Slack] sent reply (type={reply.type}, channel={channel_id})")
         except Exception as e:
             logger.error(f"[Slack] send failed: {e}", exc_info=True)
+            # chat_channel._send retries the whole reply: only worth it when nothing went out.
+            if not progress["sent"]:
+                raise
 
-    def _do_send(self, reply: Reply, channel_id: str, thread_ts):
+    def _do_send(self, reply: Reply, channel_id: str, thread_ts, progress: dict = None):
+        progress = {} if progress is None else progress
         rtype = reply.type
         content = reply.content
 
@@ -461,6 +466,7 @@ class SlackChannel(ChatChannel):
             # Slack caps a message around 40k chars; split conservatively
             for chunk in _split_text(text, 3500):
                 self._client.chat_postMessage(channel=channel_id, text=chunk, thread_ts=thread_ts)
+                progress["sent"] = True
 
         elif rtype == ReplyType.IMAGE:
             # Already a local BytesIO; upload it directly
