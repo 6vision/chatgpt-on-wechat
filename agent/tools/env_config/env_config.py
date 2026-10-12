@@ -134,10 +134,11 @@ class EnvConfig(BaseTool):
     
     def _reload_env(self):
         """Reload environment variables from .env file"""
-        env_vars = self._read_env_file()
-        for key, value in env_vars.items():
-            os.environ[key] = value
-        logger.debug(f"[EnvConfig] Reloaded {len(env_vars)} environment variables")
+        from dotenv import load_dotenv
+
+        # Match startup parsing, including quotes, comments and interpolation.
+        load_dotenv(self.env_path, override=True)
+        logger.debug("[EnvConfig] Reloaded environment variables")
     
     def _refresh_skills(self):
         """Refresh skills after environment variable changes"""

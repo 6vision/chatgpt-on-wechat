@@ -13,7 +13,6 @@ Two paths:
 """
 
 import os
-from typing import Optional
 
 from common.log import logger
 
@@ -23,10 +22,14 @@ _embedding_logged: bool = False
 
 
 def create_default_embedding_provider():
-    """Build the embedding provider from config, or None for keyword-only mode."""
+    """Build the embedding provider from config, or None for keyword-only mode.
+
+    A non-string value in hand-edited config is treated as not configured.
+    """
     from config import conf
 
-    explicit_provider = (conf().get("embedding_provider") or "").strip().lower()
+    raw_provider = conf().get("embedding_provider")
+    explicit_provider = raw_provider.strip().lower() if isinstance(raw_provider, str) else ""
     if not explicit_provider:
         return _init_legacy_provider()
     return _init_explicit_provider(explicit_provider)
@@ -107,7 +110,8 @@ def _init_explicit_provider(provider_key: str):
         )
         return None
 
-    model = (conf().get("embedding_model") or "").strip()
+    raw_model = conf().get("embedding_model")
+    model = raw_model.strip() if isinstance(raw_model, str) else ""
     # Custom providers without a model fall back to the provider's default.
     if not model and resolved_provider_key == "custom":
         from models.custom_provider import parse_custom_bot_type, get_custom_providers, _find_provider_by_id
@@ -125,6 +129,11 @@ def _init_explicit_provider(provider_key: str):
         cfg_dim = 0
     dim = cfg_dim if cfg_dim > 0 else meta["default_dimensions"]
 
+    extra_headers = None
+    if provider_key.startswith("custom:"):
+        from models.custom_provider import resolve_custom_headers
+        extra_headers = resolve_custom_headers(provider_key) or None
+
     try:
         provider = create_embedding_provider(
             provider=resolved_provider_key,
@@ -132,6 +141,7 @@ def _init_explicit_provider(provider_key: str):
             api_key=api_key,
             api_base=api_base,
             dimensions=dim,
+            extra_headers=extra_headers,
             source_tagged=True if resolved_provider_key == "linkai" else None,
         )
     except Exception as e:
@@ -196,7 +206,8 @@ def _resolve_api_base(provider_key: str, default_base: str) -> str:
     field = base_map.get(provider_key)
     if not field:
         return default_base
-    value = (conf().get(field) or "").strip()
+    raw_base = conf().get(field)
+    value = raw_base.strip() if isinstance(raw_base, str) else ""
     if not value:
         return default_base
     if provider_key == "linkai" and not value.rstrip("/").endswith("/v1"):

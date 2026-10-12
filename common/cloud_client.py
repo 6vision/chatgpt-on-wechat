@@ -129,6 +129,8 @@ def _make_peer_transport(send):
             }
             if request.history:
                 body["history"] = list(request.history)
+            if request.permission_mode:
+                body["permission_mode"] = request.permission_mode
             try:
                 self._send(body)
             except Exception as exc:
@@ -444,7 +446,7 @@ class CloudClient(LinkAIClient):
             if pconf("linkai")["midjourney"]:
                 pconf("linkai")["midjourney"]["enabled"] = True
                 pconf("linkai")["midjourney"]["use_image_create_prefix"] = True
-        elif config.get("text_to_image") and config.get("text_to_image") in ["dall-e-2", "dall-e-3"]:
+        elif config.get("text_to_image") in ["dall-e-2", "dall-e-3"] and pconf("linkai"):
             if pconf("linkai")["midjourney"]:
                 pconf("linkai")["midjourney"]["use_image_create_prefix"] = False
 
@@ -767,6 +769,7 @@ class CloudClient(LinkAIClient):
         from channel.channel_instances import remove_instance
         enabled = data.get("enabled", "Y")
         if enabled == "N":
+            # Disabling keeps the login so re-enabling does not need a new QR scan.
             remove_instance(conf(), instance_id)
             if self.channel_mgr:
                 threading.Thread(
@@ -827,6 +830,8 @@ class CloudClient(LinkAIClient):
                 continue
             remove_instance(conf(), instance_id)
             removed += 1
+            if channel_type in ("weixin", "wx"):
+                self._remove_weixin_credentials(instance_id)
             if self.channel_mgr:
                 threading.Thread(
                     target=self._do_remove_channel, args=(instance_id,), daemon=True
@@ -840,6 +845,8 @@ class CloudClient(LinkAIClient):
     def _handle_instance_delete(self, instance_id: str, channel_type: str, data: dict):
         from channel.channel_instances import remove_instance
         remove_instance(conf(), instance_id)
+        if channel_type in ("weixin", "wx"):
+            self._remove_weixin_credentials(instance_id)
         if self.channel_mgr:
             threading.Thread(
                 target=self._do_remove_channel, args=(instance_id,), daemon=True
@@ -972,9 +979,12 @@ class CloudClient(LinkAIClient):
             ).start()
 
     @staticmethod
-    def _remove_weixin_credentials():
-        """Remove the weixin token credentials file so next connect triggers QR login."""
-        cred_path = get_weixin_credentials_path()
+    def _remove_weixin_credentials(instance_id: str = ""):
+        """Remove the weixin token credentials file so next connect triggers QR login.
+
+        ``instance_id`` selects that instance's own file; empty means the legacy path.
+        """
+        cred_path = get_weixin_credentials_path(instance_id)
         try:
             if os.path.exists(cred_path):
                 os.remove(cred_path)
@@ -1336,7 +1346,7 @@ class CloudClient(LinkAIClient):
             return
 
         query = payload.get("query", "")
-        session_id = payload.get("session_id", "cloud_console")
+        session_id = payload.get("session_id") or "cloud_console"
         channel_type = payload.get("channel_type", "")
         # Console user on whose behalf this runs; usage is attributed to them
         # instead of the account this deployment is registered under.

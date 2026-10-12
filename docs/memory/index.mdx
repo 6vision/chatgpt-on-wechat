@@ -75,3 +75,4 @@ The memory management page in the Web console allows browsing memory files and d
 | `agent_max_context_turns` | Max context turns; when exceeded, content is trimmed and summarized into memory | `20` |
 | `rerank_provider` | Rerank service for memory retrieval; empty disables it, `local` uses a local cross-encoder | `""` |
 | `rerank_model` | Rerank model; empty uses the provider's default | `BAAI/bge-reranker-base` |
+| `memory.hit_boost` | Nudge frequently retrieved memories up the ranking (fading after about a week idle); off keeps ranking unchanged and searches write nothing | `false` |

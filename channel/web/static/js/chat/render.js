@@ -104,30 +104,70 @@ function createUserMessageEl(content, timestamp, attachments) {
     return el;
 }
 
-function renderToolCallsHtml(toolCalls) {
-    if (!toolCalls || toolCalls.length === 0) return '';
-    return toolCalls.map(tc => {
-        const argsStr = formatToolArgs(tc.arguments || {});
-        const resultStr = tc.result ? escapeHtml(String(tc.result)) : '';
-        const hasResult = !!resultStr;
-        return `
-<div class="agent-step agent-tool-step">
-    <div class="tool-header" onclick="this.parentElement.classList.toggle('expanded')">
-        <i class="fas fa-check text-primary-400 flex-shrink-0 tool-icon"></i>
-        <span class="tool-name">${escapeHtml(tc.name || '')}</span>
-        <i class="fas fa-chevron-right tool-chevron"></i>
-    </div>
-    <div class="tool-detail">
+// Folded step bodies of replayed history are built on first expand. A page of
+// a tool-heavy session can carry hundreds of tool calls, and putting every
+// hidden Input/Output into the DOM up front stalls opening the session.
+const _lazyStepBodies = new Map();
+let _lazyStepSeq = 0;
+
+function lazyStepBodyAttr(build) {
+    const id = String(++_lazyStepSeq);
+    _lazyStepBodies.set(id, build);
+    return `data-lazy-body="${id}"`;
+}
+
+// Drop builders whose step is no longer on screen (a session switch clears
+// the message list without telling anyone).
+function pruneLazyStepBodies() {
+    if (!_lazyStepBodies.size) return;
+    const live = new Set();
+    messagesDiv.querySelectorAll('[data-lazy-body]').forEach(el => live.add(el.dataset.lazyBody));
+    for (const id of _lazyStepBodies.keys()) {
+        if (!live.has(id)) _lazyStepBodies.delete(id);
+    }
+}
+
+function toggleStepDetail(header) {
+    const body = header.nextElementSibling;
+    if (body && body.dataset.lazyBody) {
+        const id = body.dataset.lazyBody;
+        const build = _lazyStepBodies.get(id);
+        _lazyStepBodies.delete(id);
+        delete body.dataset.lazyBody;
+        if (build) body.innerHTML = build();
+    }
+    header.parentElement.classList.toggle('expanded');
+}
+
+function toolDetailBodyHtml(argsStr, labelText, outputHtml) {
+    return `
         <div class="tool-detail-section">
             <div class="tool-detail-label">Input</div>
             <pre class="tool-detail-content">${argsStr}</pre>
         </div>
-        ${hasResult ? `
+        ${outputHtml ? `
         <div class="tool-detail-section tool-output-section">
-            <div class="tool-detail-label">Output</div>
-            <pre class="tool-detail-content">${resultStr}</pre>
-        </div>` : ''}
+            <div class="tool-detail-label">${labelText}</div>
+            ${outputHtml}
+        </div>` : ''}`;
+}
+
+function renderToolCallsHtml(toolCalls) {
+    if (!toolCalls || toolCalls.length === 0) return '';
+    return toolCalls.map(tc => {
+        const body = lazyStepBodyAttr(() => toolDetailBodyHtml(
+            formatToolArgs(tc.arguments || {}),
+            'Output',
+            tc.result ? `<pre class="tool-detail-content">${escapeHtml(String(tc.result))}</pre>` : ''
+        ));
+        return `
+<div class="agent-step agent-tool-step">
+    <div class="tool-header" onclick="toggleStepDetail(this)">
+        <i class="fas fa-check text-primary-400 flex-shrink-0 tool-icon"></i>
+        <span class="tool-name">${escapeHtml(tc.name || '')}</span>
+        <i class="fas fa-chevron-right tool-chevron"></i>
     </div>
+    <div class="tool-detail" ${body}></div>
 </div>`;
     }).join('');
 }
@@ -172,14 +212,15 @@ function finalizeThinking(el, startTime, text) {
 function renderThinkingHtml(text) {
     if (!text || !text.trim()) return '';
     const full = text.trim();
+    const body = lazyStepBodyAttr(() => _renderReasoningBody(full));
     return `
 <div class="agent-step agent-thinking-step">
-    <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
+    <div class="thinking-header" onclick="toggleStepDetail(this)">
         <i class="fas fa-lightbulb text-amber-400 flex-shrink-0"></i>
         <span class="thinking-summary">${t('thinking_done')}</span>
         <i class="fas fa-chevron-right thinking-chevron"></i>
     </div>
-    <div class="thinking-full">${_renderReasoningBody(full)}</div>
+    <div class="thinking-full" ${body}></div>
 </div>`;
 }
 
@@ -239,8 +280,9 @@ function splitAssistantTurn(msg) {
 }
 
 // With keepContent every text stays a step: a reply that never reached its
-// answer has no text to promote.
-function renderStepsHtml(steps, keepContent) {
+// answer has no text to promote. `carded` holds the paths the message already
+// shows as file cards.
+function renderStepsHtml(steps, keepContent, carded) {
     if (!steps || steps.length === 0) return { stepsHtml: '', finalContent: '' };
 
     // Find the index of the last content step — it becomes the main answer, not a step
@@ -262,8 +304,6 @@ function renderStepsHtml(steps, keepContent) {
                 html += `<div class="agent-step agent-content-step"><div class="agent-content-body">${renderMarkdown(step.content)}</div></div>`;
             }
         } else if (step.type === 'tool') {
-            const argsStr = formatToolArgs(step.arguments || {});
-            const resultStr = step.result ? escapeHtml(String(step.result)) : '';
             const isErr = step.is_error === true;
             // A hand-off is headed by who took the work, since its answer is
             // replayed as that teammate's own bubble just below. The card still
@@ -277,33 +317,28 @@ function renderStepsHtml(steps, keepContent) {
                 : (step.name || '');
             // Same rule as the live stream: a tool that wrote its outcome for
             // a person shows that, not the form the model was handed.
-            const outputHtml = step.display
-                ? `<div class="tool-display-output has-content">${renderMarkdown(String(step.display))}</div>`
-                : (resultStr
-                    ? `<pre class="tool-detail-content${isErr ? ' tool-error-text' : ''}">${resultStr}</pre>`
-                    : '');
+            const body = lazyStepBodyAttr(() => {
+                const outputHtml = step.display
+                    ? `<div class="tool-display-output has-content">${renderMarkdown(String(step.display))}</div>`
+                    : (step.result
+                        ? `<pre class="tool-detail-content${isErr ? ' tool-error-text' : ''}">${escapeHtml(String(step.result))}</pre>`
+                        : '');
+                return toolDetailBodyHtml(
+                    formatToolArgs(step.arguments || {}), isErr ? 'Error' : 'Output', outputHtml
+                );
+            });
             html += `
 <div class="agent-step agent-tool-step${isErr ? ' tool-failed' : ''}${handoff ? ' agent-handoff-step' : ''}">
-    <div class="tool-header" onclick="this.parentElement.classList.toggle('expanded')">
+    <div class="tool-header" onclick="toggleStepDetail(this)">
         <i class="${iconClass}"></i>
         <span class="tool-name">${escapeHtml(toolLabel)}</span>
         <i class="fas fa-chevron-right tool-chevron"></i>
     </div>
-    <div class="tool-detail">
-        <div class="tool-detail-section">
-            <div class="tool-detail-label">Input</div>
-            <pre class="tool-detail-content">${argsStr}</pre>
-        </div>
-        ${outputHtml ? `
-        <div class="tool-detail-section tool-output-section">
-            <div class="tool-detail-label">${isErr ? 'Error' : 'Output'}</div>
-            ${outputHtml}
-        </div>` : ''}
-    </div>
+    <div class="tool-detail" ${body}></div>
 </div>`;
             // If this tool sent a file (send/read tool), render the media inline
             // so it persists across page refreshes (SSE-only file events are not stored).
-            const mediaHtml = _renderSentFileFromToolResult(step);
+            const mediaHtml = _renderSentFileFromToolResult(step, carded);
             if (mediaHtml) html += mediaHtml;
         }
     }
@@ -311,8 +346,9 @@ function renderStepsHtml(steps, keepContent) {
 }
 
 // Extract file-to-send metadata from a tool's result and render an inline preview.
-// Returns '' if the result isn't a file_to_send payload.
-function _renderSentFileFromToolResult(step) {
+// Returns '' if the result isn't a file_to_send payload, or if `carded` shows
+// the file as a card already.
+function _renderSentFileFromToolResult(step, carded) {
     if (!step || !step.result) return '';
     let payload;
     try {
@@ -328,6 +364,9 @@ function _renderSentFileFromToolResult(step) {
     if (fileType === 'video') {
         return `<div class="agent-step">${_buildVideoHtml(webUrl)}</div>`;
     }
+    // Without a card (file gone, hidden, or not indexed) the link stays the
+    // only trace of the delivery.
+    if (carded && carded.has(payload.path)) return '';
     return `<div class="agent-step"><a href="${webUrl}" download="${escapeHtml(fileName)}" target="_blank" ` +
         `style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;margin:8px 0;border-radius:8px;` +
         `background:var(--bg-secondary,#f3f4f6);color:var(--text-primary,#374151);text-decoration:none;font-size:14px;` +
@@ -424,13 +463,20 @@ function createBotMessageEl(content, timestamp, requestId, msg, peer) {
     const runState = msg && msg.run_state;
     const status = runState || (isCancelMarker(content) ? 'cancelled' : null);
 
+    // Files written this turn, as computed by the history API (workspace.js).
+    const canCard = typeof renderArtifactCards === 'function';
+    const artifacts = canCard && Array.isArray(msg && msg.artifacts) ? msg.artifacts : [];
+    const artifactsHtml = canCard ? renderArtifactCards(artifacts) : '';
+    // A sent file shown as a card here needs no download link as well.
+    const carded = new Set(artifacts.map(a => a && a.abs_path).filter(Boolean));
+
     if (status) {
         const steps = ((msg && msg.steps) || []).filter(s => !(s.type === 'content' && isCancelMarker(s.content)));
-        stepsHtml = renderStepsHtml(steps, true).stepsHtml + replyStatusHtml(status);
+        stepsHtml = renderStepsHtml(steps, true, carded).stepsHtml + replyStatusHtml(status);
         displayContent = '';
     } else if (msg && msg.steps && msg.steps.length > 0) {
         // New format: ordered steps with interleaved content
-        const result = renderStepsHtml(msg.steps);
+        const result = renderStepsHtml(msg.steps, false, carded);
         stepsHtml = result.stepsHtml;
         // The final content (last text after all steps) is the main answer
         displayContent = content || result.lastContentText;
@@ -440,11 +486,6 @@ function createBotMessageEl(content, timestamp, requestId, msg, peer) {
         const reasoning = msg && msg.reasoning;
         stepsHtml = renderThinkingHtml(reasoning) + renderToolCallsHtml(toolCalls);
     }
-
-    // Files written this turn, as computed by the history API (workspace.js).
-    const artifactsHtml = typeof renderArtifactCards === 'function'
-        ? renderArtifactCards(msg && msg.artifacts)
-        : '';
 
     // Self-evolution bubbles get a small badge so the user can feel the agent
     // learned something on its own (text itself stays clean). History replay
@@ -720,6 +761,10 @@ function addBotMessage(content, timestamp, requestId) {
     scrollChatToBottom();
 }
 
+// Bumped to call off the bottom re-pins of a first load that have not run yet,
+// when the view is sent elsewhere in the conversation (chat/timeline.js).
+let historyPinToken = 0;
+
 // Load conversation history from the server (page 1 = most recent messages).
 // Subsequent pages prepend older messages when the user scrolls to the top.
 // With untilSeq, every page from `page` back to the one holding that message
@@ -753,6 +798,7 @@ function loadHistory(page, untilSeq) {
             if (isFirstLoad) {
                 const ws = document.getElementById('welcome-screen');
                 if (ws) ws.remove();
+                pruneLazyStepBodies();
             }
 
             // Build a fragment of history message elements in chronological order
@@ -895,8 +941,10 @@ function loadHistory(page, untilSeq) {
                 // rAF isn't enough: markdown/code-highlight/images keep growing
                 // scrollHeight after the first paint, leaving the last bubble's
                 // timestamp clipped. Re-pin a few times to catch late layout.
-                requestAnimationFrame(() => scrollChatToBottom(true));
-                [120, 350, 700].forEach(d => setTimeout(() => scrollChatToBottom(true), d));
+                const pin = ++historyPinToken;
+                const repin = () => { if (pin === historyPinToken) scrollChatToBottom(true); };
+                requestAnimationFrame(repin);
+                [120, 350, 700].forEach(d => setTimeout(repin, d));
             } else {
                 // Restore scroll position so loading older messages doesn't jump the
                 // view. Offset from where the reader was, not from the top: a page

@@ -107,7 +107,17 @@ def detect_install_kind(root: Optional[str] = None) -> InstallKind:
             ),
             platform=platform,
         )
-    if os.path.isdir(os.path.join(root, ".git")):
+    git_path = os.path.join(root, ".git")
+    is_git_checkout = os.path.isdir(git_path)
+    if not is_git_checkout and os.path.isfile(git_path):
+        # Linked worktrees and separate gitdirs use a gitfile, not a directory.
+        # Let Git validate it so an arbitrary marker cannot enable updates.
+        try:
+            result = _run(["git", "rev-parse", "--is-inside-work-tree"], cwd=root)
+            is_git_checkout = result.returncode == 0 and result.stdout.strip() == "true"
+        except OSError:
+            is_git_checkout = False
+    if is_git_checkout:
         if platform == "win32":
             return InstallKind(
                 kind="git",

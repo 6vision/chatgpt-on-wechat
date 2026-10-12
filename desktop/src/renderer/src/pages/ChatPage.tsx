@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useCallback, useState } from 'react'
 import {
   ChevronUp,
   Loader2,
@@ -243,7 +243,12 @@ const ChatPage: React.FC<ChatPageProps> = ({ baseUrl }) => {
       // After the first message, refresh the list and ask backend to title it.
       if (isFirst) {
         try {
-          await apiClient.generateSessionTitle(sid, text, undefined, owner)
+          const res = await apiClient.generateSessionTitle(sid, text, undefined, owner)
+          if (res.status === 'success' && res.title) {
+            useSessionStore.setState((s) => ({
+              sessions: s.sessions.map((x) => (x.session_id === sid ? { ...x, title: res.title } : x)),
+            }))
+          }
         } catch {
           /* ignore */
         }
@@ -319,6 +324,14 @@ const ChatPage: React.FC<ChatPageProps> = ({ baseUrl }) => {
   // the length unchanged, so the navigator keys on the persisted seqs too.
   const persistedUserSeqs = messages.filter((m) => m.role === 'user' && m.userSeq != null).length
   const timelineRevision = `${messages.length}:${persistedUserSeqs}`
+  // Each message's turn: the seq of the question that opened it.
+  const turnSeqs = useMemo(() => {
+    let turn: number | null = null
+    return messages.map((m) => {
+      if (m.role === 'user') turn = m.userSeq ?? null
+      return turn
+    })
+  }, [messages])
 
   return (
     <div className="flex flex-col flex-1 min-h-0 relative">
@@ -373,7 +386,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ baseUrl }) => {
           </div>
         ) : (
           <div className="py-3 max-w-3xl mx-auto">
-            {messages.map((msg) =>
+            {messages.map((msg, i) =>
               msg.kind === 'divider' ? (
                 <div key={msg.id} className="flex items-center gap-3 px-6 py-3 text-content-tertiary">
                   <span
@@ -402,6 +415,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ baseUrl }) => {
                     onEdit={handleEdit}
                     onDelete={handleDelete}
                     onMediaLoad={handleMediaLoad}
+                    turnSeq={turnSeqs[i]}
                   />
                 </div>
               )

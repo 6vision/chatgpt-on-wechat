@@ -269,3 +269,10 @@ def test_a_single_agent_install_keeps_every_path_it_has_today(tmp_path, prepopul
             assert accessor(**kwargs) == resolved.joinpath(*parts), name
     finally:
         set_agent_registry(None)
+
+
+def test_tmp_file_is_unique_and_under_tmp_dir(monkeypatch, tmp_path):
+    monkeypatch.setattr(state_dir, "tmp_dir", lambda: tmp_path)
+    first, second = state_dir.tmp_file("wx_media", ".png"), state_dir.tmp_file("wx_media", ".png")
+    assert first != second
+    assert Path(first).parent == tmp_path and first.endswith(".png")

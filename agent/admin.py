@@ -74,6 +74,35 @@ def _is_strictly_within(inner: Path, outer: Path) -> bool:
     return True
 
 
+# Conversation tables that carry an agent_id column.
+_AGENT_SCOPED_TABLES = ("messages", "runs", "artifacts", "sessions")
+
+
+def _forget_agent_conversations(agent_id: str):
+    """Erase a deleted Agent's rows from the shared conversation file.
+    
+    Conversations live in the default Agent's index.db, scoped by agent_id, so
+    they outlive the deleted workspace. Returns the number of rows removed and
+    raises if the sweep could not run, so the caller can report it.
+    """
+    if not agent_id:
+        return 0
+
+    from agent.memory.conversation_store import get_conversation_store
+
+    # Rows are matched by agent_id; the default Agent's handle is the shared file itself.
+    conn = get_conversation_store()._connect()
+    removed = 0
+    try:
+        with conn:
+            for table in _AGENT_SCOPED_TABLES:
+                cursor = conn.execute(f"DELETE FROM {table} WHERE agent_id = ?", (agent_id,))
+                removed += cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+    finally:
+        conn.close()
+    return removed
+
+
 class AgentAdminService:
     """Manage profiles without ever deleting an agent workspace implicitly."""
 
@@ -626,6 +655,23 @@ class AgentAdminService:
                 project_store.forget_agent(agent_id)
             except Exception as e:
                 logger.warning(f"[AgentAdmin] project store cleanup after delete failed: {e}")
+
+            # The avatar lives outside the workspace; a reused id must not inherit it.
+            try:
+                from channel.web.api.agents import delete_avatar_files
+
+                delete_avatar_files(agent_id)
+            except Exception as e:
+                logger.warning(f"[AgentAdmin] avatar cleanup after delete failed: {e}")
+
+            # Conversations live in the default Agent's shared index.db, outside the
+            # deleted workspace, so a recreated Agent with the same id would inherit them.
+            try:
+                _forget_agent_conversations(agent_id)
+            except Exception as e:
+                logger.warning(
+                    f"[AgentAdmin] conversation cleanup after delete failed: {e}"
+                )
 
             return {"id": agent_id, "deleted": True}
 

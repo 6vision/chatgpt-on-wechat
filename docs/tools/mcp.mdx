@@ -118,6 +118,10 @@ The Agent will:
 1. Read the existing MCP config and merge the new server entry, preserving existing ones
 2. Hot-reload the new MCP server, so the corresponding tools become available on the next message
 
+<Note>
+Commands in `mcp.json` start with the Agent process's privileges, so the Agent may only change `mcp.json` in a **full-access** session. Read-only and workspace-write sessions refuse it: switch the session's permission, or add the server from the console.
+</Note>
+
 ## Web Authorization (OAuth)
 
 Some remote MCP servers require OAuth web authorization, and connecting to them directly returns `401`. CowAgent has a built-in standard OAuth flow, so **no manual token is needed** — just configure the server normally, for example:

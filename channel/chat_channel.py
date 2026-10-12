@@ -1,3 +1,4 @@
+import copy
 import os
 import re
 import threading
@@ -341,7 +342,10 @@ class ChatChannel(Channel):
                     self._send(text_reply, context)
                     # 短暂延迟后发送图片
                     time.sleep(0.3)
-                    self._send(reply, context)
+                    # The caption is already out; DingTalk and QQ would send it again.
+                    image_reply = copy.copy(reply)
+                    image_reply.text_content = None
+                    self._send(image_reply, context)
                 # Send text bubble before voice, unless channel already streamed
                 # the text (feishu) or natively renders STT under the voice (wechatcom).
                 elif reply.type == ReplyType.VOICE and context.get("voice_reply_text") \
@@ -449,6 +453,18 @@ class ChatChannel(Channel):
     def _success_callback(self, session_id, **kwargs):  # 线程正常结束时的回调函数
         logger.debug("Worker return success, session_id = {}".format(session_id))
 
+    def _release_claim(self, context: Context, session_id: str) -> None:
+        """Release the "a task is in flight for this conversation" marker.
+        
+        Normally cleared by the Future done-callback. Paths that answer without
+        queueing (/cancel, /steer, a disabled agent) create no Future, and on a
+        passive-reply channel a stale marker would ignore the user from then on.
+        No-op for channels without such a marker.
+        """
+        release = getattr(self, "_release_passive_claim", None)
+        if callable(release):
+            release(context, session_id)
+
     def _fail_callback(self, session_id, exception, **kwargs):  # 线程异常结束时的回调函数
         logger.exception("Worker return exception: {}".format(exception))
 
@@ -493,6 +509,7 @@ class ChatChannel(Channel):
                 _t("该助手当前已停用，请联系管理员。",
                    "This assistant is currently disabled. Please contact an administrator."),
             ))
+            self._release_claim(context, session_id)
             return
         except Exception as e:
             logger.warning(f"[chat_channel] Agent route failed, using default: {e}")
@@ -504,10 +521,12 @@ class ChatChannel(Channel):
             stripped = context.content.strip().lower()
             if stripped in self._BYPASS_QUEUE_COMMANDS:
                 self._handle_cancel_command(context, session_id)
+                self._release_claim(context, session_id)
                 return
             if re.match(r"^/steer(?:\s|$)", stripped):
                 instruction = context.content.strip()[len("/steer"):].strip()
                 self._handle_steer_command(context, session_id, instruction)
+                self._release_claim(context, session_id)
                 return
 
         with self.lock:

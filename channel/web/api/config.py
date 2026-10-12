@@ -16,6 +16,7 @@ from agent.permission import (
     normalize_mode as permission_normalize_mode,
 )
 from channel.web.core._common import (
+    _can_reveal_in_file_manager,
     _read_config_file_for_write,
     _require_auth,
     _write_config_file_for_write,
@@ -154,6 +155,8 @@ class ConfigHandler:
                 "api_keys": api_keys_masked,
                 "providers": providers,
                 "web_password_masked": masked_pwd,
+                # Whether "show in folder" can open this machine's file manager.
+                "can_reveal_files": _can_reveal_in_file_manager(),
             }
             # The desktop app runs on the local trusted machine, so it can edit
             # the real password in place (cursor at the end, delete to clear).
@@ -208,11 +211,14 @@ class ConfigHandler:
                     merged = dict(local_config.get("reasoning_effort_by_model") or {})
                     merged.update(value)
                     value = merged
-                local_config[key] = value
                 applied[key] = value
 
             if not applied and not nested:
                 return json.dumps({"status": "error", "message": "no valid keys to update"})
+
+            # Apply only after every value coerced, so a rejected save changes nothing.
+            for key, value in applied.items():
+                local_config[key] = value
 
             config_path = os.path.join(get_data_root(), "config.json")
             file_cfg = _read_config_file_for_write()
@@ -272,31 +278,17 @@ class ConfigHandler:
                 except Exception as reset_err:
                     logger.warning(f"[WebChannel] Failed to reset bridge: {reset_err}")
 
-            # Evict cached agent runtimes when a config that is baked into the
-            # Agent at construction time changes. These values (context budget,
-            # turn/step caps) are read once in agent_initializer and cached on
-            # the Agent instance, so without eviction an edit only takes effect
-            # after a restart — the user changes the budget in the UI and sees
-            # no change (the context-usage chart keeps the old limit). Clearing
-            # the instances makes the next turn rebuild each agent from the new
-            # config, no restart needed.
-            agent_rebuild_keys = {
-                "agent_max_context_tokens",
-                "agent_max_context_turns",
-                "agent_max_steps",
-            }
-            if any(k in applied for k in agent_rebuild_keys):
+            # The context budget and step cap are cached on each Agent at build
+            # time, so push them onto the live agents (agent_max_context_turns
+            # is read per run and needs nothing).
+            if any(k in applied for k in ("agent_max_context_tokens", "agent_max_steps")):
                 try:
                     from bridge.bridge import Bridge
                     agent_bridge = Bridge().get_agent_bridge()
                     if agent_bridge is not None:
-                        agent_bridge.clear_all_sessions()
-                        logger.info(
-                            "[WebChannel] Cleared cached agents so new "
-                            f"{sorted(agent_rebuild_keys & applied.keys())} takes effect"
-                        )
-                except Exception as rebuild_err:
-                    logger.warning(f"[WebChannel] Failed to clear agents: {rebuild_err}")
+                        agent_bridge.apply_runtime_limits()
+                except Exception as limits_err:
+                    logger.warning(f"[WebChannel] Failed to apply runtime limits: {limits_err}")
 
             return json.dumps({"status": "success", "applied": applied, "warning": password_warning}, ensure_ascii=False)
         except Exception as e:

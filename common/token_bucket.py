@@ -36,10 +36,14 @@ class TokenBucket:
     def get_token(self):
         """获取令牌"""
         with self.cond:
+            deadline = time.monotonic() + self.timeout if self.timeout is not None else None
             while self.tokens <= 0:
                 if not self.is_running:
                     return False
-                flag = self.cond.wait(self.timeout)
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    return False
+                flag = self.cond.wait(remaining)
                 if not flag:  # 超时
                     return False
             if not self.is_running:

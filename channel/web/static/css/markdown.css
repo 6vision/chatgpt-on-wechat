@@ -441,3 +441,127 @@
     border: none;
 }
 
+/* =====================================================================
+   Mermaid Diagrams
+   A mermaid block is a normal code block plus a [Code|Preview] switch in
+   its header. The diagram, zoom and fullscreen only appear once a preview
+   has rendered (data-mermaid="done").
+   ===================================================================== */
+.mermaid-block .mermaid-figure {
+    display: flex;
+    justify-content: center;
+    padding: 0.75em 1em;
+    overflow-x: auto; /* wide diagrams scroll inside the bubble instead of overflowing it */
+    scrollbar-width: thin;
+}
+
+.mermaid-block .mermaid-figure svg {
+    max-width: 100%;
+    height: auto;
+}
+
+.mermaid-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.25em;
+    margin-left: auto; /* sit next to the copy button, not centered in the header */
+    margin-right: 0.25em;
+}
+
+.mermaid-mode-btn,
+.mermaid-tool-btn {
+    background: transparent;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    padding: 0.25em 0.5em;
+    border-radius: 4px;
+    transition: all 0.2s;
+    font-size: 0.9em;
+}
+
+.mermaid-mode-btn:hover,
+.mermaid-tool-btn:hover {
+    background: rgba(100, 116, 139, 0.1);
+    color: #475569;
+}
+
+.mermaid-mode-btn.active {
+    background: rgba(100, 116, 139, 0.18);
+    color: #334155;
+}
+
+.mermaid-mode-btn.failed {
+    color: #dc2626;
+}
+
+.dark .mermaid-mode-btn,
+.dark .mermaid-tool-btn {
+    color: #94a3b8;
+}
+
+.dark .mermaid-mode-btn:hover,
+.dark .mermaid-tool-btn:hover {
+    background: rgba(148, 163, 184, 0.1);
+    color: #cbd5e1;
+}
+
+.dark .mermaid-mode-btn.active {
+    background: rgba(148, 163, 184, 0.2);
+    color: #e2e8f0;
+}
+
+.dark .mermaid-mode-btn.failed {
+    color: #f87171;
+}
+
+.mermaid-spinner {
+    display: none;
+    margin-right: 0.35em;
+}
+
+.mermaid-mode-btn.loading .mermaid-spinner {
+    display: inline-block;
+}
+
+/* --- Code/preview switch ---------------------------------------------- */
+.mermaid-chart-tools,
+.mermaid-block[data-mermaid-mode="code"] .mermaid-figure {
+    display: none;
+}
+
+.mermaid-block[data-mermaid-mode="chart"][data-mermaid="done"] .mermaid-chart-tools {
+    display: inline-flex;
+}
+
+.mermaid-block[data-mermaid-mode="chart"][data-mermaid="done"] .code-block-wrapper pre,
+.mermaid-block[data-mermaid-mode="chart"][data-mermaid="done"] .code-copy-btn {
+    display: none;
+}
+
+/* --- Fullscreen --------------------------------------------------------
+   Native fullscreen (Fullscreen API) and the CSS fallback share the same
+   treatment: take the whole viewport, let oversized zoom levels scroll. */
+.mermaid-block .code-block-wrapper:fullscreen {
+    width: 100%;
+    height: 100%;
+    padding: 1.5em;
+    overflow: auto;
+    background: #f8f9fa;
+}
+
+.dark .mermaid-block .code-block-wrapper:fullscreen {
+    background: #1e293b;
+}
+
+.mermaid-block.mermaid-fullscreen .code-block-wrapper {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    padding: 1.5em;
+    overflow: auto;
+}
+

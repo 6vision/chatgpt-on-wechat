@@ -9,8 +9,10 @@ services:
       - "9899:9899"
     environment:
       COW_LANG: 'auto'
-      CHANNEL_TYPE: 'web, weixin'
-      MODEL: 'deepseek-flash'
+      # Empty: web console only. Multiple: 'web, weixin, feishu'
+      CHANNEL_TYPE: ''
+      # Empty: deepseek-flash
+      MODEL: ''
       DEEPSEEK_API_KEY: ''
       DEEPSEEK_API_BASE: 'https://api.deepseek.com/v1'
       MINIMAX_API_KEY: ''

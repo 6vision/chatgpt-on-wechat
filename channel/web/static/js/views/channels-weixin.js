@@ -71,6 +71,87 @@ function startWeixinActiveStatusPoll(iid) {
     }, 3000);
 }
 
+const WEIXIN_WAITING_DOT = 'bg-amber-400 animate-pulse';
+
+function weixinWaitingStatusHtml(loginStatus) {
+    return loginStatus === 'scanned'
+        ? `<span class="text-xs text-primary-500">${t('weixin_scan_scanned')}</span>`
+        : `<span class="text-xs text-amber-500">${t('weixin_scan_waiting')}</span>`;
+}
+
+function weixinScanPromptHtml(iid) {
+    return `<div id="weixin-active-qr-${escapeHtml(iid)}" class="flex flex-col items-center py-2">
+                <button onclick="showWeixinActiveQr('${escapeHtml(iid)}')"
+                    class="px-4 py-2 rounded-lg bg-primary-500 hover:bg-primary-600 text-white text-sm font-medium
+                           cursor-pointer transition-colors duration-150">
+                    ${t('weixin_scan_title')}
+                </button>
+            </div>`;
+}
+
+// Logged-in cards are watched as well: the server can drop a login at any
+// time (e.g. the same WeChat account was scanned into another channel), and
+// the card must switch to the scan prompt without a reload of the view.
+// "unknown" is left alone: it is what a card reads while its channel restarts.
+let _weixinLoginWatchTimer = null;
+const WEIXIN_LOGIN_WATCH_MS = 8000;
+const WEIXIN_LOGGED_OUT_STATES = ['waiting_scan', 'scanned', 'idle'];
+
+function stopWeixinLoginWatch() {
+    if (_weixinLoginWatchTimer) {
+        clearTimeout(_weixinLoginWatchTimer);
+        _weixinLoginWatchTimer = null;
+    }
+}
+
+function startWeixinLoginWatch(iids) {
+    stopWeixinLoginWatch();
+    if (!iids || !iids.length) return;
+    _weixinLoginWatchTimer = setTimeout(() => {
+        _weixinLoginWatchTimer = null;
+        // Leaving the view ends the watch; loadChannelsView starts it again.
+        if (currentView !== 'channels') return;
+        fetch('/api/channels').then(r => r.json()).then(data => {
+            if (data.status !== 'success') { startWeixinLoginWatch(iids); return; }
+            const still = [];
+            iids.forEach(iid => {
+                if (!document.getElementById(`channel-card-${iid}`)) return;
+                const wx = findWeixinEntry(data, iid);
+                if (wx && WEIXIN_LOGGED_OUT_STATES.indexOf(wx.login_status) !== -1) {
+                    markWeixinCardLoggedOut(iid, wx.login_status);
+                } else {
+                    still.push(iid);
+                }
+            });
+            startWeixinLoginWatch(still);
+        }).catch(() => { startWeixinLoginWatch(iids); });
+    }, WEIXIN_LOGIN_WATCH_MS);
+}
+
+// Patch just this card into its "scan to log in" state. Re-rendering the whole
+// list would discard unsaved input and open QR panels on the other cards.
+function markWeixinCardLoggedOut(iid, loginStatus) {
+    const card = document.getElementById(`channel-card-${iid}`);
+    if (!card) return;
+    const local = isWeixinInstanceCard(iid)
+        ? channelInstancesView.find(i => i.instance_id === iid)
+        : channelsData.find(c => c.name === 'weixin');
+    if (local) local.login_status = loginStatus;
+
+    const dot = document.getElementById(`ch-login-dot-${iid}`);
+    if (dot) dot.className = `w-2 h-2 rounded-full ${WEIXIN_WAITING_DOT}`;
+    const text = document.getElementById(`ch-login-text-${iid}`);
+    if (text) text.innerHTML = weixinWaitingStatusHtml(loginStatus);
+
+    if (!document.getElementById(`weixin-active-qr-${iid}`)) {
+        const header = card.firstElementChild;
+        if (header) header.classList.add('mb-5');
+        const anchor = card.querySelector('.channel-agent-bind') || header;
+        if (anchor) anchor.insertAdjacentHTML('afterend', weixinScanPromptHtml(iid));
+    }
+    startWeixinActiveStatusPoll(iid);
+}
+
 function syncWeixinInstanceQr(iid, loginStatus) {
     if (!isWeixinInstanceCard(iid) || !_weixinShownQr[iid]) return;
     const panel = document.getElementById(weixinQrPanelId(iid));

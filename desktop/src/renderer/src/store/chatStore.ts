@@ -293,9 +293,11 @@ function historyToMessage(m: HistoryMessage): ChatMessage {
   const finalContent = unanswered
     ? ''
     : answer || (lastContentIdx >= 0 ? stripCancelMarker(raw[lastContentIdx].content || '') : '')
-  const attachments = attachmentsFromSteps(raw)
   // Artifacts are rebuilt by the backend, which alone knows the workspace root.
   const artifacts = m.artifacts || []
+  // A sent document comes back as an artifact card too; show it once.
+  const carded = new Set(artifacts.map((a) => a.abs_path))
+  const attachments = attachmentsFromSteps(raw).filter((a) => !a.abs_path || !carded.has(a.abs_path))
 
   return {
     id: uid('assistant'),

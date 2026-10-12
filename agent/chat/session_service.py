@@ -271,12 +271,12 @@ class SessionService:
 
     def _resolve_agent_id(self, agent_id: str = None) -> str:
         from agent.registry import get_agent_registry
-        return get_agent_registry().get(agent_id or self.agent_id).id
+        return get_agent_registry().get_addressed(agent_id or self.agent_id).id
 
     def _get_store(self, agent_id: str = None):
         from agent.registry import get_agent_registry
         from agent.memory import get_conversation_store
-        profile = get_agent_registry().get(agent_id or self.agent_id)
+        profile = get_agent_registry().get_addressed(agent_id or self.agent_id)
         return get_conversation_store(profile.workspace)
 
     def _remove_agent(self, session_id: str, agent_id: str = None):
@@ -328,16 +328,53 @@ class SessionService:
         except Exception as e:
             logger.warning(f"[SessionService] Cancel on delete failed: {e}")
 
-    def delete_session(self, session_id: str, agent_id: str = None) -> None:
+    def delete_session(self, session_id: str, agent_id: str = None,
+                       fanout: bool = True) -> None:
         if not session_id:
             raise ValueError("session_id required")
         session_id = self._normalize_sid(session_id)
+        # Read the roster first: forgetting the side stores drops it.
+        teammates = self._teammates(session_id, agent_id) if fanout else []
 
         self._cancel_running(session_id, agent_id)
         store = self._get_store(agent_id)
         store.clear_session(session_id)
+        self._forget_side_stores(session_id, agent_id)
         self._remove_agent(session_id, agent_id)
+        # A team conversation keeps one transcript per participant.
+        self.delete_teammate_copies(session_id, teammates)
         logger.info(f"[SessionService] Session deleted: {session_id}")
+
+    def delete_teammate_copies(self, session_id: str, teammates) -> None:
+        """Drop each teammate's local copy of a deleted session, best-effort.
+
+        A peer in another process is out of reach here.
+        """
+        for member_id in teammates:
+            try:
+                self.delete_session(session_id, agent_id=member_id, fanout=False)
+            except Exception as e:
+                logger.warning(
+                    f"[SessionService] Delete failed for agent '{member_id}': {e}")
+
+    def team_members(self, session_id: str, agent_id: str = None) -> list:
+        """Everyone else holding a transcript of this session."""
+        return self._teammates(session_id, agent_id)
+
+    def _forget_side_stores(self, session_id: str, agent_id: str = None) -> None:
+        """Drop the session's project binding and prefs, each best-effort."""
+        try:
+            scoped = self._resolve_agent_id(agent_id)
+        except Exception as e:
+            logger.debug(f"[SessionService] Side-store cleanup skipped: {e}")
+            return
+        from agent.workspace import project_store, session_prefs
+
+        for module in (project_store, session_prefs):
+            try:
+                module.forget_session(session_id, agent_id=scoped)
+            except Exception as e:
+                logger.debug(f"[SessionService] Side-store cleanup skipped: {e}")
 
     def rename_session(
         self, session_id: str, title: str, agent_id: str = None
@@ -483,10 +520,13 @@ class SessionService:
         agent_id = payload.get("agent_id") or self.agent_id
         try:
             if action == "list_sessions":
+                from agent.memory.conversation_store import page_window
+
+                page, page_size = page_window(payload.get("page", 1), payload.get("page_size", 50), 50)
                 result = self.list_sessions(
                     channel_type=payload.get("channel_type"),
-                    page=int(payload.get("page", 1)),
-                    page_size=int(payload.get("page_size", 50)),
+                    page=page,
+                    page_size=page_size,
                     agent_id=agent_id,
                 )
                 return {"action": action, "code": 200, "message": "success", "payload": result}

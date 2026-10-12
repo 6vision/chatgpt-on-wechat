@@ -20,6 +20,21 @@ function applyTheme() {
         document.getElementById('hljs-light').disabled = false;
         document.getElementById('hljs-dark').disabled = true;
     }
+    rerenderMermaidDiagrams();
+}
+
+// Mermaid bakes the theme colors into the rendered SVG, so a theme switch
+// re-renders diagrams the user already previewed. Never-previewed blocks are
+// left alone, so this never triggers the mermaid download by itself.
+function rerenderMermaidDiagrams() {
+    document.querySelectorAll('.mermaid-block[data-mermaid="done"]').forEach(block => {
+        block.dataset.mermaid = 'pending';
+        const figure = block.querySelector('.mermaid-figure');
+        if (figure) figure.remove();
+    });
+    if (document.querySelector('.mermaid-block[data-mermaid="pending"]')) {
+        renderMermaidBlocks(document);
+    }
 }
 
 function toggleTheme() {

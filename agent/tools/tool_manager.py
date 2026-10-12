@@ -332,7 +332,11 @@ class ToolManager:
             try:
                 with open(mcp_json_path, "r", encoding="utf-8") as f:
                     data = _json.load(f)
-                raw = data.get("mcpServers") or data.get("mcp_servers") or data
+                # Must match service.load_servers: an empty {"mcpServers": {}}
+                # means no servers, not a server named "mcpServers".
+                raw = data.get("mcpServers")
+                if raw is None:
+                    raw = data.get("mcp_servers", data)
                 # DEBUG: with N agents this fires N times for the same shared
                 # mcp.json; the real boot is logged once at INFO further below.
                 logger.debug(f"[ToolManager] Loading MCP config from {mcp_json_path}")
@@ -479,10 +483,18 @@ class ToolManager:
             except Exception as e:
                 logger.warning(f"[MCP] Error shutting down '{server_name}': {e}")
         # Drop tools that belonged to this server.
+        retired = []
         for tool_name in list(self._mcp_tool_instances.keys()):
             tool = self._mcp_tool_instances.get(tool_name)
             if tool is not None and getattr(tool, "server_name", None) == server_name:
                 self._mcp_tool_instances.pop(tool_name, None)
+                retired.append(tool_name)
+        # ...and their description vectors, since _ensure_mcp_tool_vectors only fills
+        # missing names and a reused name would keep a stale embedding.
+        if retired:
+            with self._mcp_vector_lock:
+                for tool_name in retired:
+                    self._mcp_tool_vectors.pop(tool_name, None)
         self._mcp_status.pop(server_name, None)
 
     def _load_mcp_tools_async(self, mcp_servers_config):
@@ -732,6 +744,10 @@ class ToolManager:
         """Incrementally embed MCP tools that are not yet cached."""
         # Snapshot to avoid concurrent-mutation while the async loader runs.
         current = dict(self._mcp_tool_instances)
+        with self._mcp_vector_lock:
+            # Drop vectors for tools that no longer exist, e.g. after a partial load.
+            for stale in [n for n in self._mcp_tool_vectors if n not in current]:
+                self._mcp_tool_vectors.pop(stale, None)
         missing = [name for name in current if name not in self._mcp_tool_vectors]
         if not missing:
             return

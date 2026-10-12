@@ -25,9 +25,10 @@ _SOFT_EXIT_1 = {
 _SEPARATORS = (";", "&&", "||", "|", "\n")
 
 
-def _last_segment(command: str) -> str:
-    """The command that determined the exit code: the last one in the chain."""
+def _last_segment(command: str) -> Tuple[str, bool]:
+    """Return the last segment and whether conditionals may have skipped it."""
     segment_start = 0
+    conditional = False
     quote = ""
     index = 0
     while index < len(command):
@@ -44,11 +45,15 @@ def _last_segment(command: str) -> str:
         for separator in _SEPARATORS:
             if command.startswith(separator, index):
                 segment_start = index + len(separator)
+                if separator in ("&&", "||"):
+                    conditional = True
+                elif separator in (";", "\n"):
+                    conditional = False
                 index += len(separator)
                 break
         else:
             index += 1
-    return command[segment_start:]
+    return command[segment_start:], conditional
 
 
 def _base_command(segment: str) -> str:
@@ -68,7 +73,12 @@ def interpret(command: str, exit_code: int) -> Tuple[bool, Optional[str]]:
     if exit_code == 0:
         return False, None
     if exit_code == 1:
-        meaning = _SOFT_EXIT_1.get(_base_command(_last_segment(command)))
+        segment, conditional = _last_segment(command)
+        # A short-circuited chain can return an earlier command's failure.
+        # Without execution provenance, do not invent the final command's
+        # informational result. Unconditional lists and pipelines still use
+        # their final command as before.
+        meaning = None if conditional else _SOFT_EXIT_1.get(_base_command(segment))
         if meaning:
             return False, meaning
     return True, None

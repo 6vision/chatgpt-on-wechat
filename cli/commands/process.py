@@ -130,6 +130,7 @@ def start(foreground, no_logs):
         if _IS_WIN:
             sys.exit(subprocess.call([python, app_py], cwd=root))
         else:
+            os.chdir(root)
             os.execv(python, [python, app_py])
     else:
         log_file = _get_log_file()
