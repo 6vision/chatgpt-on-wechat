@@ -17,6 +17,7 @@ import ast
 from pathlib import Path
 
 MODELS_DIR = Path(__file__).resolve().parents[1] / "models"
+HTTP_VERBS = {"get", "post", "put", "patch", "delete", "head", "options", "request"}
 
 
 def _outbound_calls():
@@ -34,7 +35,8 @@ def _outbound_calls():
             called = node.func
             if (isinstance(called, ast.Attribute)
                     and isinstance(called.value, ast.Name)
-                    and called.value.id == "requests"):
+                    and called.value.id == "requests"
+                    and called.attr in HTTP_VERBS):
                 yield path.relative_to(MODELS_DIR.parent), node, called.attr
 
 

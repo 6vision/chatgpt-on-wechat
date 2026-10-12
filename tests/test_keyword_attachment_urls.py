@@ -68,7 +68,8 @@ def test_xlsx_url_uses_path_filename_without_query_string(tmp_path):
         assert reply.type is ReplyType.FILE
         # The query string must not leak into the saved name.
         assert Path(reply.content).name == "report.XLSX"
-        assert Path(reply.content).parent == expected_dir
+        assert Path(reply.content).parent.parent == expected_dir
+        assert Path(reply.content).parent.name.startswith("keyword_")
         assert Path(reply.content).read_bytes() == b"spreadsheet"
     finally:
         set_agent_registry(None)

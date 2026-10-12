@@ -41,15 +41,19 @@ from models import model_catalog
 def _paths_written_by_step(step: dict) -> list:
     """Files a persisted tool step produced, if any.
 
-    `write`/`edit` name theirs in the arguments. A `subagent` step lists the
-    ones its sub agents wrote in its result: those files never passed through
-    a tool call of this agent's own, so nothing else records them.
+    `write`/`edit` name theirs in the arguments. A `bash` step lists the files
+    its command changed in its result, and a `subagent` step the ones its sub
+    agents wrote: those files never passed through a file tool of this
+    agent's own, so nothing else records them.
     """
     name = step.get("name")
     if name in ("write", "edit"):
         args = step.get("arguments")
         path = str((args or {}).get("path") or "").strip() if isinstance(args, dict) else ""
         return [path] if path else []
+    if name == "bash":
+        from agent.protocol.artifact import command_files_from_result
+        return command_files_from_result(step.get("result"))
     if name != "subagent":
         return []
     try:
@@ -61,6 +65,22 @@ def _paths_written_by_step(step: dict) -> list:
         for item in results if isinstance(item, dict)
         for path in (item.get("files") or [])
     ]
+
+
+def _path_sent_by_step(step: dict) -> str:
+    """The local document a `send` step delivered. Images and videos are left
+    out: the history view renders those inline from the step itself."""
+    if step.get("name") != "send":
+        return ""
+    try:
+        payload = json.loads(step.get("result") or "{}")
+    except (ValueError, TypeError):
+        return ""
+    if not isinstance(payload, dict) or payload.get("type") != "file_to_send":
+        return ""
+    if payload.get("file_type") in ("image", "video") or payload.get("url"):
+        return ""
+    return str(payload.get("path") or "").strip()
 
 
 def _artifacts_from_steps(steps, session_id: str = None, agent_id: str = None) -> list:
@@ -75,7 +95,7 @@ def _artifacts_from_steps(steps, session_id: str = None, agent_id: str = None) -
     ``session_id`` anchors detection to the session's working dir (the project
     dir when one is open), matching the live SSE path; otherwise state_root.
     """
-    from agent.protocol.artifact import get_workspace_root, safe_build_artifact
+    from agent.protocol.artifact import build_sent_artifact, get_workspace_root, safe_build_artifact
 
     out = []
     seen = set()
@@ -83,10 +103,11 @@ def _artifacts_from_steps(steps, session_id: str = None, agent_id: str = None) -
     for step in steps or []:
         if not isinstance(step, dict) or step.get("type") != "tool" or step.get("is_error"):
             continue
-        for path in _paths_written_by_step(step):
+        sent = _path_sent_by_step(step)
+        for path in [sent] if sent else _paths_written_by_step(step):
             if root is None:
                 root = _get_workspace_root(session_id, agent_id) if session_id else get_workspace_root()
-            info = safe_build_artifact(path, root)
+            info = build_sent_artifact(path, root) if sent else safe_build_artifact(path, root)
             if not info or info["path"] in seen:
                 continue
             seen.add(info["path"])
@@ -348,8 +369,8 @@ class SessionsHandler:
             params = web.input(
                 page='1', page_size='50', agent_id='', agent='', scope=''
             )
-            page = int(params.page)
-            page_size = int(params.page_size)
+            from agent.memory.conversation_store import page_window
+            page, page_size = page_window(params.page, params.page_size, 50)
             if (params.scope or '').strip() == 'all':
                 result = _list_sessions_across_agents(page, page_size)
                 return json.dumps({"status": "success", **result}, ensure_ascii=False)
@@ -403,17 +424,24 @@ class SessionDetailHandler:
             except Exception as e:
                 logger.warning(f"[WebChannel] Cancel on delete failed: {e}")
 
+            from agent.chat.session_service import SessionService
+            sessions = SessionService()
+            teammates = sessions.team_members(session_id, agent_id)
+
             from agent.memory import get_conversation_store
             store = get_conversation_store(_get_workspace_root(agent_id=agent_id))
             store.clear_session(session_id)
 
             # Drop the session's side stores too. Left behind, a stale project
             # binding would keep inflating the "how many spaces are in use"
-            # count that decides how the session list is grouped.
+            # count that decides how the session list is grouped. Both stores
+            # namespace their rows by Agent, so the row to drop is the one
+            # under this session's own Agent — the unscoped key is
+            # ``default::`` and would leave the real row behind.
             try:
                 from agent.workspace import project_store, session_prefs
-                project_store.forget_session(session_id)
-                session_prefs.forget_session(session_id)
+                project_store.forget_session(session_id, agent_id=agent_id)
+                session_prefs.forget_session(session_id, agent_id=agent_id)
             except Exception as e:
                 logger.debug(f"[WebChannel] Session side-store cleanup skipped: {e}")
 
@@ -424,6 +452,7 @@ class SessionDetailHandler:
                 ab.clear_session(session_id, agent_id=agent_id)
             except Exception:
                 pass
+            sessions.delete_teammate_copies(session_id, teammates)
 
             channel = WebChannel()
             # Drop messages still waiting in the channel queue: processing them
@@ -580,6 +609,9 @@ def _session_settings_state(session_id: str, agent_id: Optional[str]) -> dict:
     global config. ``source`` is ``session`` / ``agent`` / ``global`` accordingly,
     and ``agent`` carries the Agent's default when it has one, so a fresh chat
     with a specialist Agent shows the model it will really answer with.
+
+    A conversation with members ignores the pin, as ``apply_session_prefs``
+    does, and ``pin_ignored`` says so.
     """
     from agent.workspace import session_prefs
 
@@ -607,7 +639,9 @@ def _session_settings_state(session_id: str, agent_id: Optional[str]) -> dict:
     except Exception as e:
         logger.debug(f"[WebChannel] agent default model unavailable: {e}")
 
-    if prefs.get("model"):
+    is_group = bool(prefs.get("members"))
+
+    if prefs.get("model") and not is_group:
         effective_model, effective_provider, source = prefs["model"], prefs.get("provider"), "session"
     elif agent_default:
         effective_model, effective_provider, source = agent_default["model"], agent_default["provider"], "agent"
@@ -619,6 +653,7 @@ def _session_settings_state(session_id: str, agent_id: Optional[str]) -> dict:
             "model": effective_model,
             "provider": effective_provider or global_provider,
             "source": source,
+            "pin_ignored": bool(prefs.get("model")) and is_group,
             "global": {"model": global_model, "provider": global_provider},
             "agent": agent_default,
             "providers": _session_model_catalog(),
@@ -795,8 +830,8 @@ class SessionTitleHandler:
 
             from agent.memory import get_conversation_store
             store = get_conversation_store(_get_workspace_root(agent_id=agent_id))
-            updated = store.rename_session(session_id, title)
-            logger.info(f"[WebChannel] Session title set: sid={session_id}, title='{title}', db_updated={updated}")
+            existed = store.upsert_title(session_id, title, channel_type="web")
+            logger.info(f"[WebChannel] Session title set: sid={session_id}, title='{title}', existed={existed}")
 
             return json.dumps({"status": "success", "title": title}, ensure_ascii=False)
         except Exception as e:

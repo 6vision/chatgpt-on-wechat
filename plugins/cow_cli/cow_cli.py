@@ -589,11 +589,38 @@ class CowCliPlugin(Plugin):
                     if v.get("enabled", True)
                 )
                 lines.append(_t(f"  已加载技能: {enabled}/{total}", f"  Loaded skills: {enabled}/{total}"))
+
+            lines.append(self._mcp_status_line(agent))
         else:
             lines.append("")
             lines.append(_t("  Agent: 未初始化 (首次对话后自动创建)", "  Agent: not initialized (created on first chat)"))
 
         return "\n".join(lines)
+
+    def _mcp_status_line(self, agent) -> str:
+        """One line of MCP servers, shown "ready/total" like the skills line.
+
+        Same source the web console uses (mcp.json, config.json fallback,
+        ToolManager runtime state), and reading it never boots a server.
+        The numerator counts only servers whose live status is "ready"; the
+        denominator counts every configured server (failed, disabled, and
+        not-yet-loaded included). No per-status breakdown ("就绪 2, 失败 1"
+        in parentheses) is shown here by design — the console's MCP page
+        carries that detail.
+        """
+        try:
+            from agent.tools.mcp.service import list_servers_with_status
+
+            servers = list_servers_with_status(agent.workspace_dir).get("servers") or []
+        except Exception as e:
+            logger.warning(f"[CowCli] status: failed to read MCP servers: {e}")
+            servers = []
+
+        ready = sum(1 for item in servers if item.get("status") == "ready")
+        return _t(
+            f"  已加载 MCP: {ready}/{len(servers)}",
+            f"  Loaded MCP: {ready}/{len(servers)}",
+        )
 
     # ------------------------------------------------------------------
     # logs
@@ -854,6 +881,15 @@ class CowCliPlugin(Plugin):
             load_config()
         except Exception as e:
             logger.warning(f"[CowCli] config reload warning: {e}")
+
+        if key in ("agent_max_context_tokens", "agent_max_steps"):
+            try:
+                from bridge.bridge import Bridge
+                agent_bridge = Bridge().get_agent_bridge()
+                if agent_bridge is not None:
+                    agent_bridge.apply_runtime_limits()
+            except Exception as e:
+                logger.warning(f"[CowCli] apply runtime limits failed: {e}")
 
         result = _t(f"✅ 配置已更新\n\n  {key}: {old_val} → {new_val}", f"✅ Config updated\n\n  {key}: {old_val} → {new_val}")
         if "bot_type" in updates and updates["bot_type"] != old_bot_type:
@@ -1252,7 +1288,15 @@ class CowCliPlugin(Plugin):
 
         import shutil
         import json
+        from cli.commands.skill import SkillInstallError, _check_skill_name
         from cli.utils import get_skills_dir
+
+        # The name comes from chat and is passed to rmtree below. Use the raising
+        # check: the CLI variant calls sys.exit.
+        try:
+            _check_skill_name(name)
+        except SkillInstallError as e:
+            return _t(f"无法卸载: {e}", f"Cannot uninstall: {e}")
 
         skills_dir = get_skills_dir()
         skill_dir = os.path.join(skills_dir, name)
@@ -1595,8 +1639,8 @@ class CowCliPlugin(Plugin):
             from agent.memory.chunker import TextChunker
             if detect_chunker_version(memory_manager.storage) != TextChunker.CHUNKER_VERSION:
                 warnings.append(_t(
-                    "  ⚠️ 索引由旧版切分算法生成；建议运行 /memory rebuild-index 以按标题更精准地切分记忆（重建成本较高，由你决定）",
-                    "  ⚠️ Index was built by an older chunking strategy; consider running /memory rebuild-index for heading-aware chunking (a rebuild re-embeds everything, so it's your call)",
+                    "  ⚠️ 索引由旧版切分算法生成；建议运行 /memory rebuild-index 重建以与当前算法保持一致（重建成本较高，由你决定）",
+                    "  ⚠️ Index was built by an older chunking strategy; consider running /memory rebuild-index to bring it in line with the current one (a rebuild re-embeds everything, so it's your call)",
                 ))
 
         if warnings:

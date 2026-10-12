@@ -55,6 +55,29 @@ const feedUrlFor = (china: boolean) => {
   return withFeedQuery(china ? `${FEED_BASE}?lang=zh` : FEED_BASE)
 }
 
+// A channel set explicitly at build time (publish.channel) names a dedicated
+// feed file, e.g. one per Windows generation. setFeedURL replaces the packaged
+// app-update.yml, so that channel has to be passed along. The channel
+// electron-builder derives from a pre-release version tag is left out, so
+// those builds keep reading the default feed file.
+let packagedChannelCache: string | null | undefined
+function packagedChannel(): string | undefined {
+  if (packagedChannelCache === undefined) {
+    packagedChannelCache = null
+    try {
+      const text = fs.readFileSync(path.join(process.resourcesPath, 'app-update.yml'), 'utf8')
+      const channel = text.match(/^channel:\s*['"]?([\w.-]+)['"]?\s*$/m)?.[1]
+      const versionTag = app.getVersion().split('-')[1]?.split('.')[0]?.toLowerCase()
+      if (channel && channel !== 'latest' && channel.toLowerCase() !== versionTag) {
+        packagedChannelCache = channel
+      }
+    } catch {
+      // no packaged update config: use the default channel
+    }
+  }
+  return packagedChannelCache ?? undefined
+}
+
 // Extra query parameters the renderer may attach to the feed URL, so a feed
 // server can tailor its answer to this install. Empty unless set, in which
 // case the feed URL is used exactly as above. electron-updater carries the
@@ -85,9 +108,10 @@ let downloadFellBack = false
 
 function applyFeedUrl(): void {
   const url = feedUrlFor(preferChina)
+  const channel = packagedChannel()
   try {
-    autoUpdater.setFeedURL({ provider: 'generic', url })
-    log(`feed url set: ${url} (preferChina=${preferChina})`)
+    autoUpdater.setFeedURL({ provider: 'generic', url, ...(channel ? { channel } : {}) })
+    log(`feed url set: ${url} (preferChina=${preferChina}${channel ? `, channel=${channel}` : ''})`)
   } catch (err) {
     log(`feed url set failed: ${(err as Error)?.message || String(err)}`)
   }

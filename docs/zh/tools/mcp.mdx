@@ -117,6 +117,10 @@ Agent 会：
 1. 访问 MCP 配置文件，合并新 server 配置，保留已有项
 2. 自动重载增量的 MCP Server，下一次对话即可使用相应 Tools
 
+<Note>
+`mcp.json` 中配置的命令会以 Agent 进程的权限启动，因此只有**全部可访问**权限的会话才允许 Agent 修改 `mcp.json`；只读和工作区可写会话会拒绝，可切换会话权限，或直接在控制台中添加。
+</Note>
+
 ## 网页授权（OAuth）
 
 部分远程 MCP需要 OAuth 网页授权，直接配置会返回 `401`。CowAgent 内置标准 OAuth 流程，**无需手填 token**，正常配置即可，例如：

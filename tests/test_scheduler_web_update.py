@@ -216,3 +216,120 @@ def test_list_scopes_to_a_single_agent_when_asked(tmp_path):
     assert response["status"] == "success"
     assert [task["id"] for task in response["tasks"]] == ["r-task"]
     assert response["tasks"][0]["agent_id"] == "research"
+
+
+# ---------------------------------------------------------------------------
+# The action type is part of what a user may create, so it is part of what a
+# user may edit into. The scheduler can run `tool_call` / `skill_call` for a
+# task some other code path built, but reaching those through the console would
+# run a registered tool on a timer outside the agent's tool-calling path -- and
+# therefore outside `check_tool_call`, so the session's permission mode would
+# not apply and nothing would reach its audit.
+# ---------------------------------------------------------------------------
+
+_UNSAFE_TYPES = ("tool_call", "skill_call")
+
+
+def test_create_and_update_agree_on_the_action_type_whitelist():
+    assert scheduler_api._ALLOWED_ACTION_TYPES == ("send_message", "agent_task")
+    for action_type in _UNSAFE_TYPES:
+        assert action_type not in scheduler_api._ALLOWED_ACTION_TYPES
+
+
+def test_switching_to_a_tool_call_is_refused(tmp_path):
+    store = _store_task(tmp_path, {
+        "type": "send_message",
+        "content": "daily digest",
+        "receiver": "user-1",
+        "channel_type": "web",
+    })
+
+    result = _post_update(store, {
+        "task_id": "task-1",
+        "action": {
+            "type": "tool_call",
+            "call_name": "bash",
+            "call_params": {"command": "echo should-not-run"},
+            "receiver": "user-1",
+            "channel_type": "web",
+        },
+    })
+
+    assert result["status"] == "error"
+    assert "action type" in result["message"].lower()
+    # The stored task is untouched, so nothing is left queued to run it.
+    assert store.get_task("task-1")["action"]["type"] == "send_message"
+
+
+def test_switching_to_a_skill_call_is_refused(tmp_path):
+    store = _store_task(tmp_path, {
+        "type": "send_message",
+        "content": "daily digest",
+        "receiver": "user-1",
+        "channel_type": "web",
+    })
+
+    result = _post_update(store, {
+        "task_id": "task-1",
+        "action": {
+            "type": "skill_call",
+            "skill_name": "anything",
+            "receiver": "user-1",
+            "channel_type": "web",
+        },
+    })
+
+    assert result["status"] == "error"
+    assert store.get_task("task-1")["action"]["type"] == "send_message"
+
+
+def test_a_refused_switch_does_not_smuggle_in_a_tool_name(tmp_path):
+    """The whole action is rejected, not just the type field: leaving the tool
+    fields in the stored action would be enough for the scheduler to run it."""
+    store = _store_task(tmp_path, {
+        "type": "agent_task",
+        "task_description": "refresh the index",
+        "receiver": "user-1",
+        "channel_type": "web",
+    })
+
+    result = _post_update(store, {
+        "task_id": "task-1",
+        "action": {
+            "type": "tool_call",
+            "call_name": "bash",
+            "call_params": {"command": "echo should-not-run"},
+            "task_description": "refresh the index",
+            "receiver": "user-1",
+            "channel_type": "web",
+        },
+    })
+
+    assert result["status"] == "error"
+    action = store.get_task("task-1")["action"]
+    assert "call_name" not in action
+    assert "call_params" not in action
+
+
+def test_the_two_supported_switches_still_work(tmp_path):
+    """The control: the whitelist rejects nothing it used to allow."""
+    for index, (target, stored_type, marker) in enumerate((
+        ("send_message", "agent_task", "content"),
+        ("agent_task", "send_message", "task_description"),
+    )):
+        # _store_task always uses "task-1", so each round needs its own store.
+        store = _store_task(tmp_path / f"case{index}", {
+            "type": stored_type,
+            "receiver": "user-1",
+            "channel_type": "web",
+        })
+        patch_body = {
+            "type": target,
+            "receiver": "user-1",
+            "channel_type": "web",
+            marker: "value-for-" + target,
+        }
+        result = _post_update(store, {"task_id": "task-1", "action": patch_body})
+
+        assert result["status"] == "success", (target, result)
+        assert store.get_task("task-1")["action"]["type"] == target

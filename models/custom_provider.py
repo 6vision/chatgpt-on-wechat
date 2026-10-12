@@ -17,7 +17,8 @@ Config model
           "name": "my-provider",           # user-facing display label (not a key)
           "api_key": "sk-...",             # required
           "api_base": "https://...",       # required, must be OpenAI-compatible
-          "model": "model-name"           # optional default model
+          "model": "model-name",           # optional default model
+          "headers": {"X-Foo": "bar"}      # optional extra HTTP headers
       }
 
 Routing
@@ -133,3 +134,36 @@ def resolve_custom_credentials(bot_type=None):
         conf().get("custom_api_base") or None,
         None,
     )
+
+
+def get_provider_headers(provider):
+    """Extra HTTP headers declared on one custom provider entry.
+
+    Only string keys with scalar values are kept, so a hand-edited config
+    cannot inject a non-string header value into ``requests``.
+    """
+    if not isinstance(provider, dict):
+        return {}
+    raw = provider.get("headers")
+    if not isinstance(raw, dict):
+        return {}
+    headers = {}
+    for key, value in raw.items():
+        name = str(key).strip()
+        if not name or value is None or isinstance(value, (dict, list)):
+            continue
+        headers[name] = str(value)
+    return headers
+
+
+def resolve_custom_headers(bot_type=None):
+    """Extra HTTP headers for the custom provider ``bot_type`` routes to.
+
+    The legacy flat ``custom`` mode has no headers field, so it returns {}.
+    """
+    if bot_type is None:
+        bot_type = conf().get("bot_type", "")
+    is_custom, provider_id = parse_custom_bot_type(bot_type)
+    if not is_custom or not provider_id:
+        return {}
+    return get_provider_headers(_find_provider_by_id(get_custom_providers(), provider_id))

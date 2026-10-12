@@ -184,7 +184,9 @@ def test_wechat_kf_refuses_an_oversized_file_and_writes_nothing(tmp_path, monkey
 
     msg.prepare()
 
-    assert not Path(msg.content).exists()
+    # Assert on the directory, not on Path(msg.content): a refused download
+    # now leaves content empty, and Path("") is "." -- which exists.
+    assert not list(tmp_path.iterdir()), "nothing may be written to the tmp dir"
     assert not list(tmp_path.glob(".download_*")), "no temp file may be left behind"
     assert response.closed
 

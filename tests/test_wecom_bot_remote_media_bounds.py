@@ -36,9 +36,7 @@ def _patch_download(monkeypatch, tmp_path, response):
         return response
 
     monkeypatch.setattr(channel.requests, "get", get)
-    monkeypatch.setattr(
-        channel, "_media_tmp_path", lambda prefix, ext="": str(tmp_path / f"{prefix}{ext}")
-    )
+    monkeypatch.setattr(channel.state_dir, "tmp_file", lambda prefix, ext="": str(tmp_path / f"{prefix}{ext}"))
     return calls
 
 

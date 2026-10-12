@@ -1,6 +1,9 @@
 """Web console one-click updater: local version metadata, GitHub-on-click, degrade."""
 
 import json
+import os
+import shutil
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -40,6 +43,89 @@ def test_git_checkout_is_supported_on_unix(tmp_path, monkeypatch):
     kind = detect_install_kind(str(tmp_path))
     assert kind.kind == "git"
     assert kind.update_supported is True
+
+
+def _native_git_worktree(tmp_path, monkeypatch, detached=False, separate_gitdir=False):
+    if shutil.which("git") is None:
+        pytest.skip("native Git is required for checkout fixtures")
+    for key in list(os.environ):
+        if key.startswith("GIT_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.delenv("COW_DESKTOP", raising=False)
+    monkeypatch.delenv("COW_DOCKER", raising=False)
+    monkeypatch.setattr("cli.update_service._is_docker_install", lambda: False)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    def git(*args, cwd=repo):
+        return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                              text=True, check=True)
+    git("init", "-q", *(["--separate-git-dir", str(tmp_path / "git-metadata")] if separate_gitdir else []))
+    git("config", "user.name", "Owned Fixture")
+    git("config", "user.email", "fixture@example.invalid")
+    git("config", "core.hooksPath", str(tmp_path / "empty-hooks"))
+    (repo / "README.md").write_text("fixture\n", encoding="utf-8")
+    git("add", "README.md")
+    git("-c", "commit.gpgsign=false", "commit", "-qm", "fixture")
+    worktree = tmp_path / "worktree"
+    branch_args = ["--detach"] if detached else ["-b", "fixture-worktree"]
+    git("worktree", "add", *branch_args, str(worktree))
+    assert (worktree / ".git").is_file()
+    assert git("rev-parse", "--is-inside-work-tree", cwd=worktree).stdout.strip() == "true"
+    return repo, worktree
+
+
+@pytest.mark.parametrize("separate_gitdir", [False, True])
+def test_native_linked_worktree_version_support(tmp_path, monkeypatch, separate_gitdir):
+    repo, worktree = _native_git_worktree(tmp_path, monkeypatch, separate_gitdir=separate_gitdir)
+    if separate_gitdir:
+        assert (repo / ".git").is_file()
+        assert version_payload(str(repo))["install_kind"] == "git"
+    payload = version_payload(str(worktree))
+    assert payload["install_kind"] == "git"
+    assert payload["update_supported"] is (sys.platform != "win32")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Web restart is intentionally disabled on Windows")
+def test_native_gitfile_dirty_checkout_blocks_before_restart(tmp_path, monkeypatch):
+    _, worktree = _native_git_worktree(tmp_path, monkeypatch)
+    changed = worktree / "README.md"
+    changed.write_text("owned local changes\n", encoding="utf-8")
+    with pytest.raises(UpdateError) as caught:
+        schedule_web_update(str(worktree))
+    assert caught.value.step == "git_pull"
+    assert "local changes" in str(caught.value)
+    assert changed.read_text(encoding="utf-8") == "owned local changes\n"
+    assert not (worktree / ".cow.pid").exists()
+
+
+def test_native_detached_worktree_pull_failure_stays_safe(tmp_path, monkeypatch):
+    _, worktree = _native_git_worktree(tmp_path, monkeypatch, detached=True)
+    before = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=worktree)
+    assert version_payload(str(worktree))["install_kind"] == "git"
+    with pytest.raises(UpdateError) as caught:
+        apply_source_update(str(worktree))
+    assert caught.value.step == "git_pull"
+    assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=worktree) == before
+    assert (worktree / "README.md").read_text(encoding="utf-8") == "fixture\n"
+
+
+def test_arbitrary_gitfile_is_not_update_supported(tmp_path, monkeypatch):
+    monkeypatch.delenv("COW_DESKTOP", raising=False)
+    monkeypatch.setattr("cli.update_service._is_docker_install", lambda: False)
+    (tmp_path / ".git").write_text("arbitrary marker\n", encoding="utf-8")
+    kind = detect_install_kind(str(tmp_path))
+    assert kind.kind == "unknown"
+    assert kind.update_supported is False
+
+
+def test_gitfile_without_git_executable_degrades(tmp_path, monkeypatch):
+    _, worktree = _native_git_worktree(tmp_path, monkeypatch)
+    monkeypatch.setenv("PATH", "")
+    kind = detect_install_kind(str(worktree))
+    assert kind.kind == "unknown"
+    assert kind.update_supported is False
 
 
 def test_windows_git_checkout_degrades(tmp_path, monkeypatch):

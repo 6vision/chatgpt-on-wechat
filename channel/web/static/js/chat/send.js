@@ -336,15 +336,15 @@ function startSSE(requestId, loadingEl, timestamp, titleInfo, replayItems, resum
                     <div class="media-content"></div>
                     <div class="bot-audio-slot"></div>
                 </div>
-                <div class="flex items-center gap-2 mt-1.5">
+                <div class="bot-message-meta flex items-center gap-2 mt-1.5 flex-wrap">
                     <span class="text-xs text-slate-400 dark:text-slate-500">${formatTime(timestamp)}</span>
-                    <button class="copy-msg-btn text-xs text-slate-300 dark:text-slate-600 hover:text-slate-500 dark:hover:text-slate-400 transition-colors cursor-pointer" title="${currentLang === 'zh' ? '复制' : 'Copy'}" style="display:none">
+                    <button class="copy-msg-btn text-xs text-slate-300 dark:text-slate-600 hover:text-slate-500 dark:hover:text-slate-400 transition-colors cursor-pointer" data-tip-float data-tooltip="${currentLang === 'zh' ? '复制' : 'Copy'}" style="display:none">
                         <i class="fas fa-copy"></i>
                     </button>
-                    <button class="speak-msg-btn text-xs text-slate-300 dark:text-slate-600 hover:text-slate-500 dark:hover:text-slate-400 transition-colors cursor-pointer" title="${t('speak_msg')}" style="display:none;">
+                    <button class="speak-msg-btn text-xs text-slate-300 dark:text-slate-600 hover:text-slate-500 dark:hover:text-slate-400 transition-colors cursor-pointer" data-tip-float data-tooltip="${t('speak_msg')}" style="display:none;">
                         <i class="fas fa-volume-up"></i>
                     </button>
-                    <button class="regenerate-msg-btn text-xs text-slate-300 dark:text-slate-600 hover:text-primary-400 dark:hover:text-primary-400 transition-colors cursor-pointer" title="${t('regenerate_response')}" style="display:none;">
+                    <button class="regenerate-msg-btn text-xs text-slate-300 dark:text-slate-600 hover:text-primary-400 dark:hover:text-primary-400 transition-colors cursor-pointer" data-tip-float data-tooltip="${t('regenerate_response')}" style="display:none;">
                         <i class="fas fa-rotate-right"></i>
                     </button>
                 </div>
@@ -676,6 +676,29 @@ function startSSE(requestId, loadingEl, timestamp, titleInfo, replayItems, resum
                 mediaEl.appendChild(wrapper.firstElementChild || wrapper);
                 scrollChatToBottom();
 
+            } else if (item.type === 'file' && item.file_type === 'video') {
+                ensureBotEl();
+                const wrapper = document.createElement('div');
+                wrapper.innerHTML = _buildVideoHtml(item.content);
+                mediaEl.appendChild(wrapper.firstElementChild || wrapper);
+                scrollChatToBottom();
+
+            } else if (item.type === 'file' && item.abs_path && typeof appendArtifactCard === 'function') {
+                // A local document delivered with `send`: the same card as a
+                // file the agent wrote, so it previews and opens in Artifacts.
+                // A file the turn already produced keeps its one card.
+                ensureBotEl();
+                const name = item.file_name || item.abs_path.split(/[\\/]/).pop();
+                const kind = item.kind || wsKindOf(name);
+                appendArtifactCard(mediaEl, Object.assign({}, item, {
+                    file_name: name,
+                    kind: kind,
+                    rel_path: item.rel_path || name,
+                    raw_url: item.content,
+                    previewable: item.previewable != null ? item.previewable : WS_PREVIEWABLE.has(kind),
+                }));
+                scrollChatToBottom();
+
             } else if (item.type === 'file') {
                 ensureBotEl();
                 const fileName = item.file_name || item.content.split('/').pop();
@@ -763,6 +786,7 @@ function startSSE(requestId, loadingEl, timestamp, titleInfo, replayItems, resum
                     ? messagesDiv.querySelector(`[data-request-id="${requestId}"]:not([data-peer-bubble])`)
                     : null);
                 if (targetBotEl) {
+                    attachMessageUsage(targetBotEl, item.usage);
                     if (item.bot_seq !== undefined && item.bot_seq !== null) {
                         targetBotEl.dataset.seq = item.bot_seq;
                     }

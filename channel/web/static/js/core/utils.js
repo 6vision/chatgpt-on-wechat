@@ -165,6 +165,8 @@ function applyHighlighting(container) {
         });
         // Add language labels and copy buttons to code blocks
         _addCodeBlockHeaders(root);
+        // Add the [Code|Preview] switch to ```mermaid blocks (no download here).
+        renderMermaidBlocks(root);
     }, 0);
 }
 

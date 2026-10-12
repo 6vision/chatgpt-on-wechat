@@ -16,6 +16,7 @@ import re
 import threading
 import time
 import uuid
+from typing import List, Optional
 from urllib.parse import urlparse
 
 import requests
@@ -30,7 +31,7 @@ from channel.wecom_bot.wecom_bot_message import WecomBotMessage
 from common import state_dir
 from common.expired_dict import ExpiredDict
 from common.log import logger
-from common.media_download import MAX_FILE_BYTES, MAX_IMAGE_BYTES, download_to_file
+from common.media_download import MAX_FILE_BYTES, MAX_IMAGE_BYTES, download_to_file, remove_download
 from common.singleton import singleton
 from common.ws_client_compat import websocket_app_run_forever
 from config import conf
@@ -42,18 +43,9 @@ MEDIA_CHUNK_SIZE = 512 * 1024  # 512KB per chunk (before base64 encoding)
 # receive-message URL must point at this path, e.g. http://host:9892/wecombot
 CALLBACK_PATH = "/wecombot"
 
-
-def _media_tmp_path(prefix: str, ext: str = "") -> str:
-    """Path for transient media this channel downloads or synthesizes.
-
-    Transient media belongs in the agent's managed tmp dir -- the convention
-    every other channel follows through ``common.state_dir.tmp_dir()``. A bare
-    ``/tmp/...`` is not portable: on Windows it resolves against the *current
-    drive*, so the same process writes to a different disk depending on where it
-    was launched, and it sits outside the workspace the app manages (and cleans).
-    ``tmp_dir()`` also creates the directory, which ``/tmp`` does not guarantee.
-    """
-    return os.path.join(str(state_dir.tmp_dir()), f"{prefix}_{uuid.uuid4().hex[:8]}{ext}")
+# Wall-clock budget for one downloaded reply; the socket timeout alone never
+# stops a server that keeps trickling bytes.
+_MAX_REMOTE_MEDIA_SECONDS = 60
 
 
 def _image_ext(content_type: str) -> str:
@@ -66,13 +58,29 @@ def _image_ext(content_type: str) -> str:
     return ".png"
 
 
-def _download_remote_media(url: str, prefix: str, ext, max_bytes: int, read_timeout: int):
+def _download_remote_media(
+    url: str,
+    prefix: str,
+    ext,
+    max_bytes: int,
+    read_timeout: int,
+    max_seconds: int = _MAX_REMOTE_MEDIA_SECONDS,
+):
     """Download one reply into managed tmp storage; returns (path, size, content_type).
 
     ``ext=None`` means an image whose extension comes from the Content-Type.
+    ``max_seconds`` caps the whole transfer, since ``send()`` runs on the shared
+    reply thread and a stalled download would block every later message.
     """
-    path = _media_tmp_path(prefix)
-    size, content_type = download_to_file(url, path, max_bytes, timeout=(5, read_timeout))
+    path = state_dir.tmp_file(prefix)
+    size, content_type = download_to_file(
+        url,
+        path,
+        max_bytes,
+        timeout=(5, read_timeout),
+        max_seconds=max_seconds,
+        guarded=True,
+    )
     if not size:
         os.remove(path)
         raise ValueError("remote media is empty")
@@ -346,11 +354,14 @@ class WecomBotChannel(ChatChannel):
         (e.g. an image/file silently cached for the next query).
         """
         msg_id = data.get("msgid", "")
-        if msg_id and self.received_msgs.get(msg_id):
-            logger.debug(f"[WecomBot] Duplicate msg filtered: {msg_id}")
-            return None
         if msg_id:
-            self.received_msgs[msg_id] = True
+            with self._callback_lock:
+                duplicate = self.received_msgs.get(msg_id)
+                if not duplicate:
+                    self.received_msgs[msg_id] = True
+            if duplicate:
+                logger.debug(f"[WecomBot] Duplicate msg filtered: {msg_id}")
+                return None
 
         chattype = data.get("chattype", "single")
         is_group = chattype == "group"
@@ -916,12 +927,22 @@ class WecomBotChannel(ChatChannel):
                 has_images = bool(state.get("images"))
                 state["url_sent"] = True
 
-            self._send_via_response_url(stream_id, response_url, content, image_urls, has_images)
+            if not self._send_via_response_url(stream_id, response_url, content, image_urls, has_images):
+                # Refused, so hand the answer back to a late poll.
+                with self._callback_lock:
+                    state = self._callback_streams.get(stream_id)
+                    if state:
+                        state["url_sent"] = False
 
         threading.Thread(target=_run, daemon=True, name=f"wecom-respurl-{stream_id}").start()
 
-    def _send_via_response_url(self, stream_id, response_url, content, image_urls, has_images):
-        """Push a one-shot active markdown reply to response_url (valid 1h, single use)."""
+    def _send_via_response_url(
+        self, stream_id, response_url, content, image_urls, has_images
+    ) -> bool:
+        """Push a one-shot active markdown reply to response_url (valid 1h, single use).
+
+        Returns False only when WeCom answered and refused the reply.
+        """
         md = content or ""
         if image_urls:
             md += ("\n\n" if md else "") + "\n".join(f"![]({u})" for u in image_urls)
@@ -932,12 +953,26 @@ class WecomBotChannel(ChatChannel):
         payload = {"msgtype": "markdown", "markdown": {"content": md}}
         try:
             resp = requests.post(response_url, json=payload, timeout=15)
-            logger.info(
-                f"[WecomBot] response_url active reply sent for {stream_id}: "
+        except Exception as e:
+            # It may still have arrived; keep the claim so a poll cannot repeat it.
+            logger.error(f"[WecomBot] response_url active reply failed for {stream_id}: {e}")
+            return True
+
+        # WeCom answers HTTP 200 even when it refuses; errcode is the real signal.
+        try:
+            body = resp.json()
+        except Exception:
+            body = None
+        errcode = body.get("errcode", 0) if isinstance(body, dict) else None
+        if resp.status_code != 200 or errcode != 0:
+            logger.error(
+                f"[WecomBot] response_url active reply rejected for {stream_id}: "
                 f"status={resp.status_code}, body={resp.text[:200]}"
             )
-        except Exception as e:
-            logger.error(f"[WecomBot] response_url active reply failed for {stream_id}: {e}")
+            return False
+
+        logger.info(f"[WecomBot] response_url active reply sent for {stream_id}")
+        return True
 
     def _load_image_base64(self, img_path_or_url: str):
         """Load a local/remote image, ensure JPG/PNG within 10MB, return (base64, md5)."""
@@ -1090,35 +1125,52 @@ class WecomBotChannel(ChatChannel):
         if local_path.startswith("file://"):
             local_path = local_path[7:]
 
-        if local_path.startswith(("http://", "https://")):
-            try:
-                tmp_path, size, ct = _download_remote_media(
-                    local_path, "wecom_img", None, MAX_IMAGE_BYTES, 30
-                )
-                logger.info(f"[WecomBot] Image downloaded: size={size}, "
-                            f"content-type={ct}, path={tmp_path}")
-                local_path = tmp_path
-            except Exception as e:
-                logger.error(f"[WecomBot] Failed to download image for sending: {e}")
-                self._send_text("[Image send failed]", receiver, is_group, req_id)
+        # Only files downloaded or derived here; a local file the agent produced must survive.
+        temp_files: List[str] = []
+        try:
+            if local_path.startswith(("http://", "https://")):
+                try:
+                    tmp_path, size, ct = _download_remote_media(
+                        local_path, "wecom_img", None, MAX_IMAGE_BYTES, 30
+                    )
+                    logger.info(f"[WecomBot] Image downloaded: size={size}, "
+                                f"content-type={ct}, path={tmp_path}")
+                    temp_files.append(tmp_path)
+                    local_path = tmp_path
+                except Exception as e:
+                    logger.error(f"[WecomBot] Failed to download image for sending: {e}")
+                    self._send_text("[Image send failed]", receiver, is_group, req_id)
+                    return
+
+            if not os.path.exists(local_path):
+                logger.error(f"[WecomBot] Image file not found: {local_path}")
                 return
 
-        if not os.path.exists(local_path):
-            logger.error(f"[WecomBot] Image file not found: {local_path}")
-            return
-
-        max_image_size = 2 * 1024 * 1024  # 2MB limit for image upload
-        local_path = self._ensure_image_format(local_path)
-        if not local_path:
-            self._send_text("[Image format conversion failed]", receiver, is_group, req_id)
-            return
-
-        if os.path.getsize(local_path) > max_image_size:
-            local_path = self._compress_image(local_path, max_image_size)
-            if not local_path:
-                self._send_text("[Image too large]", receiver, is_group, req_id)
+            max_image_size = 2 * 1024 * 1024  # 2MB limit for image upload
+            converted = self._ensure_image_format(local_path)
+            if not converted:
+                self._send_text("[Image format conversion failed]", receiver, is_group, req_id)
                 return
+            if converted != local_path:
+                temp_files.append(converted)
+                local_path = converted
 
+            if os.path.getsize(local_path) > max_image_size:
+                compressed = self._compress_image(local_path, max_image_size)
+                if not compressed:
+                    self._send_text("[Image too large]", receiver, is_group, req_id)
+                    return
+                if compressed != local_path:
+                    temp_files.append(compressed)
+                    local_path = compressed
+
+            self._upload_and_reply_image(local_path, receiver, is_group, req_id)
+        finally:
+            for path in temp_files:
+                remove_download(path)
+
+    def _upload_and_reply_image(self, local_path, receiver, is_group, req_id=None):
+        """Upload one prepared image and send it."""
         file_size = os.path.getsize(local_path)
         logger.info(f"[WecomBot] Uploading image: path={local_path}, size={file_size} bytes")
         media_id = self._upload_media(local_path, "image")
@@ -1164,23 +1216,24 @@ class WecomBotChannel(ChatChannel):
                     return file_path
                 # Extension doesn't match — rename/copy with correct extension
                 correct_ext = ".jpg" if fmt == "JPEG" else ".png"
-                out_path = _media_tmp_path("wecom_fmt", correct_ext)
+                out_path = state_dir.tmp_file("wecom_fmt", correct_ext)
                 img.save(out_path, fmt)
                 logger.info(f"[WecomBot] Image renamed: {file_path} -> {out_path} ({fmt})")
                 return out_path
 
             # Unsupported format (WebP, GIF, BMP, etc.) — convert to PNG
             if img.mode == "RGBA":
-                out_path = _media_tmp_path("wecom_fmt", ".png")
+                out_path = state_dir.tmp_file("wecom_fmt", ".png")
                 img.save(out_path, "PNG")
             else:
-                out_path = _media_tmp_path("wecom_fmt", ".jpg")
+                out_path = state_dir.tmp_file("wecom_fmt", ".jpg")
                 img.convert("RGB").save(out_path, "JPEG", quality=90)
             logger.info(f"[WecomBot] Image converted from {fmt} -> {out_path}")
             return out_path
         except Exception as e:
+            # WeCom only accepts JPG/PNG, so the unconverted original is unusable.
             logger.error(f"[WecomBot] Image format check failed: {e}")
-            return file_path
+            return ""
 
     @staticmethod
     def _compress_image(file_path: str, max_bytes: int) -> str:
@@ -1191,7 +1244,7 @@ class WecomBotChannel(ChatChannel):
             if img.mode == "RGBA":
                 img = img.convert("RGB")
 
-            out_path = _media_tmp_path("wecom_compressed", ".jpg")
+            out_path = state_dir.tmp_file("wecom_compressed", ".jpg")
             quality = 85
             while quality >= 30:
                 img.save(out_path, "JPEG", quality=quality, optimize=True)
@@ -1224,21 +1277,32 @@ class WecomBotChannel(ChatChannel):
         if local_path.startswith("file://"):
             local_path = local_path[7:]
 
-        if local_path.startswith(("http://", "https://")):
-            try:
-                ext = os.path.splitext(urlparse(local_path).path)[1] or ".bin"
-                tmp_path, _, _ = _download_remote_media(
-                    local_path, "wecom_file", ext, MAX_FILE_BYTES, 60
-                )
-                local_path = tmp_path
-            except Exception as e:
-                logger.error(f"[WecomBot] Failed to download file for sending: {e}")
+        # Only a download is temporary; a local path belongs to the caller.
+        downloaded: Optional[str] = None
+        try:
+            if local_path.startswith(("http://", "https://")):
+                try:
+                    ext = os.path.splitext(urlparse(local_path).path)[1] or ".bin"
+                    tmp_path, _, _ = _download_remote_media(
+                        local_path, "wecom_file", ext, MAX_FILE_BYTES, 60
+                    )
+                    downloaded = tmp_path
+                    local_path = tmp_path
+                except Exception as e:
+                    logger.error(f"[WecomBot] Failed to download file for sending: {e}")
+                    return
+
+            if not os.path.exists(local_path):
+                logger.error(f"[WecomBot] File not found: {local_path}")
                 return
 
-        if not os.path.exists(local_path):
-            logger.error(f"[WecomBot] File not found: {local_path}")
-            return
+            self._upload_and_reply_file(local_path, receiver, is_group, req_id, media_type)
+        finally:
+            remove_download(downloaded)
 
+    def _upload_and_reply_file(self, local_path, receiver, is_group, req_id=None,
+                               media_type: str = "file"):
+        """Upload one prepared file and send it."""
         media_id = self._upload_media(local_path, media_type)
         if not media_id:
             logger.error(f"[WecomBot] Failed to upload {media_type}")
@@ -1271,31 +1335,44 @@ class WecomBotChannel(ChatChannel):
         if local_path.startswith("file://"):
             local_path = local_path[7:]
 
-        if local_path.startswith(("http://", "https://")):
-            try:
-                ext = os.path.splitext(urlparse(local_path).path)[1] or ".mp3"
-                tmp_path, _, _ = _download_remote_media(
-                    local_path, "wecom_voice", ext, MAX_FILE_BYTES, 60
-                )
-                local_path = tmp_path
-            except Exception as e:
-                logger.error(f"[WecomBot] Failed to download voice for sending: {e}")
+        # The download and the amr conversion; a local voice file is kept.
+        temp_files: List[str] = []
+        try:
+            if local_path.startswith(("http://", "https://")):
+                try:
+                    ext = os.path.splitext(urlparse(local_path).path)[1] or ".mp3"
+                    tmp_path, _, _ = _download_remote_media(
+                        local_path, "wecom_voice", ext, MAX_FILE_BYTES, 60
+                    )
+                    temp_files.append(tmp_path)
+                    local_path = tmp_path
+                except Exception as e:
+                    logger.error(f"[WecomBot] Failed to download voice for sending: {e}")
+                    return
+
+            if not os.path.exists(local_path):
+                logger.error(f"[WecomBot] Voice file not found: {local_path}")
                 return
 
-        if not os.path.exists(local_path):
-            logger.error(f"[WecomBot] Voice file not found: {local_path}")
-            return
+            amr_path = local_path
+            if not local_path.lower().endswith(".amr"):
+                try:
+                    from voice.audio_convert import any_to_amr
+                    amr_path = os.path.splitext(local_path)[0] + ".amr"
+                    any_to_amr(local_path, amr_path)
+                    if amr_path != local_path:
+                        temp_files.append(amr_path)
+                except Exception as e:
+                    logger.error(f"[WecomBot] Failed to convert voice to amr: {e}")
+                    return
 
-        amr_path = local_path
-        if not local_path.lower().endswith(".amr"):
-            try:
-                from voice.audio_convert import any_to_amr
-                amr_path = os.path.splitext(local_path)[0] + ".amr"
-                any_to_amr(local_path, amr_path)
-            except Exception as e:
-                logger.error(f"[WecomBot] Failed to convert voice to amr: {e}")
-                return
+            self._upload_and_reply_voice(amr_path, receiver, is_group, req_id)
+        finally:
+            for path in temp_files:
+                remove_download(path)
 
+    def _upload_and_reply_voice(self, amr_path, receiver, is_group, req_id=None):
+        """Upload one prepared voice file and send it."""
         media_id = self._upload_media(amr_path, "voice")
         if not media_id:
             logger.error("[WecomBot] Failed to upload voice media")

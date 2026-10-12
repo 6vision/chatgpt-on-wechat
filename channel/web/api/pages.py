@@ -13,6 +13,7 @@ import os
 import web
 
 from channel.web.core import template
+from channel.web.core._common import _is_within_directory
 from common import i18n
 from common.log import logger
 
@@ -72,8 +73,7 @@ class AssetsHandler:
 
             full_path = os.path.normpath(os.path.join(static_dir, file_path))
 
-            # 安全检查：确保请求的文件在static目录内
-            if not os.path.abspath(full_path).startswith(os.path.abspath(static_dir)):
+            if not _is_within_directory(os.path.realpath(static_dir), os.path.realpath(full_path)):
                 logger.error(f"Security check failed for path: {full_path}")
                 raise web.notfound()
 
