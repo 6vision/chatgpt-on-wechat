@@ -249,6 +249,10 @@ class _WorkspaceWriteGuard:
         # The agent runtime calls execute_tool (not execute); route it through
         # our guarded execute so the path checks always run.
         try:
+            params, error = self._inner._coerce_integer_args(params)
+            if error:
+                from agent.tools.base_tool import ToolResult
+                return ToolResult.fail(error)
             return self.execute(params)
         except Exception as e:
             logger.error(f"[Evolution] guarded tool error: {e}")

@@ -1,25 +1,7 @@
 # encoding:utf-8
-"""
-Regression tests for the Read tool's handling of a non-positive ``limit``.
-
-``limit`` is documented as "maximum number of lines to read", so a caller only
-passes it to bound the amount of output. A ``limit`` of 0 produced an empty
-slice, but the reader still counted itself as "user limited" and appended a
-continuation hint, so ``limit=0`` answered::
-
-    1|
-
-    [11 more lines in file. Use offset=1 to continue.]
-
-Following that advice - ``offset=1, limit=0`` - returned a byte-identical
-string. The hint pointed at the line the read had already stopped at, so a
-model that trusted it could repeat the call forever and never advance.
-
-A negative ``limit`` was quietly wrong in the other direction: ``end_line``
-went negative and ``all_lines[start:end]`` sliced from the end of the list, so
-``limit=-5`` on a 12-line file happily returned 7 lines and called it a
-success.
-"""
+"""A non-positive Read ``limit`` is refused: limit=0 used to return an empty
+page whose "continue" hint pointed back at the same line, and a negative one
+sliced from the end of the file."""
 import os
 import re
 import sys
