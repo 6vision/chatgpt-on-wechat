@@ -303,6 +303,13 @@ class Read(BaseTool):
         end_line = total_lines
         user_limited = False
         if limit is not None:
+            # limit=0 used to return an empty page with a "continue" hint that
+            # pointed back at the same line; a negative one sliced from the end.
+            if limit <= 0:
+                return None, (
+                    f"Error: limit must be a positive number of lines (got {limit}). "
+                    f"Omit limit to read the whole file, or pass limit=20 to read 20 lines."
+                )
             end_line = min(start_line + limit, total_lines)
             user_limited = True
 

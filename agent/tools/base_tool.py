@@ -34,6 +34,26 @@ class ToolResult:
         return ToolResult(status="error", result=result, ext_data=ext_data, display=display)
 
 
+def _as_int(value) -> Optional[int]:
+    """An integer argument as an int: accepts "2", " 2 ", "2.0" and 2.0, refuses booleans."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        value = value.strip()
+        try:
+            return int(value)
+        except ValueError:
+            try:
+                value = float(value)
+            except ValueError:
+                return None
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return None
+
+
 def is_tool_available(tool) -> bool:
     """Availability of a tool that may not implement the check at all.
 
@@ -162,10 +182,29 @@ class BaseTool:
     def execute_tool(self, params: dict) -> ToolResult:
         """Run the tool; an exception becomes a failed result, never None."""
         try:
+            params, error = self._coerce_integer_args(params)
+            if error:
+                return ToolResult.fail(error)
             return self.execute(params)
         except Exception as e:
             logger.error(f"[{self.name}] execution failed: {e}", exc_info=True)
             return ToolResult.fail(f"Error: {type(e).__name__}: {e}")
+
+    def _coerce_integer_args(self, params):
+        """Models often quote integers ("offset": "2"); convert every argument the
+        schema declares as an integer, so each tool only checks its own range."""
+        properties = (self.params or {}).get("properties") or {}
+        if not isinstance(params, dict):
+            return params, None
+        coerced = dict(params)
+        for name, value in params.items():
+            if value is None or (properties.get(name) or {}).get("type") != "integer":
+                continue
+            number = _as_int(value)
+            if number is None:
+                return params, f"Error: {name} must be an integer, got {value!r}"
+            coerced[name] = number
+        return coerced, None
 
     def execute(self, params: dict) -> ToolResult:
         """Specific logic to be implemented by subclasses"""
