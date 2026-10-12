@@ -79,6 +79,7 @@ class SkillLoader:
         source: str, 
         include_root_files: bool = False,
         use_cache: bool = False,
+        _ancestor_dirs: Optional[frozenset] = None,
     ) -> LoadSkillsResult:
         """
         Recursively load skills from a directory.
@@ -96,6 +97,16 @@ class SkillLoader:
         """
         skills = []
         diagnostics = []
+
+        # Follow legitimate linked skill collections, but never descend back
+        # into an ancestor. Multiple links to a parent otherwise expand the
+        # directory walk exponentially, even when file parses are cached.
+        ancestors = _ancestor_dirs or frozenset()
+        canonical_dir = os.path.normcase(os.path.realpath(dir_path))
+        if canonical_dir in ancestors:
+            diagnostics.append(f"Skipped cyclic skill directory: {dir_path}")
+            return LoadSkillsResult(skills=skills, diagnostics=diagnostics)
+        ancestors = ancestors | {canonical_dir}
         
         try:
             entries = os.listdir(dir_path)
@@ -125,7 +136,8 @@ class SkillLoader:
             
             if os.path.isdir(full_path):
                 sub_result = self._load_skills_recursive(
-                    full_path, source, include_root_files=False, use_cache=use_cache
+                    full_path, source, include_root_files=False, use_cache=use_cache,
+                    _ancestor_dirs=ancestors,
                 )
                 skills.extend(sub_result.skills)
                 diagnostics.extend(sub_result.diagnostics)

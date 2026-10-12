@@ -37,7 +37,8 @@ def _assert_managed(reply):
 
 
 def test_linkai_tts_lands_in_the_managed_tmp_dir():
-    response = Mock(status_code=200, content=b"mp3-bytes")
+    # TTS bodies are streamed now, so the stub has to answer `iter_content`.
+    response = Mock(status_code=200, iter_content=lambda chunk_size: [b"mp3-bytes"])
     with patch.object(linkai_voice, "conf", lambda: {"linkai_api_key": "k"}), \
             patch.object(linkai_voice, "apply_client_source", lambda h: h), \
             patch.object(linkai_voice, "apply_cloud_user", lambda h: h), \
@@ -49,7 +50,8 @@ def test_linkai_tts_lands_in_the_managed_tmp_dir():
 
 
 def test_openai_tts_lands_in_the_managed_tmp_dir():
-    response = Mock(content=b"mp3-bytes")
+    # TTS bodies are streamed now, so the stub has to answer `iter_content`.
+    response = Mock(status_code=200, iter_content=lambda chunk_size: [b"mp3-bytes"])
     with patch.object(openai_voice, "conf", lambda: {"open_ai_api_key": "k"}), \
             patch.object(openai_voice.requests, "post", return_value=response):
         reply = openai_voice.OpenaiVoice().textToVoice("你好")
@@ -81,7 +83,9 @@ def test_minimax_tts_lands_in_the_managed_tmp_dir():
 
 
 def test_zhipuai_tts_lands_in_the_managed_tmp_dir():
-    response = Mock(status_code=200, headers={"Content-Type": "audio/wav"}, content=b"RIFFwav")
+    # TTS bodies are streamed now, so the stub has to answer `iter_content`.
+    response = Mock(status_code=200, headers={"Content-Type": "audio/wav"},
+                    iter_content=lambda chunk_size: [b"RIFFwav"])
     with patch.object(zhipuai_voice, "conf", lambda: {"zhipu_ai_api_key": "k"}), \
             patch.object(zhipuai_voice.requests, "post", return_value=response):
         reply = zhipuai_voice.ZhipuAIVoice().textToVoice("你好")

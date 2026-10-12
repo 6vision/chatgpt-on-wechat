@@ -5,6 +5,9 @@ is cut off at ``max_bytes`` instead of being buffered into memory first.
 ``max_seconds`` optionally caps the whole transfer, since the socket timeout
 alone never fires on a server that keeps trickling bytes.
 Every failure raises; callers decide how to degrade.
+
+``save_response`` / ``read_response`` apply the same rules to a response the
+caller already opened (a POST, or a GET behind a redirect guard).
 """
 
 import os
@@ -13,6 +16,8 @@ import time
 from typing import NamedTuple
 
 import requests
+
+from common.log import logger
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_FILE_BYTES = 100 * 1024 * 1024
@@ -31,17 +36,34 @@ class DownloadResult(NamedTuple):
 
 
 def download_to_file(url, path, max_bytes=MAX_FILE_BYTES, timeout=_DEFAULT_TIMEOUT, max_seconds=None,
-                     **kwargs) -> DownloadResult:
+                     guarded=False, **kwargs) -> DownloadResult:
     """Stream ``url`` into ``path``.
 
-    The body goes to a temp file next to ``path`` and is moved into place only
-    once it arrived completely within ``max_bytes``, so a failed or oversized
-    download never leaves a partial file behind or clobbers an existing one.
+    ``guarded`` marks a URL that came from a model reply: with
+    ``web_security_ssrf_protection`` on, it and every redirect hop must be public.
     Extra ``kwargs`` (headers, params, ...) are passed to ``requests.get``.
+    """
+    response = _open(url, max_bytes, timeout, kwargs, guarded)
+    return save_response(response, path, max_bytes, max_seconds)
+
+
+def download_bytes(url, max_bytes=MAX_FILE_BYTES, timeout=_DEFAULT_TIMEOUT, max_seconds=None,
+                   guarded=False, **kwargs) -> bytes:
+    """Return the body of ``url``, refusing anything larger than ``max_bytes``."""
+    response = _open(url, max_bytes, timeout, kwargs, guarded)
+    return read_response(response, max_bytes, max_seconds)
+
+
+def save_response(response, path, max_bytes=MAX_FILE_BYTES, max_seconds=None) -> DownloadResult:
+    """Stream an already-open *response* into *path*.
+
+    The body goes to a temp file next to *path* and is moved into place only
+    once it arrived completely within *max_bytes*, so a failed or oversized
+    download never leaves a partial file behind or clobbers an existing one.
+    The response is closed on the way out.
     """
     temp_path = None
     deadline = _deadline(max_seconds)
-    response = _open(url, max_bytes, timeout, kwargs)
     try:
         size = 0
         with tempfile.NamedTemporaryFile(
@@ -63,18 +85,37 @@ def download_to_file(url, path, max_bytes=MAX_FILE_BYTES, timeout=_DEFAULT_TIMEO
                 pass
 
 
-def download_bytes(url, max_bytes=MAX_FILE_BYTES, timeout=_DEFAULT_TIMEOUT, max_seconds=None, **kwargs) -> bytes:
-    """Return the body of ``url``, refusing anything larger than ``max_bytes``."""
+def remove_download(path) -> None:
+    """Delete a downloaded temp file. No-op for an empty or missing path; other errors are logged."""
+    if not path:
+        return
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        logger.warning(f"[media] temp cleanup failed for {path}: {e}")
+
+
+def read_response(response, max_bytes=MAX_FILE_BYTES, max_seconds=None) -> bytes:
+    """Return the body of an already-open *response*, refusing anything larger
+    than *max_bytes*. Closes the response."""
     deadline = _deadline(max_seconds)
-    response = _open(url, max_bytes, timeout, kwargs)
     try:
         return b"".join(_read_chunks(response, max_bytes, deadline))
     finally:
         response.close()
 
 
-def _open(url, max_bytes, timeout, kwargs):
-    response = requests.get(url, stream=True, timeout=timeout, **kwargs)
+def _open(url, max_bytes, timeout, kwargs, guarded=False):
+    get = requests.get
+    if guarded:
+        from agent.tools.utils.url_safety import _ssrf_protection_enabled, safe_get, validate_url_safe
+
+        if _ssrf_protection_enabled():
+            validate_url_safe(url)
+            get = safe_get
+    response = get(url, stream=True, timeout=timeout, **kwargs)
     try:
         response.raise_for_status()
         try:

@@ -8,17 +8,15 @@ without any external MCP SDK dependency.
 import json
 import os
 import queue
+import shutil
 import subprocess
 import threading
+import time
 import urllib.request
 import urllib.error
 from typing import Optional
 
 from common.log import logger
-
-
-# Aliases accepted for the Streamable HTTP transport type
-_STREAMABLE_HTTP_ALIASES = {"streamable-http", "streamable_http", "streamablehttp", "http"}
 
 
 # System env vars a stdio MCP subprocess legitimately needs to run
@@ -34,6 +32,20 @@ _STDIO_ENV_PASSTHROUGH = (
 )
 # Sensitive name patterns never forwarded, even under inherit_full_env.
 _STDIO_ENV_SENSITIVE = ("_KEY", "_SECRET", "_TOKEN", "_PASSWORD", "_PASSWD", "_CREDENTIAL")
+
+# Total time budget for reading the 'endpoint' event off a new SSE stream.
+# urlopen()'s timeout only bounds a single socket read and every arriving byte
+# resets it, so a server that holds the stream warm with keepalive comments
+# (": keepalive", which servers send every few seconds) would keep the
+# discovery loop alive forever. Because the loader walks its servers serially on
+# one background thread, that stalls every server queued behind it: they stay
+# "pending" and their tools are silently missing. Kept at the 10s this call
+# already used for connecting, since the endpoint event is due immediately.
+_SSE_DISCOVERY_TIMEOUT = 10
+
+# Ceiling on a POSTed SSE response body. The server may hold the stream open,
+# so it is read in bounded chunks against self._timeout.
+_SSE_RESPONSE_MAX_BYTES = 32 * 1024 * 1024
 
 
 # Optional callback invoked after an OAuth authorization completes, so the
@@ -78,6 +90,10 @@ def _oauth_redirect_uri() -> str:
     return f"{base}/mcp/oauth/callback"
 
 
+class McpToolExecutionError(RuntimeError):
+    """The server executed the tool and reported a failed result."""
+
+
 class McpClient:
     """Single MCP Server client supporting stdio, SSE and Streamable HTTP transports."""
 
@@ -93,12 +109,21 @@ class McpClient:
         raw_transport: str = config.get("type", "stdio")
         # Per-server timeout for tool calls (default 120s, suitable for data queries)
         self._timeout: int = int(config.get("timeout", 120))
-        # Normalize streamable-http aliases to a single internal key
-        self.transport: str = (
-            "streamable-http"
-            if raw_transport.lower() in _STREAMABLE_HTTP_ALIASES
-            else raw_transport
-        )
+        # Same normalization the console validates with, since a hand-edited
+        # mcp.json skips validation. An unknown type is left for initialize()
+        # to report rather than raising here.
+        try:
+            from agent.tools.mcp.service import normalize_transport
+
+            self.transport: str = normalize_transport(
+                raw_transport, has_url=bool(config.get("url"))
+            )
+        except Exception:
+            self.transport = (
+                raw_transport.strip().lower()
+                if isinstance(raw_transport, str)
+                else "stdio"
+            )
 
         # stdio state
         self._proc: Optional[subprocess.Popen] = None
@@ -161,8 +186,21 @@ class McpClient:
         Each item is a dict: {"name": str, "description": str, "inputSchema": dict}
         """
         try:
-            resp = self._send_request("tools/list", {})
-            tools = resp.get("result", {}).get("tools", [])
+            tools = []
+            params = {}
+            seen_cursors = set()
+            while True:
+                resp = self._send_request("tools/list", params)
+                self._raise_for_rpc_error(resp)
+                page = resp.get("result") or {}
+                tools.extend(page.get("tools", []))
+                cursor = page.get("nextCursor")
+                if not cursor:
+                    break
+                if cursor in seen_cursors:
+                    raise ValueError("tools/list returned a repeated pagination cursor")
+                seen_cursors.add(cursor)
+                params = {"cursor": cursor}
             return [
                 {
                     "name": t.get("name", ""),
@@ -179,12 +217,42 @@ class McpClient:
         """Call a tool and return the result as a string."""
         try:
             resp = self._send_request("tools/call", {"name": name, "arguments": arguments})
-            content = resp.get("result", {}).get("content", [])
+            self._raise_for_rpc_error(resp)
+            result = resp.get("result") or {}
+            content = result.get("content", [])
             parts = [item.get("text", "") for item in content if item.get("type") == "text"]
-            return "\n".join(parts)
+            text = "\n".join(parts)
+            if not parts and "structuredContent" in result:
+                text = json.dumps(result["structuredContent"], ensure_ascii=False)
+            if result.get("isError"):
+                raise McpToolExecutionError(text or "MCP tool execution failed")
+            return text
+        except McpToolExecutionError:
+            raise
         except Exception as e:
             logger.warning(f"[MCP:{self.name}] call_tool({name}) failed: {e}")
             return f"Error: {e}"
+
+    def _raise_for_rpc_error(self, resp: dict) -> None:
+        """Raise when a response is a JSON-RPC error rather than a result.
+
+        A JSON-RPC error carries no ``result`` key, so reading
+        ``resp["result"]["tools"]`` from one yields an empty list and the
+        failure is reported to the model as "this server has no tools" or "this
+        tool returned nothing" — the server's own message is dropped. The
+        handshake already treats ``error`` as fatal; a tools/list and a
+        tools/call are no different.
+        """
+        error = (resp or {}).get("error")
+        if not error:
+            return
+        if isinstance(error, dict):
+            message = error.get("message") or str(error)
+            code = error.get("code")
+            detail = f"[{code}] {message}" if code is not None else message
+        else:
+            detail = str(error)
+        raise RuntimeError(f"MCP server error: {detail}")
 
     def shutdown(self):
         """Close the connection / terminate the child process."""
@@ -235,9 +303,10 @@ class McpClient:
 
         args = self.config.get("args", [])
         env = self._build_stdio_env(self.config.get("env", None))
+        executable = self._resolve_executable(command, env)
 
         self._proc = subprocess.Popen(
-            [command] + list(args),
+            [executable] + list(args),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -254,7 +323,28 @@ class McpClient:
             target=self._drain_stdout, daemon=True, name=f"mcp-stdout-{self.name}"
         ).start()
 
-        return self._handshake()
+        if not self._handshake():
+            # start_all() drops a failed client, so reap the child here.
+            self.shutdown()
+            return False
+        return True
+
+    def _resolve_executable(self, command: str, env: dict) -> str:
+        """Resolve ``command`` to a full path using the subprocess PATH.
+
+        Popen without a shell does not apply PATHEXT on Windows, so shims like
+        ``npx`` / ``uvx`` (really ``npx.cmd``) fail with WinError 2 unless
+        resolved first.
+        """
+        path = env.get("PATH") or env.get("Path") or os.environ.get("PATH")
+        resolved = shutil.which(command, path=path)
+        if resolved:
+            return resolved
+        logger.warning(
+            f"[MCP:{self.name}] command '{command}' not found in PATH; "
+            f"make sure it is installed (e.g. Node.js for npx)"
+        )
+        return command
 
     def _command_allowed(self, command: str) -> bool:
         """Check the executable against an optional command allowlist.
@@ -337,17 +427,20 @@ class McpClient:
             except Exception:
                 pass
 
-    def _readline_with_timeout(self, timeout: Optional[int] = None) -> str:
+    def _readline_with_timeout(self, timeout: Optional[float] = None) -> str:
         """Read one line from stdio stdout with a hard timeout (cross-platform).
 
-        Uses the per-server timeout from mcp.json config when no explicit
-        timeout is provided.
+        ``timeout`` may be the *remaining* share of a larger budget rather than
+        a whole number of seconds, so it is formatted for display rather than
+        interpolated raw. Defaults to the per-server timeout from mcp.json.
         """
         effective = timeout if timeout is not None else self._timeout
         try:
             line = self._read_queue.get(timeout=effective)
         except queue.Empty:
-            raise TimeoutError(f"[MCP:{self.name}] stdio read timed out after {effective}s")
+            raise TimeoutError(
+                f"[MCP:{self.name}] stdio read timed out after {effective:g}s"
+            )
         if not line:
             raise IOError(f"[MCP:{self.name}] stdio process closed unexpectedly")
         return line
@@ -359,8 +452,17 @@ class McpClient:
         self._proc.stdin.flush()
 
         expected_id = message.get("id")
+        # One deadline for the whole exchange: skipped lines (notifications,
+        # stale ids) would otherwise reset a per-read timeout forever.
+        deadline = time.monotonic() + self._timeout
         while True:
-            line = self._readline_with_timeout()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"[MCP:{self.name}] stdio read timed out after {self._timeout}s "
+                    f"waiting for a response to {message.get('method')!r}"
+                )
+            line = self._readline_with_timeout(remaining)
             if not line:
                 raise IOError(f"[MCP:{self.name}] stdio process closed unexpectedly")
             line = line.strip()
@@ -414,8 +516,14 @@ class McpClient:
             headers={"Accept": "text/event-stream"},
         )
         endpoint = None
+        deadline = time.monotonic() + _SSE_DISCOVERY_TIMEOUT
         with urllib.request.urlopen(req, timeout=10) as resp:
             for raw_line in resp:
+                if time.monotonic() > deadline:
+                    raise TimeoutError(
+                        f"[MCP:{self.name}] No endpoint event within "
+                        f"{_SSE_DISCOVERY_TIMEOUT}s of opening the SSE stream"
+                    )
                 line = raw_line.decode("utf-8").rstrip("\n\r")
                 if line.startswith("data:"):
                     data = line[len("data:"):].strip()
@@ -440,7 +548,12 @@ class McpClient:
         return endpoint
 
     def _sse_send(self, message: dict) -> dict:
-        """POST a JSON-RPC message to the server and return the response."""
+        """POST a JSON-RPC message to the server and return the response.
+        
+        The socket timeout resets on every byte, so the body is read in bounded
+        chunks against self._timeout; one stalled server would otherwise block every
+        server queued behind it on the loader thread.
+        """
         body = json.dumps(message).encode("utf-8")
         req = urllib.request.Request(
             self._post_url,
@@ -448,9 +561,30 @@ class McpClient:
             method="POST",
             headers={"Content-Type": "application/json"},
         )
+        deadline = time.monotonic() + self._timeout
         with urllib.request.urlopen(req, timeout=30) as resp:
-            raw = resp.read().decode("utf-8")
-            return json.loads(raw)
+            buf = bytearray()
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(
+                        f"[MCP:{self.name}] SSE response read timed out after "
+                        f"{self._timeout}s"
+                    )
+                try:
+                    chunk = resp.read1(65536)
+                except AttributeError:
+                    # Without read1, fall back to a read bounded by the remaining budget.
+                    chunk = resp.read(65536)
+                if not chunk:
+                    break
+                buf.extend(chunk)
+                if len(buf) > _SSE_RESPONSE_MAX_BYTES:
+                    raise IOError(
+                        f"[MCP:{self.name}] SSE response exceeded "
+                        f"{_SSE_RESPONSE_MAX_BYTES} bytes"
+                    )
+        return json.loads(buf.decode("utf-8"))
 
     # ------------------------------------------------------------------
     # Streamable HTTP transport (MCP spec 2025-03-26)
@@ -727,10 +861,22 @@ class McpClient:
                     f"[MCP:{self.name}] failed to reinitialize expired HTTP session"
                 )
 
-    def _read_sse_response(self, resp, expected_id) -> dict:
-        """Read an SSE stream and return the first JSON-RPC response with matching id."""
+    def _read_sse_response(self, resp, expected_id, timeout: Optional[float] = None) -> dict:
+        """Read an SSE stream and return the first JSON-RPC response with matching id.
+
+        urlopen()'s timeout is per read and keepalive comments reset it, so the
+        loop carries its own total deadline (the per-server mcp.json timeout
+        unless one is given).
+        """
+        effective = timeout if timeout is not None else self._timeout
+        deadline = time.monotonic() + effective
         data_buf: list = []
         for raw_line in resp:
+            if time.monotonic() > deadline:
+                raise TimeoutError(
+                    f"[MCP:{self.name}] streamable-http SSE response read "
+                    f"timed out after {effective}s"
+                )
             line = raw_line.decode("utf-8").rstrip("\n\r")
             if line == "":
                 # End of an SSE event, attempt to parse accumulated data

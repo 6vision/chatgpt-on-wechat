@@ -15,6 +15,8 @@ class TextChunk:
     text: str
     start_line: int
     end_line: int
+    # Ordinal of a hard-split piece of one over-long line; 0 for ordinary chunks.
+    part: int = 0
 
 
 class TextChunker:
@@ -72,18 +74,20 @@ class TextChunker:
                     current_chars = 0
                 
                 # Split long line into multiple chunks
-                for sub_chunk in self._split_long_line(line, max_chars):
+                for part, sub_chunk in enumerate(self._split_long_line(line, max_chars)):
                     chunks.append(TextChunk(
                         text=sub_chunk,
                         start_line=i,
-                        end_line=i
+                        end_line=i,
+                        part=part
                     ))
                 
                 start_line = i + 1
                 continue
             
             # Check if adding this line would exceed limit
-            if current_chars + line_chars > max_chars and current_chunk:
+            separator_chars = 1 if current_chunk else 0
+            if current_chars + separator_chars + line_chars > max_chars and current_chunk:
                 # Save current chunk
                 chunks.append(TextChunk(
                     text='\n'.join(current_chunk),
@@ -92,14 +96,16 @@ class TextChunker:
                 ))
                 
                 # Start new chunk with overlap
-                overlap_lines = self._get_overlap_lines(current_chunk, overlap_chars)
+                # Leave room for the incoming line and its separator.
+                overlap_budget = min(overlap_chars, max_chars - line_chars - 1)
+                overlap_lines = self._get_overlap_lines(current_chunk, overlap_budget)
                 current_chunk = overlap_lines + [line]
-                current_chars = sum(len(l) for l in current_chunk)
+                current_chars = sum(len(l) for l in current_chunk) + len(current_chunk) - 1
                 start_line = i - len(overlap_lines)
             else:
                 # Add line to current chunk
                 current_chunk.append(line)
-                current_chars += line_chars
+                current_chars += separator_chars + line_chars
         
         # Save last chunk
         if current_chunk:
@@ -128,7 +134,7 @@ class TextChunker:
         chars = 0
         
         for line in reversed(lines):
-            line_chars = len(line)
+            line_chars = len(line) + (1 if overlap else 0)
             if chars + line_chars > target_chars:
                 break
             overlap.insert(0, line)
@@ -150,7 +156,8 @@ class TextChunker:
     # boundaries forever (file hashes do not change when only the chunker does).
     # v2: keep text before the first heading; end a heading's body at the next
     # heading of any level (skipped levels used to be indexed twice).
-    CHUNKER_VERSION = 2
+    # v3: hard-split pieces of one over-long line carry a part ordinal in their id.
+    CHUNKER_VERSION = 3
 
     def chunk_markdown(self, text: str) -> List[TextChunk]:
         """Chunk a markdown file while respecting its heading structure.

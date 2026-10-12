@@ -22,8 +22,11 @@ Design goals:
   override and trusting whatever path/payload shape the caller passes.
 """
 
+import hashlib
 import json
 import os
+import re
+import uuid
 from typing import Any, Dict, Generator, Optional
 from urllib.parse import urlparse
 
@@ -90,6 +93,67 @@ def _resolve_attribution_headers(url: str) -> Dict[str, str]:
                     )
             return resolved
     return {}
+
+
+# Gateways that require a stable per-conversation session id for routing and
+# prompt caching, and reject requests without it. The value is a hash of the
+# ambient session, so raw chat / user ids never leave the process.
+_SESSION_HEADER_BY_HOST: Dict[str, str] = {
+    "opencode.ai": "x-opencode-session",
+}
+
+# Used when a request runs outside any conversation (e.g. a background job).
+_PROCESS_SESSION_ID = uuid.uuid4().hex
+
+
+def _host_of(url: str) -> str:
+    try:
+        return (urlparse(url).hostname or "").lower()
+    except Exception:
+        return ""
+
+
+def _host_matches(host: str, suffix: str) -> bool:
+    return host == suffix or host.endswith("." + suffix)
+
+
+def _session_token() -> str:
+    try:
+        from common.runtime_identity import current_identity
+        identity = current_identity()
+    except Exception:
+        return _PROCESS_SESSION_ID
+    if not identity.session_id:
+        return _PROCESS_SESSION_ID
+    scope = f"{identity.agent_id or ''}:{identity.session_id}"
+    return hashlib.sha256(scope.encode("utf-8")).hexdigest()[:32]
+
+
+def _user_agent() -> str:
+    try:
+        from cli import __version__
+    except Exception:
+        return _APP_TITLE
+    return f"{_APP_TITLE}/{__version__}"
+
+
+def _resolve_session_headers(url: str) -> Dict[str, str]:
+    host = _host_of(url)
+    if not host:
+        return {}
+    for suffix, header in _SESSION_HEADER_BY_HOST.items():
+        if _host_matches(host, suffix):
+            # These gateways also ask clients to identify themselves instead
+            # of sending a generic HTTP-library user agent.
+            return {header: _session_token(), "User-Agent": _user_agent()}
+    return {}
+
+
+def resolve_host_headers(url: str) -> Dict[str, str]:
+    """Headers a known gateway expects for ``url``; {} for any other host."""
+    headers = _resolve_attribution_headers(url)
+    headers.update(_resolve_session_headers(url))
+    return headers
 
 
 class OpenAIHTTPError(Exception):
@@ -263,9 +327,7 @@ class OpenAIHTTPClient:
         if key:
             headers["Authorization"] = f"Bearer {key}"
         if url:
-            attribution = _resolve_attribution_headers(url)
-            if attribution:
-                headers.update(attribution)
+            headers.update(resolve_host_headers(url))
         if self.extra_headers:
             headers.update(self.extra_headers)
         if extra_headers:
@@ -378,36 +440,42 @@ class OpenAIHTTPClient:
             return
 
         if resp.status_code >= 400:
-            # Read full body once for error reporting
             try:
-                body = resp.json()
-            except ValueError:
-                body = {"raw": resp.text[:1000]}
-            err_msg = ""
-            err_code = ""
-            err_type = ""
-            if isinstance(body, dict):
-                err = body.get("error") or {}
-                if isinstance(err, dict):
-                    err_msg = err.get("message") or ""
-                    err_code = err.get("code") or ""
-                    err_type = err.get("type") or ""
-                elif isinstance(err, str):
-                    err_msg = err
-            if not err_msg:
-                err_msg = str(body)[:500]
-            yield {
-                "error": {
+                # Read full body once for error reporting
+                try:
+                    body = resp.json()
+                except ValueError:
+                    body = {"raw": resp.text[:1000]}
+                err_msg = ""
+                err_code = ""
+                err_type = ""
+                if isinstance(body, dict):
+                    err = body.get("error") or {}
+                    if isinstance(err, dict):
+                        err_msg = err.get("message") or ""
+                        err_code = err.get("code") or ""
+                        err_type = err.get("type") or ""
+                    elif isinstance(err, str):
+                        err_msg = err
+                if not err_msg:
+                    err_msg = str(body)[:500]
+                yield {
+                    "error": {
+                        "message": err_msg,
+                        "code": err_code,
+                        "type": err_type,
+                    },
+                    # Top-level fields kept for backward compatibility with the
+                    # error-shape that `_handle_stream_response` previously emitted.
                     "message": err_msg,
-                    "code": err_code,
-                    "type": err_type,
-                },
-                # Top-level fields kept for backward compatibility with the
-                # error-shape that `_handle_stream_response` previously emitted.
-                "message": err_msg,
-                "status_code": resp.status_code,
-            }
-            return
+                    "status_code": resp.status_code,
+                }
+                return
+            finally:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
 
         # IMPORTANT: do NOT use `iter_lines(decode_unicode=True)`.
         #
@@ -468,73 +536,54 @@ class OpenAIHTTPClient:
         ``[DONE]`` is yielded as a literal string so the caller can break.
         """
         buf = b""
-        for raw in resp.iter_content(chunk_size=None, decode_unicode=False):
-            if not raw:
-                continue
-            buf += raw
-            # Find complete events (terminated by a blank line).
-            while True:
-                # Look for the earliest event terminator. SSE allows three
-                # forms; check all and pick the earliest match.
-                idx_nn = buf.find(b"\n\n")
-                idx_rr = buf.find(b"\r\r")
-                idx_rnrn = buf.find(b"\r\n\r\n")
-                candidates = [i for i in (idx_nn, idx_rr, idx_rnrn) if i != -1]
-                if not candidates:
-                    break
-                # We need to know the length of the matched terminator to
-                # advance past it correctly.
-                end_pos = min(candidates)
-                if end_pos == idx_rnrn:
-                    term_len = 4
-                else:
-                    term_len = 2
-                event_bytes = buf[:end_pos]
-                buf = buf[end_pos + term_len:]
+        data_lines = []
+        first_line = True
+        skip_lf = False
+        newline = re.compile(rb"\r\n|\r|\n")
 
-                # Decode the full event as UTF-8. ``errors="replace"`` is a
-                # belt-and-suspenders safety net for truly malformed upstream
-                # bytes; it should never trigger for well-formed providers.
-                try:
-                    event_text = event_bytes.decode("utf-8")
-                except UnicodeDecodeError:
-                    event_text = event_bytes.decode("utf-8", errors="replace")
-
-                data_lines = []
-                for line in event_text.splitlines():
-                    if not line or line.startswith(":"):
-                        continue
-                    field, _, value = line.partition(":")
-                    # Per SSE spec, a single optional space after the colon
-                    # is part of the framing, not the value.
-                    if value.startswith(" "):
-                        value = value[1:]
-                    if field == "data":
-                        data_lines.append(value)
-                    # Other fields (event/id/retry) are intentionally ignored
-                    # — chat-completion endpoints don't use them in a way we
-                    # need for parsing.
+        def consume_line(raw_line):
+            nonlocal first_line
+            # Only the stream's initial BOM is framing. Other Unicode line
+            # separators are payload and must survive inside JSON strings.
+            encoding = "utf-8-sig" if first_line else "utf-8"
+            first_line = False
+            line = raw_line.decode(encoding, errors="replace")
+            if not line:
                 if data_lines:
-                    yield "\n".join(data_lines)
-
-        # Flush any trailing bytes the server forgot to terminate. This is
-        # rare but spec-allowed (some providers omit the final \n\n).
-        if buf.strip():
-            try:
-                event_text = buf.decode("utf-8")
-            except UnicodeDecodeError:
-                event_text = buf.decode("utf-8", errors="replace")
-            data_lines = []
-            for line in event_text.splitlines():
-                if not line or line.startswith(":"):
-                    continue
+                    event = "\n".join(data_lines)
+                    data_lines.clear()
+                    return event
+            elif not line.startswith(":"):
                 field, _, value = line.partition(":")
                 if value.startswith(" "):
                     value = value[1:]
                 if field == "data":
                     data_lines.append(value)
-            if data_lines:
-                yield "\n".join(data_lines)
+            return None
+
+        for raw in resp.iter_content(chunk_size=None, decode_unicode=False):
+            if not raw:
+                continue
+            # A CR at a network-chunk boundary already ended its line. The
+            # optional following LF belongs to that same delimiter.
+            if skip_lf:
+                if raw.startswith(b"\n"):
+                    raw = raw[1:]
+                skip_lf = False
+            buf += raw
+            while (match := newline.search(buf)) is not None:
+                raw_line = buf[:match.start()]
+                skip_lf = match.group() == b"\r" and match.end() == len(buf)
+                buf = buf[match.end():]
+                event = consume_line(raw_line)
+                if event is not None:
+                    yield event
+
+        # Preserve compatibility with proxies that omit the final blank line.
+        if buf:
+            consume_line(buf)
+        if data_lines:
+            yield "\n".join(data_lines)
 
     @staticmethod
     def _make_error_chunk(status_code: int, message: str) -> Dict[str, Any]:

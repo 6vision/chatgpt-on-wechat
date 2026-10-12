@@ -3,7 +3,7 @@ import time
 
 import web
 from wechatpy import parse_message
-from wechatpy.replies import ImageReply, VoiceReply, create_reply
+from wechatpy.replies import ImageReply, VideoReply, VoiceReply, create_reply
 import textwrap
 from bridge.context import *
 from bridge.reply import *
@@ -37,7 +37,7 @@ class Query:
             else:
                 logger.debug("[wechatmp] Receive post data:\n" + message.decode("utf-8"))
             msg = parse_message(message)
-            if msg.type in ["text", "voice", "image"]:
+            if msg.type in WeChatMPMessage.SUPPORTED_TYPES:
                 wechatmp_msg = WeChatMPMessage(msg, client=channel.client)
                 from_user = wechatmp_msg.from_user_id
                 content = wechatmp_msg.content
@@ -81,7 +81,7 @@ class Query:
                                     请跟我说话吧。"""
                                 )
                         else:
-                            logger.error(f"[wechatmp] unknown error")
+                            logger.error("[wechatmp] unknown error")
                             reply_text = textwrap.dedent(
                                 """\
                                 未知错误，请稍后再试"""
@@ -144,7 +144,11 @@ class Query:
                     # cached text segments at once and merge them into one reply.
                     # Media (voice/image) can only be returned one at a time, so it
                     # stops the merge and is returned on its own.
-                    cached = channel.cache_dict[from_user]
+                    # Use .get: indexing the defaultdict would insert an empty entry that
+                    # blocks this user from starting a new task.
+                    cached = channel.cache_dict.get(from_user)
+                    if not cached:
+                        return "success"
                     if cached[0][0] == "text":
                         reply_type = "text"
                         merged_parts = []
@@ -153,7 +157,7 @@ class Query:
                         reply_content = "\n\n".join(merged_parts)
                     else:
                         (reply_type, reply_content) = cached.pop(0)
-                    if not channel.cache_dict[from_user]:  # If draining empties the list, delete the user entry from cache
+                    if not cached:  # If draining empties the list, delete the user entry from cache
                         del channel.cache_dict[from_user]
                 except IndexError:
                     return "success"
@@ -215,6 +219,39 @@ class Query:
                     replyPost.media_id = media_id
                     return encrypt_func(replyPost.render())
 
+                elif reply_type == "video":
+                    media_id = reply_content
+                    asyncio.run_coroutine_threadsafe(channel.delete_media(media_id), channel.delete_media_loop)
+                    logger.info(
+                        "[wechatmp] Request {} do send to {} {}: {} video media_id {}".format(
+                            request_cnt,
+                            from_user,
+                            message_id,
+                            content,
+                            media_id,
+                        )
+                    )
+                    replyPost = VideoReply(message=msg)
+                    replyPost.media_id = media_id
+                    return encrypt_func(replyPost.render())
+
+                else:
+                    # A segment no branch above can render was still uploaded to
+                    # the permanent material store, so it has to be released
+                    # here rather than left behind for good.
+                    logger.warning(
+                        "[wechatmp] Request {} cannot render cached reply type {} from {}, dropping it".format(
+                            request_cnt,
+                            reply_type,
+                            from_user,
+                        )
+                    )
+                    if reply_type != "text" and reply_content:
+                        asyncio.run_coroutine_threadsafe(
+                            channel.delete_media(reply_content), channel.delete_media_loop
+                        )
+                    return "success"
+
             elif msg.type == "event":
                 logger.info("[wechatmp] Event {} from {}".format(msg.event, msg.source))
                 if msg.event in ["subscribe", "subscribe_scan"]:
@@ -225,7 +262,10 @@ class Query:
                 else:
                     return "success"
             else:
-                logger.info("暂且不处理")
+                logger.info(
+                    f"[wechatmp] unsupported message type {msg.type!r} from "
+                    f"{getattr(msg, 'source', '?')}, ignored"
+                )
             return "success"
         except Exception as exc:
             logger.exception(exc)

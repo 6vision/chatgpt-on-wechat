@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hmac
 import json
 import queue
 import threading
@@ -11,6 +10,7 @@ import uuid
 from typing import Callable, Iterator
 
 from common.log import logger
+from common.utils import constant_time_equals
 from config import conf
 
 
@@ -28,6 +28,9 @@ _SESSION_LOCKS = tuple(threading.Lock() for _ in range(64))
 _STREAM_END = object()
 _STREAM_ERROR = object()
 _FIRST_EVENT_TIMEOUT_SECONDS = 30
+# Budget for each later stream event, matching the web SSE stream. Without it
+# a stalled run parks the consumer forever and keeps the session lock.
+_STREAM_IDLE_TIMEOUT_SECONDS = 600
 
 
 def _authenticate(authorization: str, external_api_token: str) -> None:
@@ -43,7 +46,7 @@ def _authenticate(authorization: str, external_api_token: str) -> None:
         not separator
         or scheme.lower() != "bearer"
         or not credential
-        or not hmac.compare_digest(credential.strip(), token)
+        or not constant_time_equals(credential.strip(), token)
     ):
         raise OpenAIAPIError(
             401, "Invalid authentication credentials.", "invalid_api_key"
@@ -314,6 +317,7 @@ def _stream_completion(
             yield _sse_frame(
                 _base_chunk(completion_id, created, model, {"role": "assistant"})
             )
+            timed_out = False
             while item is not _STREAM_END:
                 if item is _STREAM_ERROR:
                     finish_reason = "error"
@@ -331,8 +335,30 @@ def _stream_completion(
                     )
                 else:
                     yield _sse_frame(item)
-                item = output.get()
-            completed = True
+                try:
+                    item = output.get(timeout=_STREAM_IDLE_TIMEOUT_SECONDS)
+                except queue.Empty:
+                    # The worker stalled. completed stays False so the finally below cancels
+                    # the run and releases the session lock.
+                    timed_out = True
+                    finish_reason = "error"
+                    yield _sse_frame(
+                        _base_chunk(
+                            completion_id,
+                            created,
+                            model,
+                            {},
+                            cow_event={
+                                "type": "error",
+                                "message": (
+                                    "CowAgent stopped producing events before the "
+                                    "stream finished."
+                                ),
+                            },
+                        )
+                    )
+                    break
+            completed = not timed_out
             yield _sse_frame(
                 _base_chunk(
                     completion_id,
@@ -372,6 +398,13 @@ def _non_stream_completion(
         else:
             tool_trace.extend(_tool_events(chunk))
 
+    # Registered like the streaming path so a session cancel can reach it.
+    from agent.protocol import get_cancel_registry
+
+    registry = get_cancel_registry()
+    cancel_key, scoped_session_key = _request_cancel_scope(completion_id, session_id)
+    registry.register(cancel_key, session_id=scoped_session_key)
+
     try:
         lock = _SESSION_LOCKS[hash(session_id) % len(_SESSION_LOCKS)]
         with lock:
@@ -388,6 +421,8 @@ def _non_stream_completion(
         raise OpenAIAPIError(
             500, "CowAgent failed to complete the request.", "internal_error"
         ) from error
+    finally:
+        registry.unregister(cancel_key)
 
     message = {"role": "assistant", "content": "".join(content)}
     if reasoning:

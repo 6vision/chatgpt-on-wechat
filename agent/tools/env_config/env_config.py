@@ -134,10 +134,11 @@ class EnvConfig(BaseTool):
     
     def _reload_env(self):
         """Reload environment variables from .env file"""
-        env_vars = self._read_env_file()
-        for key, value in env_vars.items():
-            os.environ[key] = value
-        logger.debug(f"[EnvConfig] Reloaded {len(env_vars)} environment variables")
+        from dotenv import load_dotenv
+
+        # Match startup parsing, including quotes, comments and interpolation.
+        load_dotenv(self.env_path, override=True)
+        logger.debug("[EnvConfig] Reloaded environment variables")
     
     def _refresh_skills(self):
         """Refresh skills after environment variable changes"""
@@ -173,7 +174,17 @@ class EnvConfig(BaseTool):
             if action == "set":
                 if not key or not value:
                     return ToolResult.fail("Error: 'key' and 'value' are required for 'set' action.")
-                
+
+                # .env is read line by line (here and by python-dotenv), so a line
+                # break would split one entry into several variables.
+                for name, text in (("key", key), ("value", value)):
+                    text = str(text)
+                    if "\n" in text or "\r" in text or (name == "key" and "=" in text):
+                        limit = "a line break or an '=' character" if name == "key" else "a line break"
+                        return ToolResult.fail(
+                            f"Error: '{name}' cannot contain {limit}; .env holds one entry per line."
+                        )
+
                 # Read current env vars
                 env_vars = self._read_env_file()
                 

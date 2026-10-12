@@ -1,9 +1,16 @@
+import threading
+
+
 def singleton(cls):
     instances = {}
+    # Reentrant: a constructor that reaches its own class again must not deadlock.
+    initialization_lock = threading.RLock()
 
     def get_instance(*args, **kwargs):
         if cls not in instances:
-            instances[cls] = cls(*args, **kwargs)
+            with initialization_lock:
+                if cls not in instances:
+                    instances[cls] = cls(*args, **kwargs)
         return instances[cls]
 
     # Expose the undecorated class so callers that legitimately need more than

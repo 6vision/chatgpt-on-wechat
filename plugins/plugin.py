@@ -20,7 +20,7 @@ class Plugin:
             # 全局配置不存在，则获取插件目录下的配置
             plugin_config_path = os.path.join(self.path, "config.json")
             if os.path.exists(plugin_config_path):
-                with open(plugin_config_path, "r", encoding="utf-8") as f:
+                with open(plugin_config_path, "r", encoding="utf-8-sig") as f:
                     plugin_conf = json.load(f)
 
                 # 写入全局配置内存

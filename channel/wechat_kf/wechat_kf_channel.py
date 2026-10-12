@@ -42,6 +42,7 @@ from common.utils import (
     compress_imgfile,
     fsize,
     remove_markdown_symbol,
+    scrub_secrets,
     split_string_by_utf8_length,
 )
 from config import conf
@@ -59,7 +60,6 @@ SYNC_MSG_LIMIT = 1000
 _MAX_REMOTE_IMAGE_BYTES = 20 * 1024 * 1024
 _MAX_REMOTE_VIDEO_BYTES = 10 * 1024 * 1024
 _MAX_REMOTE_MEDIA_SECONDS = 60
-
 
 @singleton
 class WechatKfChannel(ChatChannel):
@@ -211,12 +211,11 @@ class WechatKfChannel(ChatChannel):
                 logger.error("[wechat_kf] upload voice failed: {}".format(e))
                 return
 
-            try:
-                os.remove(file_path)
-                if amr_file != file_path:
-                    os.remove(amr_file)
-            except Exception:
-                pass
+            for path in {file_path, amr_file, *files}:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
             for media_id in media_ids:
                 self._send_voice(external_userid, open_kfid, media_id)
@@ -367,6 +366,9 @@ class WechatKfChannel(ChatChannel):
                 ftype = "image" if kf_msg.ctype == ContextType.IMAGE else "file"
                 try:
                     kf_msg.prepare()  # download to local tmp path
+                    # prepare() swallows a failed download; never hand the agent a missing path.
+                    if not kf_msg.content or not os.path.exists(kf_msg.content):
+                        raise FileNotFoundError(kf_msg.content or "<empty path>")
                     file_cache.add(session_id, kf_msg.content, file_type=ftype)
                     logger.info(
                         "[wechat_kf] {} cached for session {}: {}".format(
@@ -486,7 +488,7 @@ class WechatKfChannel(ChatChannel):
         try:
             resp = requests.post(url, json=payload, timeout=10).json()
         except Exception as e:
-            logger.error(f"[wechat_kf] sync_msg request failed: {e}")
+            logger.error(f"[wechat_kf] sync_msg request failed: {scrub_secrets(e)}")
             return None
 
         if resp.get("errcode") != 0:
@@ -505,8 +507,8 @@ class WechatKfChannel(ChatChannel):
         try:
             resp = requests.post(url, json=payload, timeout=10).json()
         except Exception as e:
-            logger.error(f"[wechat_kf] send_msg request failed: {e}")
-            return {"errcode": -1, "errmsg": str(e)}
+            logger.error(f"[wechat_kf] send_msg request failed: {scrub_secrets(e)}")
+            return {"errcode": -1, "errmsg": scrub_secrets(e)}
         if resp.get("errcode") != 0:
             logger.error(f"[wechat_kf] send_msg failed, payload={payload}, resp={resp}")
         return resp

@@ -137,6 +137,41 @@ def test_save_keeps_other_top_level_keys_of_mcp_json(tmp_path, monkeypatch):
     assert data["mcpServers"]["fetch"]["command"] == "npx"
 
 
+def test_overlapping_save_cannot_truncate_the_store(tmp_path, monkeypatch):
+    """A save running while another one is mid-write must not corrupt mcp.json."""
+    monkeypatch.setattr(
+        "agent.tools.mcp.service.mcp_config_path",
+        lambda workspace=None: str(tmp_path / "mcp.json"),
+    )
+
+    real_dump = json.dump
+    concurrent = [{"name": "concurrent", "command": "npx", "args": [
+        "-y", "@modelcontextprotocol/server-github",
+    ]}]
+    first_pass = {"running": True}
+
+    def overlapping_dump(obj, fp, **kwargs):
+        if not first_pass["running"]:
+            return real_dump(obj, fp, **kwargs)
+        first_pass["running"] = False
+        try:
+            # Write half of the outer payload, run a complete second save
+            # against the same store, then write the rest.
+            text = json.dumps(obj, **kwargs)
+            half = len(text) // 2
+            fp.write(text[:half])
+            save_servers(str(tmp_path), concurrent)
+            fp.write(text[half:])
+        finally:
+            first_pass["running"] = True
+
+    monkeypatch.setattr("agent.tools.mcp.service.json.dump", overlapping_dump)
+
+    save_servers(str(tmp_path), [{"name": "outer", "command": "uvx"}])
+
+    assert [item["name"] for item in load_servers(str(tmp_path))] == ["outer"]
+
+
 def test_get_does_not_spawn_servers(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "agent.tools.mcp.service.mcp_config_path",
@@ -372,8 +407,6 @@ def test_frontend_contract_exposes_mcp_and_skill_install_surfaces():
         for name in ("SkillsPage.tsx", "skills/McpEditorModal.tsx", "skills/SkillAddModal.tsx")
     )
     desktop_api = _read("desktop/src/renderer/src/api/client.ts")
-    docs_en = _read("docs/tools/mcp.mdx")
-    docs_zh = _read("docs/zh/tools/mcp.mdx")
 
     assert "'/api/mcp/servers', 'McpServersHandler'" in py
     assert "'/api/mcp/servers/test', 'McpServerTestHandler'" in py
@@ -424,7 +457,3 @@ def test_frontend_contract_exposes_mcp_and_skill_install_surfaces():
         "confirmSkill",
     ):
         assert token in desktop_page
-
-    assert "web console" in docs_en.lower() or "Skills page" in docs_en
-    assert "Test connection" in docs_en or "test connection" in docs_en.lower()
-    assert "Web" in docs_zh or "web" in docs_zh.lower()

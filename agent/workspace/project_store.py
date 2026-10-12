@@ -65,22 +65,21 @@ _lock = threading.Lock()
 
 def _load() -> Dict:
     path = _store_file()
+    empty = {"sessions": {}, "recents": [], "meta": {}, "order": []}
     if not os.path.isfile(path):
-        return {"sessions": {}, "recents": [], "meta": {}, "order": []}
+        return empty
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f) or {}
     except Exception as e:
         logger.warning(f"[ProjectStore] Could not read {path}: {e}")
-        return {"sessions": {}, "recents": [], "meta": {}, "order": []}
-    data.setdefault("sessions", {})
-    data.setdefault("recents", [])
-    # ``meta``: path -> {"display_name": str}. A rename lives here, never on
-    # disk, so the folder keeps its name and existing bindings stay valid.
-    data.setdefault("meta", {})
-    # ``order``: user-chosen sidebar order of spaces (project paths and the
-    # DEFAULT_SPACE_KEY sentinel). Absent entries fall back to recency order.
-    data.setdefault("order", [])
+        return empty
+    if not isinstance(data, dict):
+        return empty
+    # A hand-edited file may hold the wrong type under a key; reset just that key.
+    for key, shape in (("sessions", dict), ("recents", list), ("meta", dict), ("order", list)):
+        if not isinstance(data.get(key), shape):
+            data[key] = shape()
     return data
 
 
@@ -98,7 +97,7 @@ def _save(data: Dict) -> None:
 
 def _normalize(path: str) -> str:
     from common.utils import expand_path
-    return os.path.realpath(expand_path((path or "").strip()))
+    return os.path.realpath(expand_path(path or ""))
 
 
 def _session_key(session_id: str, agent_id: Optional[str]) -> str:
@@ -330,7 +329,7 @@ def set_order(order: List[str]) -> List[str]:
     for key in order or []:
         if not isinstance(key, str):
             continue
-        k = key.strip()
+        k = key
         if not k or k in seen:
             continue
         # Real project paths are normalized; the default sentinel is kept as-is.

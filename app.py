@@ -317,8 +317,8 @@ class ChannelManager:
                 ch = self._channels.pop(name, None)
                 th = self._threads.pop(name, None)
                 to_stop.append((name, ch, th))
-            if channel_name and self._primary_channel is self._channels.get(channel_name):
-                self._primary_channel = None
+                if ch is not None and self._primary_channel is ch:
+                    self._primary_channel = None
 
         for name, ch, th in to_stop:
             if ch is None:

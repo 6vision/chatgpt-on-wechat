@@ -156,7 +156,8 @@ class MemoryManager:
             List of search results sorted by relevance
         """
         max_results = max_results or self.config.max_results
-        min_score = min_score or self.config.min_score
+        # min_score=0 means "no threshold", so only None takes the default.
+        min_score = self.config.min_score if min_score is None else min_score
         
         # Determine scopes
         scopes = []
@@ -220,7 +221,25 @@ class MemoryManager:
         # rerank; the reranker only reorders the candidates that pass it.
         filtered = [r for r in merged if r.score >= min_score]
         filtered = self._rerank(query, filtered)
-        return filtered[:max_results]
+        # The hit boost runs last, as a pure reordering multiplier over the
+        # final candidates: it rewards chunks that proved useful before but
+        # can neither rescue below-threshold results nor bypass the reranker.
+        filtered = self._apply_hit_boost(filtered)
+        top = filtered[:max_results]
+
+        # Count one retrieval hit per returned chunk, as ranking feedback for
+        # the hit-popularity boost. Opt-in only: with the boost disabled the
+        # write transaction is skipped entirely. Bookkeeping must never break
+        # the search.
+        if top and self._hit_boost_enabled():
+            try:
+                self.storage.record_hits(
+                    [(r.path, r.start_line, r.end_line) for r in top]
+                )
+            except Exception as e:
+                logger.warning(f"[MemoryManager] Hit write-back failed: {e}")
+
+        return top
     
     async def add_memory(
         self,
@@ -267,7 +286,7 @@ class MemoryManager:
         # Create memory chunks
         memory_chunks = []
         for chunk, embedding in zip(chunks, embeddings):
-            chunk_id = self._generate_chunk_id(path, chunk.start_line, chunk.end_line)
+            chunk_id = self._generate_chunk_id(path, chunk.start_line, chunk.end_line, chunk.part)
             chunk_hash = MemoryStorage.compute_hash(chunk.text)
             
             memory_chunks.append(MemoryChunk(
@@ -368,7 +387,7 @@ class MemoryManager:
             # scans the shared base rather than an empty (or missing) local one.
             knowledge_dir = Path(state_dir.knowledge_dir(base=workspace_dir))
             if knowledge_dir.exists():
-                for file_path in knowledge_dir.rglob("*.md"):
+                for file_path in knowledge_dir.rglob("*.[mM][dD]"):
                     # The root index.md / log.md only restate pages indexed on
                     # their own, and change on every page write, which re-embeds
                     # the whole file each time.
@@ -423,7 +442,8 @@ class MemoryManager:
                 logger.warning(f"[MemoryManager] Skipping {file_path}: cannot read it ({e})")
                 continue
             file_hash = MemoryStorage.compute_hash(content)
-            if self.storage.get_file_hash(rel_path) == file_hash:
+            previous_hash = self.storage.get_file_hash(rel_path)
+            if previous_hash == file_hash:
                 continue
             # Markdown files (memory + knowledge) get structure-aware chunking;
             # anything else (rare) falls back to the plain char splitter.
@@ -431,7 +451,7 @@ class MemoryManager:
                 chunks = self.chunker.chunk_markdown(content)
             else:
                 chunks = self.chunker.chunk_text(content)
-            if not chunks:
+            if not chunks and previous_hash is None:
                 continue
             pending.append({
                 "file_path": file_path,
@@ -493,9 +513,9 @@ class MemoryManager:
         for entry in pending:
             all_texts.extend(entry["texts"])
 
-        if not self.embedding_provider:
-            # No provider configured at all (legacy keyword-only). Persist
-            # chunks without embeddings — this is the user's intent.
+        if not all_texts or not self.embedding_provider:
+            # Empty files still replace their index entry without an API call.
+            # Keyword-only indexes persist nonempty chunks without embeddings.
             all_embeddings: List[Optional[List[float]]] = [None] * len(all_texts)
         else:
             try:
@@ -528,7 +548,7 @@ class MemoryManager:
                 self.storage.delete_by_path(rel_path.replace("/", os.sep))
             memory_chunks = []
             for chunk, embedding in zip(entry["chunks"], entry_embeddings):
-                chunk_id = self._generate_chunk_id(rel_path, chunk.start_line, chunk.end_line)
+                chunk_id = self._generate_chunk_id(rel_path, chunk.start_line, chunk.end_line, chunk.part)
                 chunk_hash = MemoryStorage.compute_hash(chunk.text)
                 memory_chunks.append(MemoryChunk(
                     id=chunk_id,
@@ -626,9 +646,12 @@ class MemoryManager:
     
     # Helper methods
     
-    def _generate_chunk_id(self, path: str, start_line: int, end_line: int) -> str:
-        """Generate unique chunk ID"""
+    def _generate_chunk_id(self, path: str, start_line: int, end_line: int,
+                           part: int = 0) -> str:
+        """Generate unique chunk ID; `part` separates the pieces of one split line."""
         content = f"{path}:{start_line}:{end_line}"
+        if part:
+            content += f":{part}"
         return hashlib.md5(content.encode('utf-8')).hexdigest()
     
     @staticmethod
@@ -645,9 +668,20 @@ class MemoryManager:
         import re
         import math
         
-        match = re.search(r'(\d{4})-(\d{2})-(\d{2})\.md$', path)
+        # Normalize legacy backslash paths so the anchor below also matches
+        # paths produced on Windows checkouts.
+        normalized = path.replace("\\", "/")
+
+        # Decay applies only to daily diary files: memory/YYYY-MM-DD.md, the
+        # per-user memory/users/<id>/YYYY-MM-DD.md and memory/dreams/YYYY-MM-DD.md.
+        # Dated knowledge pages (knowledge/analysis/foo-2026-09-02.md) are
+        # event time anchors rather than perishable content, so they stay
+        # evergreen and are never decayed.
+        match = re.search(
+            r'^memory/(?:users/[^/]+/|dreams/)?(\d{4})-(\d{2})-(\d{2})\.md$', normalized
+        )
         if not match:
-            return 1.0  # evergreen: MEMORY.md, non-dated files
+            return 1.0  # evergreen: MEMORY.md, knowledge pages, handoffs...
         
         try:
             file_date = datetime(
@@ -806,3 +840,79 @@ class MemoryManager:
 
         reranked.sort(key=lambda r: r.score, reverse=True)
         return reranked
+
+    def _hit_boost_params(self):
+        """(weight, cap) of the hit-popularity boost; weight 0 means off."""
+        config = getattr(self, "config", None)
+        weight = float(getattr(config, "hit_boost_weight", 0.0) or 0.0)
+        cap = float(getattr(config, "hit_boost_max", 1.25) or 1.25)
+        return weight, cap
+
+    def _hit_boost_enabled(self) -> bool:
+        """Opt-in: a retrieval hit is not proof of usefulness, so by default
+        both the re-ranking and the per-search hit write-back stay off."""
+        weight, cap = self._hit_boost_params()
+        return weight > 0 and cap > 1.0
+
+    def _apply_hit_boost(
+        self,
+        results: List[SearchResult]
+    ) -> List[SearchResult]:
+        """Nudge chunks that were retrieved often (and recently) up the ranking.
+
+        The multiplier is ``1 + w*log2(1 + hits)`` plus a same-sized recency
+        term that decays over a week since ``last_hit_at``, capped at
+        ``hit_boost_max``. The log keeps the curve flat at the high end and the
+        cap bounds the feedback loop, so repeated queries can only re-order
+        near-equal candidates, never crowd out everything else. The boost is
+        opt-in: with the default ``hit_boost_weight = 0`` this returns the
+        results untouched and ``search()`` skips the hit write-back too.
+
+        Uses getattr lookups so a bare instance (tests call the pure fusion
+        helpers without storage/config) degrades to a no-op, and any storage
+        failure degrades to the unboosted order like rerank does.
+        """
+        if not results:
+            return results
+        storage = getattr(self, "storage", None)
+        if storage is None or not hasattr(storage, "get_hit_stats"):
+            return results
+        if not self._hit_boost_enabled():
+            return results
+
+        weight, cap = self._hit_boost_params()
+
+        import math
+        import time
+
+        from common.log import logger
+
+        try:
+            keys = [(r.path, r.start_line, r.end_line) for r in results]
+            stats = storage.get_hit_stats(keys)
+        except Exception as e:
+            logger.warning(f"[MemoryManager] Hit stats unavailable, skipping boost: {e}")
+            return results
+
+        now = time.time()
+        boosted = []
+        for result in results:
+            hits, last_hit_at = stats.get(
+                (result.path, result.start_line, result.end_line), (0, None)
+            )
+            factor = 1.0 + weight * math.log2(1.0 + max(0, int(hits or 0)))
+            if last_hit_at:
+                age_days = max(0.0, (now - float(last_hit_at)) / 86400.0)
+                factor += weight * math.exp(-age_days / 7.0)
+            boosted.append(SearchResult(
+                path=result.path,
+                start_line=result.start_line,
+                end_line=result.end_line,
+                score=result.score * min(factor, cap),
+                snippet=result.snippet,
+                source=result.source,
+                user_id=result.user_id
+            ))
+
+        boosted.sort(key=lambda r: r.score, reverse=True)
+        return boosted

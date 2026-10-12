@@ -2,6 +2,8 @@
 
 import json
 import os
+import tempfile
+from pathlib import Path
 import requests
 from urllib.parse import urlparse
 import plugins
@@ -34,7 +36,7 @@ class Keyword(Plugin):
                     json.dump(conf, f, indent=4)
             else:
                 logger.debug(f"[keyword] loading config file: {config_path}")
-                with open(config_path, "r", encoding="utf-8") as f:
+                with open(config_path, "r", encoding="utf-8-sig") as f:
                     conf = json.load(f)
             # 加载关键词
             self.keyword = conf["keyword"]
@@ -72,7 +74,7 @@ class Keyword(Plugin):
                 # 下载到 Agent 受管的 tmp 目录。不要自己拼 "tmp"：那是相对进程 CWD
                 # 解析的，打包后的桌面端控制不了 CWD，甚至可能没有写权限——
                 # 原来那句 makedirs 会直接抛错，被外层 except 吞掉后关键词静默不回复。
-                file_path = state_dir.tmp_dir() / file_name
+                tmp_dir = state_dir.tmp_dir()
                 # Bound the request. The reply is built on the thread handling
                 # this message, and requests with no timeout waits forever, so a
                 # file host that accepts the connection and then stalls would
@@ -102,6 +104,10 @@ class Keyword(Plugin):
                     reply.type = ReplyType.ERROR
                     reply.content = f"下载失败：{failure}"
                 else:
+                    # Replies may wait in the send queue. A fresh directory
+                    # keeps earlier bytes intact without changing the display name.
+                    download_dir = Path(tempfile.mkdtemp(prefix="keyword_", dir=str(tmp_dir)))
+                    file_path = download_dir / file_name
                     file_path.write_bytes(response.content)
                     reply = Reply()
                     reply.type = ReplyType.FILE

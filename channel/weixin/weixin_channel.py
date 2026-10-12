@@ -10,7 +10,7 @@ import json
 import os
 import threading
 import time
-import uuid
+from typing import Tuple
 
 import requests
 
@@ -26,6 +26,7 @@ from channel.weixin.weixin_message import WeixinMessage
 from common import state_dir
 from common.expired_dict import ExpiredDict
 from common.log import logger
+from common.media_download import MAX_FILE_BYTES, remove_download, save_response
 from common.singleton import singleton
 from common.utils import is_cloud_deployment
 from config import conf, get_weixin_credentials_path
@@ -48,17 +49,17 @@ _ADOPT_LOCK = threading.Lock()
 _ACTIVE_LOGINS = {}
 
 
-def _media_tmp_path(prefix: str, ext: str = "") -> str:
-    """Path for transient media this channel downloads or synthesizes.
+def _console_print(*args, **kwargs):
+    """print() that never raises.
 
-    Transient media belongs in the agent's managed tmp dir -- the convention
-    this channel already follows elsewhere through ``common.state_dir``. A bare
-    ``/tmp/...`` is not portable: on Windows it resolves against the *current
-    drive*, so the same process writes to a different disk depending on where it
-    was launched, and it sits outside the workspace the app manages (and cleans).
-    ``tmp_dir()`` also creates the directory, which ``/tmp`` does not guarantee.
+    Console output is cosmetic, but a Windows GBK console rejects characters
+    such as emoji with UnicodeEncodeError; raised mid-login it would discard a
+    login the server has already confirmed.
     """
-    return os.path.join(str(state_dir.tmp_dir()), f"{prefix}_{uuid.uuid4().hex[:8]}{ext}")
+    try:
+        print(*args, **kwargs)
+    except (UnicodeEncodeError, OSError, ValueError):
+        pass
 
 
 def _load_credentials(cred_path: str) -> dict:
@@ -198,7 +199,7 @@ class WeixinChannel(ChatChannel):
         self.login_status = self.LOGIN_STATUS_IDLE
         if not self._stop_event.is_set():
             logger.info("[Weixin] QR login timed out, waiting for stop or reconnect...")
-            print("  二维码登录超时，请通过控制台重新接入\n")
+            _console_print("  二维码登录超时，请通过控制台重新接入\n")
             self._stop_event.wait()
 
         logger.info("[Weixin] Login cancelled by stop event")
@@ -462,7 +463,7 @@ class WeixinChannel(ChatChannel):
         logger.info(f"[Weixin] 微信二维码链接: {qrcode_url}")
         self._print_qr(qrcode_url)
         self._notify_cloud_qrcode(qrcode_url)
-        print("  等待扫码...\n")
+        _console_print("  等待扫码...\n")
 
         scanned_printed = False
         refresh_count = 0
@@ -471,7 +472,7 @@ class WeixinChannel(ChatChannel):
         while not self._stop_event.is_set():
             if time.time() >= deadline:
                 logger.warning(f"[Weixin] QR login timed out after {QR_LOGIN_TIMEOUT_S}s")
-                print(f"\n  二维码登录超时（{QR_LOGIN_TIMEOUT_S}s），请重启后重试")
+                _console_print(f"\n  二维码登录超时（{QR_LOGIN_TIMEOUT_S}s），请重启后重试")
                 break
 
             try:
@@ -487,19 +488,27 @@ class WeixinChannel(ChatChannel):
             elif status == "scaned":
                 self.login_status = self.LOGIN_STATUS_SCANNED
                 if not scanned_printed:
-                    print("  已扫码，请在手机上确认...")
+                    _console_print("  已扫码，请在手机上确认...")
                     scanned_printed = True
             elif status == "expired":
                 refresh_count += 1
                 if refresh_count >= QR_MAX_REFRESHES:
                     logger.warning(f"[Weixin] QR code refreshed {QR_MAX_REFRESHES} times, giving up")
-                    print(f"\n  二维码已刷新 {QR_MAX_REFRESHES} 次仍未扫码，请重启后重试")
+                    _console_print(f"\n  二维码已刷新 {QR_MAX_REFRESHES} 次仍未扫码，请重启后重试")
                     break
-                print(f"  二维码已过期，正在刷新（{refresh_count}/{QR_MAX_REFRESHES}）...")
+                _console_print(f"  二维码已过期，正在刷新（{refresh_count}/{QR_MAX_REFRESHES}）...")
                 try:
                     qr_resp = api.fetch_qr_code()
                     qrcode = qr_resp.get("qrcode", "")
                     qrcode_url = qr_resp.get("qrcode_img_content", "")
+                    # A 200 with an error body has no qrcode; polling an empty
+                    # code only ever reports "wait".
+                    if not qrcode:
+                        logger.error(
+                            "[Weixin] QR refresh returned no qrcode; stopping login"
+                        )
+                        self._current_qr_url = ""
+                        return {}
                     scanned_printed = False
                     self._current_qr_url = qrcode_url
                     logger.info(f"[Weixin] 微信二维码链接 ({refresh_count}/{QR_MAX_REFRESHES}): {qrcode_url}")
@@ -519,7 +528,7 @@ class WeixinChannel(ChatChannel):
                     return {}
 
                 self._current_qr_url = ""
-                print(f"\n  ✅ 微信登录成功！bot_id={bot_id}")
+                _console_print(f"\n  ✅ 微信登录成功！bot_id={bot_id}")
                 logger.info(f"[Weixin] Login confirmed: bot_id={bot_id}")
                 self._notify_cloud_connected()
 
@@ -714,6 +723,14 @@ class WeixinChannel(ChatChannel):
 
         if wx_msg.ctype == ContextType.FILE:
             wx_msg.prepare()
+            # A failed download leaves content pointing at a file that does not exist.
+            if not wx_msg.content or not os.path.exists(wx_msg.content):
+                logger.warning(
+                    "[Weixin] File download did not land, not caching: %s",
+                    wx_msg.content,
+                )
+                self._clear_pending_media(session_id)
+                return
             file_cache.add(session_id, wx_msg.content, file_type="file")
             logger.info(f"[Weixin] File cached for session {session_id}: {wx_msg.content}")
             self._clear_pending_media(session_id)
@@ -840,23 +857,33 @@ class WeixinChannel(ChatChannel):
         return self._context_tokens.get(receiver, "")
 
     def _check_send_response(self, resp, receiver: str) -> None:
-        """Inspect a send-API response; drop stale context_token on -14.
+        """Inspect a send-API response; log failures and drop stale context_token on -14.
 
         ilink uses ret/errcode = -14 to signal that the session (and any
         cached context_token) is no longer valid. The plugin keeps running
         because the bot itself can re-login; we just need to forget the
         per-user token so the next push won't retry forever.
+
+        Other non-zero codes (e.g. the user has not messaged the bot within
+        the last 24h, or the send quota is used up) come back with HTTP 200,
+        so they would otherwise pass silently.
         """
         if not isinstance(resp, dict):
             return
         ret = resp.get("ret")
         errcode = resp.get("errcode")
         if ret == -14 or errcode == -14:
-            logger.warning(
+            logger.error(
                 f"[Weixin] Send returned -14 (session expired) for "
                 f"receiver={receiver}; dropping cached context_token"
             )
             self._invalidate_context_token(receiver)
+        elif ret or errcode:
+            logger.error(
+                f"[Weixin] Send failed for receiver={receiver}: ret={ret} "
+                f"errcode={errcode} errmsg={resp.get('errmsg', '')}. The user may "
+                f"need to send a message to the bot to re-open the 24h send window"
+            )
 
     def _send_text(self, text: str, receiver: str, context_token: str):
         if len(text) <= TEXT_CHUNK_LIMIT:
@@ -900,7 +927,7 @@ class WeixinChannel(ChatChannel):
         return chunks
 
     def _send_image(self, img_path_or_url: str, receiver: str, context_token: str):
-        local_path = self._resolve_media_path(img_path_or_url)
+        local_path, downloaded = self._resolve_media(img_path_or_url)
         if not local_path:
             self._send_text("[Image send failed: file not found]", receiver, context_token)
             return
@@ -918,9 +945,12 @@ class WeixinChannel(ChatChannel):
         except Exception as e:
             logger.error(f"[Weixin] Image send failed: {e}")
             self._send_text("[Image send failed]", receiver, context_token)
+        finally:
+            if downloaded:
+                remove_download(local_path)
 
     def _send_file(self, file_path_or_url: str, receiver: str, context_token: str):
-        local_path = self._resolve_media_path(file_path_or_url)
+        local_path, downloaded = self._resolve_media(file_path_or_url)
         if not local_path:
             self._send_text("[File send failed: file not found]", receiver, context_token)
             return
@@ -939,9 +969,12 @@ class WeixinChannel(ChatChannel):
         except Exception as e:
             logger.error(f"[Weixin] File send failed: {e}")
             self._send_text("[File send failed]", receiver, context_token)
+        finally:
+            if downloaded:
+                remove_download(local_path)
 
     def _send_video(self, video_path_or_url: str, receiver: str, context_token: str):
-        local_path = self._resolve_media_path(video_path_or_url)
+        local_path, downloaded = self._resolve_media(video_path_or_url)
         if not local_path:
             self._send_text("[Video send failed: file not found]", receiver, context_token)
             return
@@ -959,6 +992,9 @@ class WeixinChannel(ChatChannel):
         except Exception as e:
             logger.error(f"[Weixin] Video send failed: {e}")
             self._send_text("[Video send failed]", receiver, context_token)
+        finally:
+            if downloaded:
+                remove_download(local_path)
 
     @staticmethod
     def _resolve_media_path(path_or_url: str) -> str:
@@ -972,7 +1008,7 @@ class WeixinChannel(ChatChannel):
 
         if local_path.startswith(("http://", "https://")):
             try:
-                resp = requests.get(local_path, timeout=60)
+                resp = requests.get(local_path, timeout=60, stream=True)
                 resp.raise_for_status()
                 ct = resp.headers.get("Content-Type", "")
                 ext = ".bin"
@@ -989,9 +1025,8 @@ class WeixinChannel(ChatChannel):
                 elif "pdf" in ct:
                     ext = ".pdf"
 
-                tmp_path = _media_tmp_path("wx_media", ext)
-                with open(tmp_path, "wb") as f:
-                    f.write(resp.content)
+                tmp_path = state_dir.tmp_file("wx_media", ext)
+                save_response(resp, tmp_path, MAX_FILE_BYTES)
                 return tmp_path
             except Exception as e:
                 logger.error(f"[Weixin] Failed to download media: {e}")
@@ -1002,3 +1037,11 @@ class WeixinChannel(ChatChannel):
 
         logger.warning(f"[Weixin] Media file not found: {local_path}")
         return ""
+
+    @classmethod
+    def _resolve_media(cls, path_or_url: str) -> Tuple[str, bool]:
+        """Like :meth:`_resolve_media_path`, plus whether the file was downloaded here."""
+        downloaded = bool(path_or_url) and path_or_url.startswith(
+            ("http://", "https://"))
+        local_path = cls._resolve_media_path(path_or_url)
+        return local_path, bool(local_path) and downloaded

@@ -15,6 +15,7 @@ from typing import List, Optional
 from common.log import logger
 from agent.skills.archive import extract_archive
 from agent.skills.manager import SkillManager
+from common.media_download import MAX_FILE_BYTES, download_to_file
 
 try:
     import requests
@@ -744,6 +745,9 @@ class SkillService:
         """
         Download a file from *url* and save to *dest*.
 
+        Uses the size-capped downloader so a malicious or broken URL cannot
+        fill disk with an unbounded response body.
+
         :param url: remote file URL
         :param dest: local destination path
         """
@@ -754,8 +758,5 @@ class SkillService:
         if dest_dir:
             os.makedirs(dest_dir, exist_ok=True)
 
-        resp = requests.get(url, timeout=60)
-        resp.raise_for_status()
-        with open(dest, "wb") as f:
-            f.write(resp.content)
+        download_to_file(url, dest, MAX_FILE_BYTES, timeout=60)
         logger.debug(f"[SkillService] downloaded {url} -> {dest}")

@@ -4,11 +4,13 @@ Web Fetch tool - Fetch and extract readable content from web pages and remote fi
 Supports:
 - HTML web pages: extracts readable text content
 - Document files (PDF, Word, TXT, Markdown, etc.): downloads to workspace/tmp and parses content
+- Plain text downloads: prefers a declared HTTP charset, then existing decoding fallbacks
 """
 
 import os
 import re
 import uuid
+from html.parser import HTMLParser
 from typing import Dict, Any, Optional, Set
 from urllib.parse import urlparse, unquote
 
@@ -18,9 +20,12 @@ from agent.tools.base_tool import BaseTool, ToolResult
 from agent.tools.utils.truncate import truncate_head, format_size
 from agent.tools.utils.url_safety import validate_url_safe, safe_get
 from common.log import logger
+from common.media_download import MediaTooLargeError, read_response, save_response
 
 
 DEFAULT_TIMEOUT = 30
+# A slow sender never trips the per-read timeout, so a page read is capped as a whole.
+PAGE_READ_SECONDS = 60
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
 DEFAULT_HEADERS = {
@@ -64,7 +69,7 @@ def _extract_charset_from_html_meta(raw_bytes: bytes) -> Optional[str]:
 
 def _get_url_suffix(url: str) -> str:
     """Extract file extension from URL path, ignoring query params."""
-    path = urlparse(url).path
+    path = unquote(urlparse(url).path)
     return os.path.splitext(path)[-1].lower()
 
 
@@ -72,6 +77,51 @@ def _is_document_url(url: str) -> bool:
     """Check if URL points to a downloadable document file."""
     suffix = _get_url_suffix(url)
     return suffix in ALL_DOC_SUFFIXES
+
+
+def _parse_content_length(response: requests.Response) -> int:
+    """Content-Length as a non-negative int, or 0 when absent or malformed."""
+    try:
+        return max(int(response.headers.get("Content-Length", 0)), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+class _PageTextParser(HTMLParser):
+    """Keep text and block boundaries without treating quoted attributes as text."""
+
+    _BLOCK_TAGS = frozenset({
+        "address", "article", "aside", "blockquote", "caption", "center",
+        "dd", "details", "dialog", "div", "dl", "dt", "fieldset", "figcaption",
+        "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6",
+        "header", "hr", "li", "main", "nav", "ol", "p", "pre", "section",
+        "summary", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul",
+    })
+
+    def __init__(self):
+        # Decode character references once, in text rather than in markup.
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self.hidden_tag = None
+
+    def handle_starttag(self, tag, attrs):
+        if self.hidden_tag:
+            return
+        if tag in ("script", "style"):
+            self.hidden_tag = tag
+        elif tag == "br" or tag in self._BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if self.hidden_tag:
+            if tag == self.hidden_tag:
+                self.hidden_tag = None
+        elif tag in self._BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if not self.hidden_tag:
+            self.parts.append(data)
 
 
 class WebFetch(BaseTool):
@@ -142,111 +192,144 @@ class WebFetch(BaseTool):
 
     def _fetch_webpage(self, url: str) -> ToolResult:
         """Fetch and extract readable text from an HTML web page."""
-        parsed = urlparse(url)
+        response = None
         try:
-            response = self._safe_get(url)
-            response.raise_for_status()
-        except requests.Timeout:
-            return ToolResult.fail(f"Error: Request timed out after {DEFAULT_TIMEOUT}s")
-        except requests.ConnectionError:
-            return ToolResult.fail(f"Error: Failed to connect to {parsed.netloc}")
-        except requests.HTTPError as e:
-            return ToolResult.fail(f"Error: HTTP {e.response.status_code} for URL: {url}")
-        except ValueError as e:
-            return ToolResult.fail(f"Error: {e}")
-        except Exception as e:
-            return ToolResult.fail(f"Error: Failed to fetch URL: {e}")
+            parsed = urlparse(url)
+            try:
+                response = self._safe_get(url, stream=True)
+                response.raise_for_status()
+            except requests.Timeout:
+                return ToolResult.fail(f"Error: Request timed out after {DEFAULT_TIMEOUT}s")
+            except requests.ConnectionError:
+                return ToolResult.fail(f"Error: Failed to connect to {parsed.netloc}")
+            except requests.HTTPError as e:
+                return ToolResult.fail(f"Error: HTTP {e.response.status_code} for URL: {url}")
+            except ValueError as e:
+                return ToolResult.fail(f"Error: {e}")
+            except Exception as e:
+                return ToolResult.fail(f"Error: Failed to fetch URL: {e}")
 
-        content_type = response.headers.get("Content-Type", "")
-        if self._is_binary_content_type(content_type) and not _is_document_url(url):
-            return self._handle_download_by_content_type(url, response, content_type)
+            content_type = response.headers.get("Content-Type", "")
+            if self._is_binary_content_type(content_type) and not _is_document_url(url):
+                return self._handle_download_by_content_type(url, response, content_type)
 
-        response.encoding = self._detect_encoding(response)
-        html = response.text
-        title = self._extract_title(html)
-        text = self._extract_text(html)
-
-        return ToolResult.success(f"Title: {title}\n\nContent:\n{text}")
-
-    # ---- Document fetching ----
-
-    def _fetch_document(self, url: str) -> ToolResult:
-        """Download a document file and extract its text content."""
-        suffix = _get_url_suffix(url)
-        parsed = urlparse(url)
-        filename = self._extract_filename(url)
-        tmp_dir = self._ensure_tmp_dir()
-
-        local_path = os.path.join(tmp_dir, filename)
-        logger.info(f"[WebFetch] Downloading document: {url} -> {local_path}")
-
-        try:
-            response = self._safe_get(url, stream=True)
-            response.raise_for_status()
-
-            content_length = int(response.headers.get("Content-Length", 0))
+            content_length = _parse_content_length(response)
             if content_length > MAX_FILE_SIZE:
                 return ToolResult.fail(
                     f"Error: File too large ({format_size(content_length)} > {format_size(MAX_FILE_SIZE)})"
                 )
 
-            downloaded = 0
-            with open(local_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    downloaded += len(chunk)
-                    if downloaded > MAX_FILE_SIZE:
-                        f.close()
-                        os.remove(local_path)
-                        return ToolResult.fail(
-                            f"Error: File too large (>{format_size(MAX_FILE_SIZE)}), download aborted"
-                        )
-                    f.write(chunk)
+            try:
+                body = read_response(response, MAX_FILE_SIZE, max_seconds=PAGE_READ_SECONDS)
+            except MediaTooLargeError:
+                return ToolResult.fail(
+                    f"Error: File too large (>{format_size(MAX_FILE_SIZE)}), download aborted"
+                )
+            except requests.Timeout:
+                return ToolResult.fail(f"Error: Reading {parsed.netloc} took longer than {PAGE_READ_SECONDS}s")
+            # .content and .text decode these bytes instead of draining the spent stream.
+            response._content = body
+            response._content_consumed = True
 
-        except requests.Timeout:
-            return ToolResult.fail(f"Error: Download timed out after {DEFAULT_TIMEOUT}s")
-        except requests.ConnectionError:
-            return ToolResult.fail(f"Error: Failed to connect to {parsed.netloc}")
-        except requests.HTTPError as e:
-            return ToolResult.fail(f"Error: HTTP {e.response.status_code} for URL: {url}")
-        except ValueError as e:
-            self._cleanup_file(local_path)
-            return ToolResult.fail(f"Error: {e}")
-        except Exception as e:
-            self._cleanup_file(local_path)
-            return ToolResult.fail(f"Error: Failed to download file: {e}")
+            response.encoding = self._detect_encoding(response)
+            html = response.text
+            media_type = content_type.split(";", 1)[0].strip().lower()
+            if media_type in ("text/plain", "application/json"):
+                title = "Untitled"
+                text = html
+            else:
+                title = self._extract_title(html)
+                text = self._extract_text(html)
 
+            return ToolResult.success(f"Title: {title}\n\nContent:\n{text}")
+        finally:
+            if response is not None:
+                response.close()
+
+    # ---- Document fetching ----
+
+    def _fetch_document(self, url: str, suffix: Optional[str] = None,
+                        response: Optional[requests.Response] = None) -> ToolResult:
+        """Download or reuse a document response and extract its text content."""
         try:
-            text = self._parse_document(local_path, suffix)
-        except Exception as e:
-            self._cleanup_file(local_path)
-            return ToolResult.fail(f"Error: Failed to parse document: {e}")
+            suffix = suffix or _get_url_suffix(url)
+            parsed = urlparse(url)
+            filename = self._extract_filename(url)
+            if _get_url_suffix(url) not in ALL_DOC_SUFFIXES:
+                filename += suffix
+            tmp_dir = self._ensure_tmp_dir()
 
-        if not text or not text.strip():
+            local_path = os.path.join(tmp_dir, filename)
+            logger.info(f"[WebFetch] Downloading document: {url} -> {local_path}")
+
+            try:
+                if response is None:
+                    response = self._safe_get(url, stream=True)
+                response.raise_for_status()
+
+                content_length = _parse_content_length(response)
+                if content_length > MAX_FILE_SIZE:
+                    return ToolResult.fail(
+                        f"Error: File too large ({format_size(content_length)} > {format_size(MAX_FILE_SIZE)})"
+                    )
+
+                save_response(response, local_path, MAX_FILE_SIZE, max_seconds=PAGE_READ_SECONDS)
+
+            except MediaTooLargeError:
+                self._cleanup_file(local_path)
+                return ToolResult.fail(f"Error: File too large (>{format_size(MAX_FILE_SIZE)}), download aborted")
+            except requests.Timeout:
+                self._cleanup_file(local_path)
+                return ToolResult.fail(f"Error: Download from {parsed.netloc} timed out after {DEFAULT_TIMEOUT}s")
+            except requests.ConnectionError:
+                self._cleanup_file(local_path)
+                return ToolResult.fail(f"Error: Download from {parsed.netloc} failed: connection error")
+            except requests.HTTPError as e:
+                self._cleanup_file(local_path)
+                return ToolResult.fail(f"Error: HTTP {e.response.status_code} for URL: {url}")
+            except ValueError as e:
+                self._cleanup_file(local_path)
+                return ToolResult.fail(f"Error: {e}")
+            except Exception as e:
+                self._cleanup_file(local_path)
+                return ToolResult.fail(f"Error: Failed to download file: {e}")
+
+            try:
+                charset = _extract_charset_from_content_type(response.headers.get("Content-Type", ""))
+                text = self._parse_document(local_path, suffix, charset=charset)
+            except Exception as e:
+                self._cleanup_file(local_path)
+                return ToolResult.fail(f"Error: Failed to parse document: {e}")
+
+            if not text or not text.strip():
+                file_size = os.path.getsize(local_path)
+                return ToolResult.success(
+                    f"File downloaded to: {local_path} ({format_size(file_size)})\n"
+                    f"No text content could be extracted. The file may contain only images or be encrypted."
+                )
+
+            truncation = truncate_head(text)
+            result_text = truncation.content
+
             file_size = os.path.getsize(local_path)
-            return ToolResult.success(
-                f"File downloaded to: {local_path} ({format_size(file_size)})\n"
-                f"No text content could be extracted. The file may contain only images or be encrypted."
-            )
+            header = f"[Document: {filename} | Size: {format_size(file_size)} | Saved to: {local_path}]\n\n"
 
-        truncation = truncate_head(text)
-        result_text = truncation.content
+            if truncation.truncated:
+                header += f"[Content truncated: showing {truncation.output_lines} of {truncation.total_lines} lines]\n\n"
 
-        file_size = os.path.getsize(local_path)
-        header = f"[Document: {filename} | Size: {format_size(file_size)} | Saved to: {local_path}]\n\n"
+            return ToolResult.success(header + result_text)
+        finally:
+            if response is not None:
+                response.close()
 
-        if truncation.truncated:
-            header += f"[Content truncated: showing {truncation.output_lines} of {truncation.total_lines} lines]\n\n"
-
-        return ToolResult.success(header + result_text)
-
-    def _parse_document(self, file_path: str, suffix: str) -> str:
+    def _parse_document(self, file_path: str, suffix: str, charset: Optional[str] = None) -> str:
         """Parse document file and return extracted text."""
         if suffix in PDF_SUFFIXES:
             return self._parse_pdf(file_path)
         elif suffix in WORD_SUFFIXES:
             return self._parse_word(file_path)
         elif suffix in TEXT_SUFFIXES:
-            return self._parse_text(file_path)
+            return self._parse_text(file_path, charset=charset)
         elif suffix in SPREADSHEET_SUFFIXES:
             return self._parse_spreadsheet(file_path)
         elif suffix in PPT_SUFFIXES:
@@ -278,18 +361,21 @@ class WebFetch(BaseTool):
             raise ImportError(
                 "python-docx library is required for .docx parsing. Install with: pip install python-docx"
             )
+        from common.office_text import iter_docx_body_text
         doc = Document(file_path)
-        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-        return "\n\n".join(paragraphs)
+        blocks = [text for text in iter_docx_body_text(doc) if text.strip()]
+        return "\n\n".join(blocks)
 
-    def _parse_text(self, file_path: str) -> str:
-        """Read plain text files (txt, md, csv, etc.)."""
+    def _parse_text(self, file_path: str, charset: Optional[str] = None) -> str:
+        """Read plain text, trying a declared charset before existing fallbacks."""
         encodings = ["utf-8", "utf-8-sig", "gbk", "gb2312", "latin-1"]
+        if charset:
+            encodings.insert(0, charset)
         for enc in encodings:
             try:
                 with open(file_path, "r", encoding=enc) as f:
                     return f.read()
-            except (UnicodeDecodeError, UnicodeError):
+            except (UnicodeError, LookupError):
                 continue
         raise ValueError(f"Unable to decode file with any supported encoding: {encodings}")
 
@@ -302,20 +388,14 @@ class WebFetch(BaseTool):
                 "openpyxl library is required for .xlsx parsing. Install with: pip install openpyxl"
             )
 
-        wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+        from common.office_text import spreadsheet_sheets
         result_parts = []
+        with spreadsheet_sheets(file_path, openpyxl.load_workbook) as sheets:
+            for name, sheet_rows in sheets:
+                rows = [" | ".join(cells) for cells in sheet_rows if any(cells)]
+                if rows:
+                    result_parts.append(f"--- Sheet: {name} ---\n" + "\n".join(rows))
 
-        for sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-            rows = []
-            for row in ws.iter_rows(values_only=True):
-                cells = [str(c) if c is not None else "" for c in row]
-                if any(cells):
-                    rows.append(" | ".join(cells))
-            if rows:
-                result_parts.append(f"--- Sheet: {sheet_name} ---\n" + "\n".join(rows))
-
-        wb.close()
         return "\n\n".join(result_parts)
 
     def _parse_ppt(self, file_path: str) -> str:
@@ -327,17 +407,12 @@ class WebFetch(BaseTool):
                 "python-pptx library is required for .pptx parsing. Install with: pip install python-pptx"
             )
 
+        from common.office_text import iter_pptx_shape_text
         prs = Presentation(file_path)
         text_parts = []
 
         for slide_num, slide in enumerate(prs.slides, 1):
-            slide_texts = []
-            for shape in slide.shapes:
-                if shape.has_text_frame:
-                    for paragraph in shape.text_frame.paragraphs:
-                        text = paragraph.text.strip()
-                        if text:
-                            slide_texts.append(text)
+            slide_texts = list(iter_pptx_shape_text(slide.shapes))
             if slide_texts:
                 text_parts.append(f"--- Slide {slide_num}/{len(prs.slides)} ---\n" + "\n".join(slide_texts))
 
@@ -431,19 +506,13 @@ class WebFetch(BaseTool):
                 break
 
         if detected_suffix and detected_suffix in ALL_DOC_SUFFIXES:
-            # Re-fetch as document
-            return self._fetch_document(url if _get_url_suffix(url) in ALL_DOC_SUFFIXES
-                                        else self._rewrite_url_with_suffix(url, detected_suffix))
+            # Content-Type selects the parser, not a different network URL.
+            # Reuse this response, including for signed or single-use downloads.
+            return self._fetch_document(url, suffix=detected_suffix, response=response)
+        response.close()
         return ToolResult.fail(f"Error: URL returned binary content ({content_type}), not a supported document type")
 
-    @staticmethod
-    def _rewrite_url_with_suffix(url: str, suffix: str) -> str:
-        """Append a suffix to the URL path so _get_url_suffix works correctly."""
-        parsed = urlparse(url)
-        new_path = parsed.path.rstrip("/") + suffix
-        return parsed._replace(path=new_path).geturl()
-
-    # ---- HTML extraction (unchanged) ----
+    # ---- HTML extraction ----
 
     @staticmethod
     def _extract_title(html: str) -> str:
@@ -452,11 +521,10 @@ class WebFetch(BaseTool):
 
     @staticmethod
     def _extract_text(html: str) -> str:
-        text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.IGNORECASE | re.DOTALL)
-        text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.IGNORECASE | re.DOTALL)
-        text = re.sub(r"<[^>]+>", "", text)
-        text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
-        text = text.replace("&quot;", '"').replace("&#39;", "'").replace("&nbsp;", " ")
+        parser = _PageTextParser()
+        parser.feed(html)
+        parser.close()
+        text = "".join(parser.parts)
         text = re.sub(r"[^\S\n]+", " ", text)
         text = re.sub(r"\n{3,}", "\n\n", text)
         lines = [line.strip() for line in text.splitlines()]

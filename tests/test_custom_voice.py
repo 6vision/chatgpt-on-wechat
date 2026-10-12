@@ -101,20 +101,20 @@ class TestCustomVoice(unittest.TestCase):
     def test_text_to_voice_writes_audio_file(self):
         response = MagicMock()
         response.status_code = 200
-        response.content = b"mp3-bytes"
+        response.iter_content.return_value = [b"mp3-bytes"]
 
         voice = CustomVoice("custom:abc12345")
         with self.conf(text_to_voice_model="fun-tts-large", tts_voice_id="anna"):
             with patch("voice.custom.custom_voice.requests.post", return_value=response) as post:
-                with patch("builtins.open", mock_open()) as mocked_open:
-                    reply = voice.textToVoice("你好")
+                reply = voice.textToVoice("你好")
 
         self.assertEqual(reply.type, ReplyType.VOICE)
         # The audio belongs in the routed Agent's tmp dir (common/tmp_dir.py),
         # not a CWD-relative "./tmp" the desktop app cannot rely on.
         self.assertTrue(reply.content.endswith(".mp3"))
         self.assertEqual(os.path.dirname(reply.content), str(state_dir.tmp_dir()))
-        mocked_open().write.assert_called_once_with(b"mp3-bytes")
+        with open(reply.content, "rb") as written:
+            self.assertEqual(written.read(), b"mp3-bytes")
         self.assertEqual(post.call_args[0][0], "https://my.vendor/v1/audio/speech")
         self.assertEqual(
             post.call_args.kwargs["json"],

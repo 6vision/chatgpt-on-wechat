@@ -13,6 +13,10 @@ import web
 from channel.web.api.agents import (  # noqa: F401
     AgentAvatarHandler, AgentCoreFileHandler, AgentsHandler,
 )
+from channel.web.api.artifacts import (  # noqa: F401
+    ArtifactAddHandler, ArtifactDeleteHandler, ArtifactPinHandler,
+    ArtifactRenameHandler, ArtifactsHandler,
+)
 from channel.web.api.auth import (  # noqa: F401
     AuthCheckHandler, AuthLoginHandler, AuthLogoutHandler,
     McpOAuthCallbackHandler,
@@ -25,7 +29,7 @@ from channel.web.api.chat import (  # noqa: F401
 )
 from channel.web.api.config import ConfigHandler  # noqa: F401
 from channel.web.api.files import (  # noqa: F401
-    FileServeHandler, PreviewHandler, UploadHandler, UploadsHandler,
+    FileRevealHandler, FileServeHandler, PreviewHandler, UploadHandler, UploadsHandler,
     VoiceAsrHandler, VoiceTtsHandler,
 )
 from channel.web.api.knowledge import (  # noqa: F401
@@ -36,6 +40,7 @@ from channel.web.api.logs import LogsDownloadHandler, LogsHandler  # noqa: F401
 from channel.web.api.memory import (  # noqa: F401
     MemoryContentHandler, MemoryHandler,
 )
+from channel.web.api.menu import MenuHandler  # noqa: F401
 from channel.web.api.models import ModelsHandler  # noqa: F401
 from channel.web.api.openai_compat import (  # noqa: F401
     OpenAIChatCompletionsHandler,
@@ -89,6 +94,7 @@ URLS = (
     '/message', 'MessageHandler',
     '/upload', 'UploadHandler',
     '/uploads/(.*)', 'UploadsHandler',
+    '/api/file/reveal', 'FileRevealHandler',
     '/api/file', 'FileServeHandler',
     '/preview/(.+)', 'PreviewHandler',
     '/api/workspace/tree', 'WorkspaceTreeHandler',
@@ -97,6 +103,12 @@ URLS = (
     '/api/workspace/meta', 'WorkspaceMetaHandler',
     '/api/workspace/read', 'WorkspaceReadHandler',
     '/api/workspace/write', 'WorkspaceWriteHandler',
+    '/api/artifacts/add', 'ArtifactAddHandler',
+    '/api/artifacts/pin', 'ArtifactPinHandler',
+    '/api/artifacts/rename', 'ArtifactRenameHandler',
+    '/api/menu', 'MenuHandler',
+    '/api/artifacts/delete', 'ArtifactDeleteHandler',
+    '/api/artifacts', 'ArtifactsHandler',
     '/api/projects', 'ProjectsHandler',
     '/api/projects/select', 'ProjectSelectHandler',
     '/api/projects/create', 'ProjectCreateHandler',
@@ -169,8 +181,10 @@ URLS = (
     # can ever shadow an API route above -- which is also why the
     # settings view is /settings and not /config, a path the config
     # API already owns.
-    '/(?:agents|settings|skills|memory|knowledge|channels|scheduler|logs)'
+    '/(?:agents|artifacts|settings|skills|memory|knowledge|channels|scheduler|logs)'
     '(?:/[a-z]+)?/?', 'ChatHandler',
+    # A page the user put in the menu: /m/<item id>.
+    '/m/[A-Za-z0-9_-]{1,40}/?', 'ChatHandler',
 )
 
 

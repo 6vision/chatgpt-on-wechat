@@ -28,6 +28,9 @@ Pillow
 python-dotenv>=1.0.0
 PyYAML>=6.0
 croniter>=2.0.0
+# zoneinfo is stdlib from 3.9 (the Win7 build runs 3.8); Windows has no system tz database
+backports.zoneinfo; python_version < "3.9"
+tzdata; sys_platform == "win32"
 click>=8.0
 qrcode
 json-repair

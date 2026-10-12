@@ -472,6 +472,66 @@ const I18N = {
         session_history: '历史会话',
         ws_toggle: '工作空间', ws_tab_preview: '预览', ws_tab_files: '文件',
         timeline_nav: '消息导航',
+        menu_artifacts: '产物', artifacts_title: '产物',
+        artifacts_desc: 'Agent 在对话中生成的网页、图片、视频和文档，按时间汇集在这里',
+        artifacts_filter_all: '全部', artifacts_filter_web: '网页', artifacts_filter_image: '图片',
+        artifacts_filter_media: '音视频', artifacts_filter_doc: '文档', artifacts_filter_other: '其他',
+        artifacts_search: '搜索名称或路径', artifacts_scope_all: '全部智能体',
+        artifacts_empty_title: '还没有产物',
+        artifacts_empty_desc: '从现在起，Agent 在对话中写出的网页和文档、发给你的图片和视频，都会按时间收录在这里。',
+        artifacts_empty_action: '开始对话',
+        artifacts_no_match: '没有符合条件的产物', artifacts_clear_filters: '清除筛选',
+        artifacts_today: '今天', artifacts_yesterday: '昨天',
+        artifacts_jump: '定位到对话',
+        artifacts_jump_unavailable: '该产物来自其他通道或已删除的会话，无法定位',
+        artifacts_missing: '文件已被移动或删除',
+        artifacts_remove: '从产物中移除', artifacts_removed: '已移除，文件本身不受影响',
+        artifacts_remove_title: '从产物中移除？', artifacts_remove_ok: '移除',
+        artifacts_remove_confirm: '「{name}」将不再出现在产物中，文件本身不会被删除。之后可从对话中的文件卡片重新加入。',
+        artifacts_add: '加入产物', artifacts_added: '已加入产物',
+        artifacts_pin: '置顶', artifacts_unpin: '取消置顶', artifacts_pinned_group: '已置顶',
+        artifacts_pinned: '已置顶', artifacts_unpinned: '已取消置顶',
+        artifacts_rename: '重命名', artifacts_rename_failed: '重命名失败',
+        menu_edit: '自定义菜单',
+        menu_edit_desc: '拖动调整顺序和分组，也可以把产物或网页放进菜单。Web 端和桌面端共用这份菜单。',
+        menu_add: '添加',
+        menu_add_group: '添加分组',
+        menu_add_artifact: '产物（HTML / Markdown）',
+        menu_add_url: '网页链接',
+        menu_add_builtin: '内置页面',
+        menu_group_untitled: '未命名分组',
+        menu_group_title_ph: '分组名称',
+        menu_group_keeps_pages: '分组里有内置页面，先把它们移到别的分组',
+        menu_item_title_ph: '名称',
+        menu_open_embed: '内嵌',
+        menu_open_tab: '新标签',
+        menu_hide: '隐藏',
+        menu_show: '显示',
+        menu_required: '这个页面不能隐藏',
+        menu_remove: '移除',
+        menu_drag: '拖动排序',
+        menu_icon: '图标',
+        menu_icon_default: '默认图标',
+        menu_reset: '恢复默认',
+        menu_reset_confirm: '菜单会恢复成内置的默认菜单，你添加的产物和链接会被移除。',
+        menu_save_failed: '保存失败',
+        menu_need_title: '请填写名称',
+        menu_need_group_title: '请填写分组名称',
+        menu_need_url: '请填写以 http:// 或 https:// 开头的链接',
+        menu_builtin_page: '内置页面',
+        menu_unsupported: '当前端没有这个页面，保留给另一端',
+        menu_artifact_search: '搜索产物',
+        menu_artifact_empty: '没有找到产物',
+        menu_already_added: '已在菜单中',
+        menu_page_missing: '这一项已经不在菜单里了',
+        menu_file_missing: '文件已不存在',
+        menu_open_external: '新标签打开',
+        menu_back_chat: '回到对话',
+        menu_add_to_menu: '添加到菜单',
+        artifacts_view_in: '在产物中查看', artifacts_untitled: '未命名对话',
+        artifacts_load_failed: '加载失败', artifacts_retry: '重试',
+        artifacts_meta_session: '会话', artifacts_meta_size: '大小',
+        sidebar_collapse: '收起侧边栏', sidebar_expand: '展开侧边栏',
         ws_default_workspace: '默认空间', ws_sel_title: '选择工作空间',
         ws_sel_default_hint: '使用默认工作空间（~/cow）', ws_sel_recents: '最近使用',
         ws_sel_open: '打开项目…', ws_sel_new: '新建项目', ws_sel_new_placeholder: '项目名称',
@@ -480,7 +540,8 @@ const I18N = {
         ws_sel_name_required: '请输入项目名称', ws_sel_name_no_slash: '项目名称不能包含 / 或 \\',
         ws_sel_open_here: '打开此目录', ws_sel_dblclick_hint: '双击进入子目录，单击选中',
         ws_sel_no_subdirs: '此目录下没有子文件夹', ws_sel_drives: '此电脑',
-        ws_open_external: '在新标签页打开', ws_download: '下载', ws_copy_path: '复制路径',
+        ws_open_external: '在新标签页打开', ws_download: '下载',
+        ws_reveal: '在文件夹中显示', ws_reveal_failed: '无法打开文件夹',
         ws_close: '关闭', ws_refresh: '刷新', ws_preview: '预览',
         ws_search_placeholder: '搜索文件',
         ws_preview_empty: '选择一个文件进行预览',
@@ -612,6 +673,9 @@ const I18N = {
         update_step_restart: '重启服务',
         update_step_starting: '准备更新',
         update_step_done: '完成',
+        mermaid_code: '代码',
+        mermaid_preview: '预览',
+        mermaid_preview_failed: '图表无法渲染',
     },
     'zh-Hant': {
 
@@ -1080,6 +1144,66 @@ const I18N = {
         session_history: '歷史會話',
         ws_toggle: '工作空間', ws_tab_preview: '預覽', ws_tab_files: '檔案',
         timeline_nav: '訊息導覽',
+        menu_artifacts: '產物', artifacts_title: '產物',
+        artifacts_desc: 'Agent 在對話中產生的網頁、圖片、影片和文件，依時間彙整於此',
+        artifacts_filter_all: '全部', artifacts_filter_web: '網頁', artifacts_filter_image: '圖片',
+        artifacts_filter_media: '影音', artifacts_filter_doc: '文件', artifacts_filter_other: '其他',
+        artifacts_search: '搜尋名稱或路徑', artifacts_scope_all: '全部智慧體',
+        artifacts_empty_title: '還沒有產物',
+        artifacts_empty_desc: '從現在起，Agent 在對話中寫出的網頁和文件、傳給你的圖片和影片，都會依時間收錄在這裡。',
+        artifacts_empty_action: '開始對話',
+        artifacts_no_match: '沒有符合條件的產物', artifacts_clear_filters: '清除篩選',
+        artifacts_today: '今天', artifacts_yesterday: '昨天',
+        artifacts_jump: '定位到對話',
+        artifacts_jump_unavailable: '此產物來自其他通道或已刪除的會話，無法定位',
+        artifacts_missing: '檔案已被移動或刪除',
+        artifacts_remove: '從產物中移除', artifacts_removed: '已移除，檔案本身不受影響',
+        artifacts_remove_title: '從產物中移除？', artifacts_remove_ok: '移除',
+        artifacts_remove_confirm: '「{name}」將不再出現在產物中，檔案本身不會被刪除。之後可從對話中的檔案卡片重新加入。',
+        artifacts_add: '加入產物', artifacts_added: '已加入產物',
+        artifacts_pin: '置頂', artifacts_unpin: '取消置頂', artifacts_pinned_group: '已置頂',
+        artifacts_pinned: '已置頂', artifacts_unpinned: '已取消置頂',
+        artifacts_rename: '重新命名', artifacts_rename_failed: '重新命名失敗',
+        menu_edit: '自訂選單',
+        menu_edit_desc: '拖曳調整順序和分組，也可以把產物或網頁放進選單。網頁版和桌面版共用這份選單。',
+        menu_add: '新增',
+        menu_add_group: '新增分組',
+        menu_add_artifact: '產物（HTML / Markdown）',
+        menu_add_url: '網頁連結',
+        menu_add_builtin: '內建頁面',
+        menu_group_untitled: '未命名分組',
+        menu_group_title_ph: '分組名稱',
+        menu_group_keeps_pages: '分組裡有內建頁面，先把它們移到別的分組',
+        menu_item_title_ph: '名稱',
+        menu_open_embed: '內嵌',
+        menu_open_tab: '新分頁',
+        menu_hide: '隱藏',
+        menu_show: '顯示',
+        menu_required: '這個頁面不能隱藏',
+        menu_remove: '移除',
+        menu_drag: '拖曳排序',
+        menu_icon: '圖示',
+        menu_icon_default: '預設圖示',
+        menu_reset: '恢復預設',
+        menu_reset_confirm: '選單會恢復成內建的預設選單，你新增的產物和連結會被移除。',
+        menu_save_failed: '儲存失敗',
+        menu_need_title: '請填寫名稱',
+        menu_need_group_title: '請填寫分組名稱',
+        menu_need_url: '請填寫以 http:// 或 https:// 開頭的連結',
+        menu_builtin_page: '內建頁面',
+        menu_unsupported: '目前這端沒有這個頁面，保留給另一端',
+        menu_artifact_search: '搜尋產物',
+        menu_artifact_empty: '沒有找到產物',
+        menu_already_added: '已在選單中',
+        menu_page_missing: '這一項已經不在選單裡了',
+        menu_file_missing: '檔案已不存在',
+        menu_open_external: '新分頁開啟',
+        menu_back_chat: '回到對話',
+        menu_add_to_menu: '加入選單',
+        artifacts_view_in: '在產物中檢視', artifacts_untitled: '未命名對話',
+        artifacts_load_failed: '載入失敗', artifacts_retry: '重試',
+        artifacts_meta_session: '會話', artifacts_meta_size: '大小',
+        sidebar_collapse: '收合側邊欄', sidebar_expand: '展開側邊欄',
         ws_default_workspace: '預設空間', ws_sel_title: '選擇工作空間',
         ws_sel_default_hint: '使用預設工作空間（~/cow）', ws_sel_recents: '最近使用',
         ws_sel_open: '開啟專案…', ws_sel_new: '新建專案', ws_sel_new_placeholder: '專案名稱',
@@ -1088,7 +1212,8 @@ const I18N = {
         ws_sel_name_required: '請輸入專案名稱', ws_sel_name_no_slash: '專案名稱不能包含 / 或 \\',
         ws_sel_open_here: '開啟此目錄', ws_sel_dblclick_hint: '雙擊進入子目錄，單擊選中',
         ws_sel_no_subdirs: '此目錄下沒有子資料夾', ws_sel_drives: '本機',
-        ws_open_external: '在新分頁開啟', ws_download: '下載', ws_copy_path: '複製路徑',
+        ws_open_external: '在新分頁開啟', ws_download: '下載',
+        ws_reveal: '在資料夾中顯示', ws_reveal_failed: '無法開啟資料夾',
         ws_close: '關閉', ws_refresh: '重新整理', ws_preview: '預覽',
         ws_search_placeholder: '搜尋檔案',
         ws_preview_empty: '選擇一個檔案進行預覽',
@@ -1216,6 +1341,9 @@ const I18N = {
         update_step_restart: '重啟服務',
         update_step_starting: '準備更新',
         update_step_done: '完成',
+        mermaid_code: '程式碼',
+        mermaid_preview: '預覽',
+        mermaid_preview_failed: '圖表無法渲染',
         },
     en: {
         console: 'Console',
@@ -1683,6 +1811,66 @@ const I18N = {
         session_history: 'History',
         ws_toggle: 'Workspace', ws_tab_preview: 'Preview', ws_tab_files: 'Files',
         timeline_nav: 'Jump to message',
+        menu_artifacts: 'Artifacts', artifacts_title: 'Artifacts',
+        artifacts_desc: 'Pages, images, videos and documents your agents made in chats, in one timeline',
+        artifacts_filter_all: 'All', artifacts_filter_web: 'Pages', artifacts_filter_image: 'Images',
+        artifacts_filter_media: 'Video & audio', artifacts_filter_doc: 'Documents', artifacts_filter_other: 'Other',
+        artifacts_search: 'Search name or path', artifacts_scope_all: 'All agents',
+        artifacts_empty_title: 'No artifacts yet',
+        artifacts_empty_desc: 'From now on, the pages and documents your agents write, and the images and videos they send you, will be collected here by time.',
+        artifacts_empty_action: 'Start a chat',
+        artifacts_no_match: 'Nothing matches these filters', artifacts_clear_filters: 'Clear filters',
+        artifacts_today: 'Today', artifacts_yesterday: 'Yesterday',
+        artifacts_jump: 'Show in chat',
+        artifacts_jump_unavailable: 'Made in another channel or a deleted conversation, so it can\'t be located',
+        artifacts_missing: 'File moved or deleted',
+        artifacts_remove: 'Remove from artifacts', artifacts_removed: 'Removed. The file itself is untouched.',
+        artifacts_remove_title: 'Remove from artifacts?', artifacts_remove_ok: 'Remove',
+        artifacts_remove_confirm: '"{name}" will no longer appear in Artifacts. The file itself is not deleted, and you can add it back from its file card in the conversation.',
+        artifacts_add: 'Add to artifacts', artifacts_added: 'Added to artifacts',
+        artifacts_pin: 'Pin to top', artifacts_unpin: 'Unpin', artifacts_pinned_group: 'Pinned',
+        artifacts_pinned: 'Pinned to top', artifacts_unpinned: 'Unpinned',
+        artifacts_rename: 'Rename', artifacts_rename_failed: 'Rename failed',
+        menu_edit: 'Customize menu',
+        menu_edit_desc: 'Drag to reorder and regroup, and put artifacts or web pages in the menu. The web console and the desktop app share it.',
+        menu_add: 'Add',
+        menu_add_group: 'Add group',
+        menu_add_artifact: 'Artifact (HTML / Markdown)',
+        menu_add_url: 'Web link',
+        menu_add_builtin: 'Built-in page',
+        menu_group_untitled: 'Untitled group',
+        menu_group_title_ph: 'Group name',
+        menu_group_keeps_pages: 'Move the built-in pages to another group first',
+        menu_item_title_ph: 'Name',
+        menu_open_embed: 'Embed',
+        menu_open_tab: 'New tab',
+        menu_hide: 'Hide',
+        menu_show: 'Show',
+        menu_required: 'This page can\'t be hidden',
+        menu_remove: 'Remove',
+        menu_drag: 'Drag to reorder',
+        menu_icon: 'Icon',
+        menu_icon_default: 'Default icon',
+        menu_reset: 'Restore default',
+        menu_reset_confirm: 'The menu goes back to the built-in one, and the artifacts and links you added are removed.',
+        menu_save_failed: 'Couldn\'t save',
+        menu_need_title: 'Enter a name',
+        menu_need_group_title: 'Enter a group name',
+        menu_need_url: 'Enter a link starting with http:// or https://',
+        menu_builtin_page: 'Built-in page',
+        menu_unsupported: 'Not available here; kept for the other app',
+        menu_artifact_search: 'Search artifacts',
+        menu_artifact_empty: 'No artifacts found',
+        menu_already_added: 'Already in the menu',
+        menu_page_missing: 'This item is no longer in the menu',
+        menu_file_missing: 'The file no longer exists',
+        menu_open_external: 'Open in new tab',
+        menu_back_chat: 'Back to chat',
+        menu_add_to_menu: 'Add to menu',
+        artifacts_view_in: 'View in artifacts', artifacts_untitled: 'Untitled chat',
+        artifacts_load_failed: 'Failed to load', artifacts_retry: 'Retry',
+        artifacts_meta_session: 'Chat', artifacts_meta_size: 'Size',
+        sidebar_collapse: 'Collapse sidebar', sidebar_expand: 'Expand sidebar',
         ws_default_workspace: 'Default', ws_sel_title: 'Select workspace',
         ws_sel_default_hint: 'Use the default workspace (~/cow)', ws_sel_recents: 'Recent',
         ws_sel_open: 'Open project…', ws_sel_new: 'New project', ws_sel_new_placeholder: 'Project name',
@@ -1691,7 +1879,8 @@ const I18N = {
         ws_sel_name_required: 'Please enter a project name', ws_sel_name_no_slash: 'Project name must not contain / or \\',
         ws_sel_open_here: 'Open this folder', ws_sel_dblclick_hint: 'Double-click to enter, single-click to select',
         ws_sel_no_subdirs: 'No sub-folders here', ws_sel_drives: 'This PC',
-        ws_open_external: 'Open in new tab', ws_download: 'Download', ws_copy_path: 'Copy path',
+        ws_open_external: 'Open in new tab', ws_download: 'Download',
+        ws_reveal: 'Show in folder', ws_reveal_failed: 'Could not open the folder',
         ws_close: 'Close', ws_refresh: 'Refresh', ws_preview: 'Preview',
         ws_search_placeholder: 'Search files',
         ws_preview_empty: 'Select a file to preview',
@@ -1823,6 +2012,9 @@ const I18N = {
         update_step_restart: 'Restarting the service',
         update_step_starting: 'Preparing the update',
         update_step_done: 'Done',
+        mermaid_code: 'Code',
+        mermaid_preview: 'Preview',
+        mermaid_preview_failed: 'Diagram could not be rendered',
     }
 };
 
@@ -1886,6 +2078,7 @@ function applyI18n() {
     });
     installCfgTipPortal();
     installContextUsagePopover();
+    if (typeof syncSidebarTips === 'function') syncSidebarTips();
     
     // Clear any status messages when language changes
     document.querySelectorAll('[id$="-status"]').forEach(el => {
@@ -2037,6 +2230,7 @@ function rerenderDynamicViews() {
         renderAgentsGrid();
         if (selectedAdminAgentId) renderAgentDetail();
     }
+    if (currentView === 'artifacts') rerenderArtifactsView();
 }
 
 // Floating tooltip portal for [data-tip-key] elements. Tooltip nodes are
@@ -2063,12 +2257,19 @@ function installCfgTipPortal() {
         _cfgTipPortalEl.style.top = '0px';
         _cfgTipPortalEl.classList.add('show');
         const tipRect = _cfgTipPortalEl.getBoundingClientRect();
-        let left = rect.left + rect.width / 2 - tipRect.width / 2;
-        // Clamp horizontally to the viewport with an 8px gutter.
-        left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
-        // Default above the target; place below when data-tooltip-pos="bottom".
-        const below = target.getAttribute('data-tooltip-pos') === 'bottom';
-        const top = below ? rect.bottom + 6 : rect.top - tipRect.height - 6;
+        const pos = target.getAttribute('data-tooltip-pos');
+        let left;
+        let top;
+        if (pos === 'right') {
+            left = rect.right + 10;
+            top = rect.top + rect.height / 2 - tipRect.height / 2;
+        } else {
+            left = rect.left + rect.width / 2 - tipRect.width / 2;
+            // Clamp horizontally to the viewport with an 8px gutter.
+            left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
+            // Default above the target; place below when data-tooltip-pos="bottom".
+            top = pos === 'bottom' ? rect.bottom + 6 : rect.top - tipRect.height - 6;
+        }
         _cfgTipPortalEl.style.left = left + 'px';
         _cfgTipPortalEl.style.top = top + 'px';
     };
@@ -2088,8 +2289,10 @@ function installCfgTipPortal() {
         const target = e.target.closest(_tipSel);
         if (target) hideTip();
     });
-    // Hide on scroll/resize so the tooltip doesn't drift away from its anchor.
+    // Hide on scroll/resize so the tooltip doesn't drift away from its anchor,
+    // and on press: a click may hide or move the anchor, so no mouseout follows.
     window.addEventListener('scroll', hideTip, true);
     window.addEventListener('resize', hideTip);
+    document.addEventListener('pointerdown', hideTip, true);
 }
 

@@ -13,6 +13,7 @@ import re
 from typing import Any, Optional
 from urllib.parse import urlparse
 
+from common.atomic_write import write_text_atomic
 from common.log import logger
 
 
@@ -183,7 +184,7 @@ def mcp_config_path(workspace: Optional[str] = None) -> str:
 
 def _read_mcp_file(path: str):
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, "r", encoding="utf-8-sig") as handle:
             data = json.load(handle)
     except json.JSONDecodeError as exc:
         raise McpConfigError(f"mcp.json is not valid JSON: {exc}") from exc
@@ -263,11 +264,7 @@ def save_servers(workspace: Optional[str], servers: list) -> list:
         if "mcpServers" in current or "mcp_servers" in current:
             payload = {k: v for k, v in current.items() if k not in ("mcpServers", "mcp_servers")}
     payload["mcpServers"] = {entry["name"]: _persistable(entry) for entry in normalized}
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, ensure_ascii=False)
-        handle.write("\n")
-    os.replace(tmp, path)
+    write_text_atomic(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
     logger.info("[MCP] Wrote %s (%s server(s))", path, len(normalized))
     return normalized
 

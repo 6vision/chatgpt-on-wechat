@@ -8,6 +8,8 @@ import types
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 
 if "dingtalk_stream" not in sys.modules:
     _ds = types.ModuleType("dingtalk_stream")
@@ -164,6 +166,22 @@ def test_sanitize_keeps_angle_bracket_text_that_is_not_html():
 def test_sanitize_still_strips_html_with_attributes_and_case():
     out = sanitize_dingtalk_markdown('<DIV class="x">hi</DIV> <span style="c">there</span>')
     assert out == "hi there"
+
+
+@pytest.mark.parametrize(
+    "fenced",
+    [
+        '~~~html\n<div class="card">Hi</div>\n~~~',
+        "```c#\n/// <summary>Adds two numbers.</summary>\nint Add(int a, int b) => a + b;\n```",
+        '```html title="card.html"\n<div>Hi</div>\n```',
+        "````markdown\n```html\n<b>bold</b>\n```\n````",
+        "~~~python\ndef a():\n    pass\n\n\n\ndef b():\n    pass\n~~~",
+    ],
+)
+def test_sanitize_keeps_every_fenced_code_block_untouched(fenced):
+    # ~~~ fences, info strings outside [\w+-] and a ```` fence around a ```
+    # example are code too: their HTML and blank lines must survive.
+    assert sanitize_dingtalk_markdown(f"Example:\n\n{fenced}\n\nDone") == f"Example:\n\n{fenced}\n\nDone"
 
 
 def test_sanitize_empty_and_none():

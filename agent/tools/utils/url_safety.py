@@ -138,8 +138,12 @@ def safe_get(url: str, timeout: float = 30, headers: dict = None,
 
         # Resolve the redirect target relative to the current URL, then
         # re-validate it before following.
-        current = requests.compat.urljoin(current, location)
-        validate_url_safe(current)
-        response.close()
+        try:
+            current = requests.compat.urljoin(current, location)
+            validate_url_safe(current)
+        finally:
+            # A rejected redirect is never returned to the caller, so it must
+            # release its connection here even when resolution/validation fails.
+            response.close()
 
     raise ValueError(f"Too many redirects (>{max_redirects})")

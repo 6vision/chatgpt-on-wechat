@@ -28,7 +28,7 @@ from bridge.reply import Reply, ReplyType
 from channel.chat_channel import ChatChannel, check_prefix
 from channel.web.core import providers
 from channel.web.core._common import (
-    _addressed_agent_id, _build_artifact_payload, _cancel_reply_text,
+    _addressed_agent_id, _build_artifact_payload, _build_preview_url, _cancel_reply_text,
     _desktop_token_matches, _first_value, _get_upload_dir, _get_workspace_root,
     IMAGE_EXTENSIONS, _is_loopback_request, _is_password_enabled,
     _is_within_directory, _log_bind_failure, MAX_LOCAL_IMPORT_BYTES,
@@ -556,6 +556,15 @@ class WebChannel(ChatChannel):
                 # the file directly (Finder / default app) instead of the browser.
                 if not is_remote and file_path:
                     payload["abs_path"] = file_path
+                    # Lets the web console show the file as a regular file card.
+                    if data.get("kind"):
+                        payload.update({
+                            "rel_path": data.get("rel_path") or file_name,
+                            "kind": data["kind"],
+                            "previewable": bool(data.get("previewable")),
+                            "size": data.get("size", 0),
+                            "preview_url": _build_preview_url(file_path),
+                        })
                 publish(payload)
 
             elif event_type == "artifact":

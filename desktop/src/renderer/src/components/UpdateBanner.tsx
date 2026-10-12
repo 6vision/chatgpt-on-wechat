@@ -118,13 +118,13 @@ const UpdateBanner: React.FC = () => {
               {version && (
                 <div className="flex items-center justify-between gap-2 text-xs">
                   <span className="text-content-tertiary">v{version}</span>
-                  <button
+                  {!product.links?.hideReleaseNotes && <button
                     onClick={() => window.open(releaseNotesUrl(version), '_blank', 'noopener,noreferrer')}
                     className="inline-flex items-center gap-1 text-content-tertiary hover:text-content-secondary hover:underline cursor-pointer transition-colors"
                   >
                     <FileText size={12} />
                     {t('update_release_notes')}
-                  </button>
+                  </button>}
                 </div>
               )}
               <button

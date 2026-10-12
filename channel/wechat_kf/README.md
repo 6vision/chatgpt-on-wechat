@@ -5,7 +5,7 @@
 > - 自建应用：**面向企业内部成员**（员工通过企业微信 App 与机器人对话）。
 > - 微信客服：**面向外部微信用户**（普通微信用户通过链接/二维码进入对话）。
 >
-> 但底层都基于"企微自建应用"——本通道是**通过把一个企微自建应用绑定到微信客服账号**来实现 AI 接管对外咨询，详见 [LinkAI 微信客服接入文档](https://docs.link-ai.tech/platform/link-app/wechat-customer-service)。
+> 但底层都基于"企微自建应用"——本通道是**通过把一个企微自建应用绑定到微信客服账号**来实现 AI 接管对外咨询，详见 [LinkAI 微信客服接入文档](https://docs.link-ai.tech/platform/link-app/wechat-customer-service?utm_source=cowagent&utm_medium=readme&utm_campaign=channel-wechat-kf)。
 
 ## 一、接入流程概览
 
@@ -110,6 +110,6 @@ python app.py
 
 ## 六、参考文档
 
-- [LinkAI 微信客服接入文档](https://docs.link-ai.tech/platform/link-app/wechat-customer-service)
+- [LinkAI 微信客服接入文档](https://docs.link-ai.tech/platform/link-app/wechat-customer-service?utm_source=cowagent&utm_medium=readme&utm_campaign=channel-wechat-kf)
 - [企业微信开放接口 - 微信客服 - 接收消息](https://developer.work.weixin.qq.com/document/path/94670)
 - [企业微信开放接口 - 微信客服 - 发送消息](https://developer.work.weixin.qq.com/document/path/95122)

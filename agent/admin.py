@@ -74,6 +74,35 @@ def _is_strictly_within(inner: Path, outer: Path) -> bool:
     return True
 
 
+# Conversation tables that carry an agent_id column.
+_AGENT_SCOPED_TABLES = ("messages", "runs", "artifacts", "sessions")
+
+
+def _forget_agent_conversations(agent_id: str):
+    """Erase a deleted Agent's rows from the shared conversation file.
+    
+    Conversations live in the default Agent's index.db, scoped by agent_id, so
+    they outlive the deleted workspace. Returns the number of rows removed and
+    raises if the sweep could not run, so the caller can report it.
+    """
+    if not agent_id:
+        return 0
+
+    from agent.memory.conversation_store import get_conversation_store
+
+    # Rows are matched by agent_id; the default Agent's handle is the shared file itself.
+    conn = get_conversation_store()._connect()
+    removed = 0
+    try:
+        with conn:
+            for table in _AGENT_SCOPED_TABLES:
+                cursor = conn.execute(f"DELETE FROM {table} WHERE agent_id = ?", (agent_id,))
+                removed += cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+    finally:
+        conn.close()
+    return removed
+
+
 class AgentAdminService:
     """Manage profiles without ever deleting an agent workspace implicitly."""
 
@@ -92,9 +121,6 @@ class AgentAdminService:
             return team.resolve(self._settings)
         if not self.config_path.exists():
             return {}
-        # utf-8-sig tolerates a UTF-8 BOM (e.g. config.json edited with Windows
-        # Notepad / PowerShell). Plain utf-8 raises "Unexpected UTF-8 BOM" here,
-        # which surfaces as a failed /api/agents snapshot and an empty team page.
         with self.config_path.open("r", encoding="utf-8-sig") as handle:
             data = json.load(handle)
         if not isinstance(data, dict):
@@ -630,6 +656,23 @@ class AgentAdminService:
             except Exception as e:
                 logger.warning(f"[AgentAdmin] project store cleanup after delete failed: {e}")
 
+            # The avatar lives outside the workspace; a reused id must not inherit it.
+            try:
+                from channel.web.api.agents import delete_avatar_files
+
+                delete_avatar_files(agent_id)
+            except Exception as e:
+                logger.warning(f"[AgentAdmin] avatar cleanup after delete failed: {e}")
+
+            # Conversations live in the default Agent's shared index.db, outside the
+            # deleted workspace, so a recreated Agent with the same id would inherit them.
+            try:
+                _forget_agent_conversations(agent_id)
+            except Exception as e:
+                logger.warning(
+                    f"[AgentAdmin] conversation cleanup after delete failed: {e}"
+                )
+
             return {"id": agent_id, "deleted": True}
 
     def knowledge_mode(self, agent_id: str) -> str:
@@ -813,7 +856,13 @@ class AgentAdminService:
     def read_core_file(self, agent_id: str, filename: str) -> Dict:
         with self._lock:
             path = self._core_path(agent_id, filename)
-            raw = path.read_bytes() if path.exists() else b""
+            if path.exists():
+                with path.open("rb") as handle:
+                    raw = handle.read(MAX_CORE_FILE_BYTES + 1)
+                if len(raw) > MAX_CORE_FILE_BYTES:
+                    raise AgentAdminError("core file exceeds 1 MiB")
+            else:
+                raw = b""
             return {
                 "filename": filename,
                 "content": raw.decode("utf-8"),

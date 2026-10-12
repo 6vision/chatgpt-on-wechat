@@ -11,14 +11,24 @@ outright would be worse than the problem: tests would inherit the developer's
 model, language and channel settings, and start passing or failing on them.
 """
 
+import atexit
 import os
 import re
+import shutil
 import sys
 import tempfile
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+# Redirecting agent_workspace is not enough: ~/.cow/.env, a restore target
+# without agent_workspace and every other "~" path resolve through the home
+# directory itself. Set before any test module is imported.
+_FAKE_HOME = tempfile.mkdtemp(prefix="cow-tests-home-")
+for _name in ("HOME", "USERPROFILE"):
+    os.environ[_name] = _FAKE_HOME
+atexit.register(shutil.rmtree, _FAKE_HOME, ignore_errors=True)
 
 _WEB_DIR = os.path.join(os.path.dirname(__file__), "..", "channel", "web")
 

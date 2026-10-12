@@ -10,7 +10,7 @@ from common.atomic_write import write_json_atomic
 from common.log import logger
 from common.singleton import singleton
 from common.sorted_dict import SortedDict
-from config import remove_plugin_config, write_plugin_config, get_data_root, get_resource_root
+from config import write_plugin_config, get_data_root, get_resource_root
 
 from .event import *
 
@@ -181,7 +181,7 @@ class PluginManager:
     def scan_plugins(self):
         logger.debug("Scanning plugins ...")
         plugins_dir = _plugins_resource_dir()
-        raws = [self.plugins[name] for name in self.plugins]
+        raws = {name: self.plugins[name] for name in self.plugins}
         for plugin_name in os.listdir(plugins_dir):
             plugin_path = os.path.join(plugins_dir, plugin_name)
             if os.path.isdir(plugin_path):
@@ -207,8 +207,9 @@ class PluginManager:
                         logger.warn("Failed to import plugin %s: %s" % (plugin_name, e))
                         continue
         pconf = self.pconf
-        news = [self.plugins[name] for name in self.plugins]
-        new_plugins = list(set(news) - set(raws))
+        # Compare by registry key: a reload registers a new class object.
+        new_plugins = [self.plugins[name] for name in self.plugins
+                       if name not in raws]
         modified = False
         for name, plugincls in self.plugins.items():
             rawname = plugincls.name
@@ -251,13 +252,15 @@ class PluginManager:
                 for event in instance.handlers:
                     if event not in self.listening_plugins:
                         self.listening_plugins[event] = []
-                    self.listening_plugins[event].append(name)
+                    if name not in self.listening_plugins[event]:
+                        self.listening_plugins[event].append(name)
         self.refresh_order()
         return failed_plugins
 
     def reload_plugin(self, name: str):
         name = name.upper()
-        remove_plugin_config(name)
+        # Keep the loaded config: a plugin only falls back to its own config.json,
+        # so settings from plugins/config.json would be lost. #reconf reloads config.
         if name in self.instances:
             for event in self.listening_plugins:
                 if name in self.listening_plugins[event]:

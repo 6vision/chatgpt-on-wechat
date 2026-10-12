@@ -7,11 +7,11 @@ import random
 from typing import Optional
 
 import dashscope
-import requests
 from dashscope import MultiModalConversation
 
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common.media_download import MAX_FILE_BYTES as _MEDIA_MAX_BYTES, download_to_file as _media_download_to_file
 from common.tmp_dir import TmpDir
 from config import conf
 from voice import audio_convert
@@ -128,10 +128,7 @@ class DashScopeVoice(Voice):
             if ext not in (".mp3", ".wav", ".m4a", ".aac", ".opus"):
                 ext = ".wav"
             dst = os.path.join(tmp_dir, f"dashscope_tts_{ts}_{random.randint(0, 9999)}{ext}")
-            resp = requests.get(url, timeout=60)
-            resp.raise_for_status()
-            with open(dst, "wb") as f:
-                f.write(resp.content)
+            _media_download_to_file(url, dst, _MEDIA_MAX_BYTES, timeout=60)
             return dst
         except Exception as e:
             logger.error(f"[DashScopeVoice] download audio failed: {e}")

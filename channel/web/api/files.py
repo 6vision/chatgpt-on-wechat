@@ -15,6 +15,8 @@ import mimetypes
 import os
 import random
 import re
+import subprocess
+import sys
 
 import web
 
@@ -23,9 +25,11 @@ import web
 # reply raised NameError instead of being checked.
 from bridge.reply import ReplyType
 from channel.web.core._common import (
+    _can_reveal_in_file_manager,
     _is_path_allowed,
     _get_preview_secret,
     _get_upload_dir,
+    _is_within_directory,
     _raw_web_input,
     _request_agent_id,
     _require_auth,
@@ -33,6 +37,7 @@ from channel.web.core._common import (
 )
 from channel.web.core.channel import WebChannel
 from common.log import logger
+from common.utils import constant_time_equals
 
 
 def _decode_dir_token(token: str) -> str:
@@ -46,7 +51,7 @@ def _decode_dir_token(token: str) -> str:
     except Exception:
         raise ValueError("Malformed preview token")
     expected = hmac.new(_get_preview_secret(), real.encode("utf-8"), hashlib.sha256).hexdigest()[:16]
-    if not hmac.compare_digest(sig, expected):
+    if not constant_time_equals(sig, expected):
         raise ValueError("Bad preview token signature")
     return real
 
@@ -166,8 +171,8 @@ class UploadsHandler:
         try:
             params = web.input(agent_id='')
             upload_dir = _get_upload_dir(_request_agent_id(params))
-            full_path = os.path.normpath(os.path.join(upload_dir, file_name))
-            if not os.path.abspath(full_path).startswith(os.path.abspath(upload_dir)):
+            full_path = os.path.realpath(os.path.join(upload_dir, file_name))
+            if not _is_within_directory(os.path.realpath(upload_dir), full_path):
                 raise web.notfound()
             if not os.path.isfile(full_path):
                 raise web.notfound()
@@ -215,6 +220,47 @@ class FileServeHandler:
             raise web.notfound()
 
 
+class FileRevealHandler:
+    """POST /api/file/reveal {path}: show a file in the system file manager.
+
+    Local-only (see _can_reveal_in_file_manager), and confined to the same
+    roots /api/file serves from.
+    """
+
+    def POST(self):
+        _require_auth()
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        try:
+            if not _can_reveal_in_file_manager():
+                return json.dumps({"status": "error", "message": "Only available on this machine"})
+            data = json.loads(web.data() or b"{}")
+            path = str(data.get("path") or "")
+            if not path or not os.path.isabs(path):
+                return json.dumps({"status": "error", "message": "path must be absolute"})
+            path = os.path.realpath(path)
+            if not _is_path_allowed(path) or not os.path.exists(path):
+                return json.dumps({"status": "error", "message": "File not found"})
+            _reveal_path(path)
+            return json.dumps({"status": "success"})
+        except Exception as e:
+            logger.error(f"[WebChannel] Reveal in file manager failed: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+
+def _reveal_path(path: str) -> None:
+    """Open the file manager on ``path``, selecting it where the OS can."""
+    quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", "-R", path], **quiet)
+    elif sys.platform == "win32":
+        # explorer wants the quotes inside its own /select, argument, which a
+        # list argv would wrap the wrong way. Windows paths can't contain '"'.
+        subprocess.Popen(f'explorer /select,"{path}"', **quiet)
+    else:
+        target = path if os.path.isdir(path) else os.path.dirname(path)
+        subprocess.Popen(["xdg-open", target], start_new_session=True, **quiet)
+
+
 # Injected into previewed HTML so the iframe's scrollbars match the app chrome
 # instead of falling back to the platform default (wide, opaque track).
 # Placed at the top of <head> so a page that styles its own scrollbars still wins.
@@ -231,18 +277,52 @@ _PREVIEW_SCROLLBAR_CSS = (
     "</style>"
 )
 
+# Injected ahead of the page's own scripts, so a framed page scrolls only
+# itself. A native scrollIntoView() or focus() inside an iframe also scrolls
+# every scrollable ancestor of the frame in the host page: a page that
+# brings "today" into view on load would drag the artifacts list, or the
+# chat, along with it. Here both scroll the frame's own containers and
+# viewport, and nothing above it. Opened as a tab, the page keeps the natives.
+_PREVIEW_SCROLL_GUARD_JS = """<script>(function(){
+if(window.top===window)return;
+var E=Element.prototype,root=function(){return document.scrollingElement||document.documentElement;};
+function delta(start,size,viewStart,viewSize,mode){
+if(mode==='start')return start-viewStart;
+if(mode==='end')return start+size-viewStart-viewSize;
+if(mode==='center')return start+size/2-viewStart-viewSize/2;
+if(start<viewStart)return start-viewStart;
+if(start+size>viewStart+viewSize)return Math.min(start-viewStart,start+size-viewStart-viewSize);
+return 0;}
+function scrollable(n){var s=getComputedStyle(n);return /auto|scroll|overlay/.test(s.overflowX+s.overflowY)&&(n.scrollHeight>n.clientHeight||n.scrollWidth>n.clientWidth);}
+E.scrollIntoView=function(arg){
+var o=arg===false?{block:'end'}:(arg&&typeof arg==='object'?arg:{block:'start'});
+var block=o.block||'start',inline=o.inline||'nearest',behavior=o.behavior||'auto',top=root();
+for(var n=this.parentElement;n;n=n.parentElement){
+var isRoot=n===top;if(!isRoot&&!scrollable(n))continue;
+var r=this.getBoundingClientRect(),v=isRoot?{top:0,left:0}:n.getBoundingClientRect();
+var vt=v.top+(isRoot?0:n.clientTop),vl=v.left+(isRoot?0:n.clientLeft);
+var dy=delta(r.top,r.height,vt,isRoot?innerHeight:n.clientHeight,block);
+var dx=delta(r.left,r.width,vl,isRoot?innerWidth:n.clientWidth,inline);
+if(dx||dy)(isRoot?window:n).scrollBy({top:dy,left:dx,behavior:behavior});
+if(isRoot)break;}};
+var focus=HTMLElement.prototype.focus;
+HTMLElement.prototype.focus=function(o){
+var keep=o&&o.preventScroll;focus.call(this,Object.assign({},o,{preventScroll:true}));
+if(!keep&&this.isConnected)this.scrollIntoView({block:'nearest'});};
+})();</script>"""
+
 _HEAD_OPEN_RE = re.compile(rb"<head\b[^>]*>", re.IGNORECASE)
 _HTML_OPEN_RE = re.compile(rb"<html\b[^>]*>", re.IGNORECASE)
 
 
 def _inject_preview_chrome(raw: bytes) -> bytes:
-    """Insert the scrollbar stylesheet into a previewed HTML document."""
-    css = _PREVIEW_SCROLLBAR_CSS.encode("utf-8")
+    """Insert the scrollbar stylesheet and the scroll guard into a previewed HTML document."""
+    chrome = (_PREVIEW_SCROLLBAR_CSS + _PREVIEW_SCROLL_GUARD_JS).encode("utf-8")
     for pattern in (_HEAD_OPEN_RE, _HTML_OPEN_RE):
         m = pattern.search(raw)
         if m:
-            return raw[: m.end()] + css + raw[m.end():]
-    return css + raw
+            return raw[: m.end()] + chrome + raw[m.end():]
+    return chrome + raw
 
 
 class PreviewHandler:

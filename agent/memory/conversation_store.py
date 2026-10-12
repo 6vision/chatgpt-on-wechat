@@ -125,6 +125,56 @@ CREATE INDEX IF NOT EXISTS idx_runs_task
     ON runs (task_source, task_id);
 """
 
+# Artifacts are auxiliary too: an index of the user-facing files conversations
+# produced, so they can be browsed in one place instead of session by session.
+# One logical row per (agent_id, path), kept unique by record_artifacts inside
+# its write transaction rather than by a constraint. Columns carry defaults
+# but no NOT NULL / UNIQUE either: SQLite can only lift those by rebuilding
+# the table, while adding a column or an index is cheap. Readers coalesce.
+_ARTIFACTS_DDL = """
+CREATE TABLE IF NOT EXISTS artifacts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id    TEXT    DEFAULT '',
+    session_id  TEXT    DEFAULT '',
+    -- seq of the visible user message that opened the turn which last
+    -- produced the file: what the history view scrolls to.
+    turn_seq    INTEGER,
+    path        TEXT    DEFAULT '',
+    kind        TEXT    DEFAULT 'file',
+    size        INTEGER DEFAULT 0,
+    -- What produced it (write / edit / bash / send / subagent / embed / manual).
+    source      TEXT    DEFAULT '',
+    created_at  INTEGER DEFAULT 0,
+    updated_at  INTEGER DEFAULT 0,
+    -- JSON object for metadata that doesn't warrant a column of its own.
+    extras      TEXT    DEFAULT '',
+    -- When the user pinned it to the top of the timeline; 0 = not pinned.
+    pinned_at   INTEGER DEFAULT 0,
+    -- Name the user gave it in the view; '' = the file name. The file on disk
+    -- keeps its name, since conversations and other files refer to the path.
+    title       TEXT    DEFAULT ''
+);
+"""
+
+# Columns added after the table first shipped. Append new columns here too:
+# CREATE TABLE IF NOT EXISTS never adds them to an existing table.
+_ARTIFACTS_ADDED_COLUMNS = (
+    ("extras", "TEXT DEFAULT ''"),
+    ("pinned_at", "INTEGER DEFAULT 0"),
+    ("title", "TEXT DEFAULT ''"),
+)
+
+_ARTIFACTS_INDEX_DDL = """
+CREATE INDEX IF NOT EXISTS idx_artifacts_recent
+    ON artifacts (agent_id, updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_artifacts_updated
+    ON artifacts (updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_artifacts_path
+    ON artifacts (agent_id, path);
+"""
+
 # Migration: add channel_type column to existing databases that predate it.
 _MIGRATION_ADD_CHANNEL_TYPE = """
 ALTER TABLE sessions ADD COLUMN channel_type TEXT NOT NULL DEFAULT '';
@@ -534,6 +584,29 @@ def _group_into_display_turns(
     return turns
 
 
+# Ceiling for a page requested from outside (HTTP or a remote caller).
+MAX_PAGE_SIZE = 200
+
+
+def page_window(page: Any, page_size: Any, default_page_size: int,
+                 cap: Optional[int] = MAX_PAGE_SIZE) -> tuple:
+    """Clamp an untrusted (page, page_size) pair into a usable window.
+
+    A negative page_size would reach SQLite as LIMIT -1 ("no limit") and 0
+    would divide by zero; ``cap=None`` keeps only those lower bounds.
+    """
+    try:
+        page = int(page)
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = int(page_size)
+    except (TypeError, ValueError):
+        page_size = default_page_size
+    page_size = max(1, page_size)
+    return max(1, page), min(page_size, cap) if cap else page_size
+
+
 class ConversationStore:
     """
     SQLite-backed store for per-session conversation history.
@@ -558,6 +631,7 @@ class ConversationStore:
         # bookkeeping degrades to a no-op so it can never break a turn or a
         # history query -- runs are auxiliary to conversation storage.
         self._runs_ready = False
+        self._artifacts_ready = False
         self._init_db()
 
     # ------------------------------------------------------------------
@@ -1645,6 +1719,8 @@ class ConversationStore:
         Pages are numbered from 1 (most recent).  Messages within a page are
         returned in chronological order.
 
+        ``page`` and ``page_size`` are clamped to ``[1, MAX_PAGE_SIZE]``.
+
         Returns:
             {
                 "messages": [
@@ -1662,7 +1738,7 @@ class ConversationStore:
                 "has_more": bool,
             }
         """
-        page = max(1, page)
+        page, page_size = page_window(page, page_size, 20)
         with self._lock:
             conn = self._connect()
             try:
@@ -1817,6 +1893,9 @@ class ConversationStore:
         the rows on the same page, so a pin still reaches the top of the list
         when the conversation is old enough to sit several pages down.
 
+        ``page`` and ``page_size`` are only bounded below: the cross-Agent
+        listing asks each store for ``page * page_size`` rows at once.
+
         Returns:
             {
                 "sessions": [{session_id, title, created_at, last_active,
@@ -1827,7 +1906,7 @@ class ConversationStore:
                 "has_more": bool,
             }
         """
-        page = max(1, page)
+        page, page_size = page_window(page, page_size, 50, cap=None)
         with self._lock:
             conn = self._connect()
             try:
@@ -1895,6 +1974,38 @@ class ConversationStore:
                         (title, self._agent_id, session_id),
                     )
                     return cur.rowcount > 0
+            finally:
+                conn.close()
+
+    def upsert_title(self, session_id: str, title: str, channel_type: str = "") -> bool:
+        """Set a session's title, creating its record first when missing.
+
+        A client may title a brand-new chat before the agent has persisted its
+        first turn; a plain rename would hit no row and lose the title. The
+        record created here is the same one ``append_messages`` would create,
+        so the later write just fills it in. Returns True if the row existed.
+        """
+        now = int(time.time())
+        with self._lock:
+            conn = self._connect()
+            try:
+                with conn:
+                    aid = self._agent_id
+                    inserted = conn.execute(
+                        """
+                        INSERT OR IGNORE INTO sessions
+                            (agent_id, session_id, channel_type, title, created_at, last_active, msg_count)
+                        VALUES (?, ?, ?, ?, ?, ?, 0)
+                        """,
+                        (aid, session_id, channel_type, title, now, now),
+                    ).rowcount
+                    if inserted:
+                        return False
+                    conn.execute(
+                        "UPDATE sessions SET title = ? WHERE agent_id = ? AND session_id = ?",
+                        (title, aid, session_id),
+                    )
+                    return True
             finally:
                 conn.close()
 
@@ -1966,6 +2077,223 @@ class ConversationStore:
                 conn.close()
 
     # ------------------------------------------------------------------
+    # Artifacts
+    # ------------------------------------------------------------------
+
+    def record_artifacts(
+        self,
+        session_id: str,
+        items: List[Dict[str, Any]],
+        turn_seq: Optional[int] = None,
+    ) -> int:
+        """Index the files one stretch of a turn produced.
+
+        Each item needs ``path`` (absolute) and may carry ``kind``, ``size`` and
+        ``source``. A path already indexed for this Agent is moved to the top
+        and re-pointed at the turn, so the index always leads to the turn that
+        last produced the file. ``turn_seq`` defaults to the session's latest
+        turn. Returns the number of items written.
+        """
+        if not items or not session_id or not self._artifacts_ready:
+            return 0
+        now = int(time.time())
+        with self._lock:
+            conn = self._connect()
+            try:
+                with conn:
+                    aid = self._agent_id
+                    if turn_seq is None:
+                        turn_seq = self._latest_visible_user_seq(conn, session_id)
+                    written = 0
+                    for item in items:
+                        path = str(item.get("path") or "")
+                        if not path:
+                            continue
+                        kind = str(item.get("kind") or "file")
+                        size = int(item.get("size") or 0)
+                        source = str(item.get("source") or "")
+                        row = conn.execute(
+                            "SELECT id FROM artifacts WHERE agent_id = ? AND path = ? "
+                            "ORDER BY id DESC LIMIT 1",
+                            (aid, path),
+                        ).fetchone()
+                        if row:
+                            conn.execute(
+                                """
+                                UPDATE artifacts
+                                SET session_id = ?, turn_seq = ?, kind = ?, size = ?,
+                                    source = ?, updated_at = ?
+                                WHERE id = ?
+                                """,
+                                (session_id, turn_seq, kind, size, source, now, row[0]),
+                            )
+                        else:
+                            conn.execute(
+                                """
+                                INSERT INTO artifacts
+                                    (agent_id, session_id, turn_seq, path, kind, size,
+                                     source, created_at, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """,
+                                (aid, session_id, turn_seq, path, kind, size, source, now, now),
+                            )
+                        written += 1
+                    return written
+            finally:
+                conn.close()
+
+    def list_artifacts(
+        self,
+        agent_ids: Optional[List[str]] = None,
+        kinds: Optional[List[str]] = None,
+        query: str = "",
+        path: str = "",
+        offset: int = 0,
+        limit: int = 60,
+    ) -> Dict[str, Any]:
+        """Newest-first page of indexed artifacts, with their session's title.
+
+        Pinned rows come first, most recently pinned on top. ``agent_ids``
+        widens the scope from this handle's Agent to the stored ids given
+        (``""`` is the default Agent): every Agent shares the file, so one
+        handle can read them all. ``path`` narrows to one exact file, and
+        ``query`` matches the path or the given title.
+        """
+        if not self._artifacts_ready:
+            return {"items": [], "has_more": False}
+        scope = list(agent_ids) if agent_ids is not None else [self._agent_id]
+        if not scope:
+            return {"items": [], "has_more": False}
+        where: List[str] = ["a.agent_id IN (%s)" % ",".join("?" * len(scope))]
+        args: List[Any] = list(scope)
+        if kinds:
+            where.append("a.kind IN (%s)" % ",".join("?" * len(kinds)))
+            args.extend(kinds)
+        if path:
+            where.append("a.path = ?")
+            args.append(path)
+        if query:
+            escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            where.append("(a.path LIKE ? ESCAPE '\\' OR a.title LIKE ? ESCAPE '\\')")
+            args.extend([f"%{escaped}%"] * 2)
+        clause = "WHERE " + " AND ".join(where)
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT a.id, COALESCE(a.agent_id, ''), COALESCE(a.session_id, ''),
+                           a.turn_seq, a.path, COALESCE(a.kind, 'file'),
+                           COALESCE(a.size, 0), COALESCE(a.source, ''),
+                           COALESCE(a.created_at, 0), COALESCE(a.updated_at, 0),
+                           s.title, s.channel_type, COALESCE(a.pinned_at, 0) AS pin,
+                           COALESCE(a.title, '')
+                    FROM artifacts a
+                    LEFT JOIN sessions s
+                        ON s.agent_id = a.agent_id AND s.session_id = a.session_id
+                    {clause}
+                    ORDER BY pin DESC, a.updated_at DESC, a.id DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (*args, limit + 1, offset),
+                ).fetchall()
+            finally:
+                conn.close()
+        items = [
+            {
+                "id": row[0],
+                "agent_id": row[1],
+                "session_id": row[2],
+                "turn_seq": row[3],
+                "path": row[4],
+                "kind": row[5],
+                "size": row[6],
+                "source": row[7],
+                "created_at": row[8],
+                "updated_at": row[9],
+                "session_title": row[10],
+                "session_channel": row[11],
+                "session_exists": row[11] is not None,
+                "pinned_at": row[12],
+                "title": row[13],
+            }
+            for row in rows[:limit]
+        ]
+        return {"items": items, "has_more": len(rows) > limit}
+
+    def set_artifact_title(self, artifact_id: int, title: str) -> bool:
+        """Name one row for the view; an empty title falls back to the file name."""
+        if not self._artifacts_ready:
+            return False
+        with self._lock:
+            conn = self._connect()
+            try:
+                with conn:
+                    cur = conn.execute(
+                        "UPDATE artifacts SET title = ? WHERE agent_id = ? AND id = ?",
+                        ((title or "").strip(), self._agent_id, int(artifact_id)),
+                    )
+                    return cur.rowcount > 0
+            finally:
+                conn.close()
+
+    def set_artifact_pinned(self, artifact_id: int, pinned: bool) -> Optional[int]:
+        """Pin one row to the top of the timeline, or unpin it.
+
+        Returns the stored ``pinned_at`` (0 when unpinned), or None when the row
+        is not this Agent's.
+        """
+        if not self._artifacts_ready:
+            return None
+        pinned_at = int(time.time()) if pinned else 0
+        with self._lock:
+            conn = self._connect()
+            try:
+                with conn:
+                    cur = conn.execute(
+                        "UPDATE artifacts SET pinned_at = ? WHERE agent_id = ? AND id = ?",
+                        (pinned_at, self._agent_id, int(artifact_id)),
+                    )
+                    return pinned_at if cur.rowcount > 0 else None
+            finally:
+                conn.close()
+
+    def delete_artifact(self, artifact_id: int) -> bool:
+        """Drop one row from the index. The file itself is left alone."""
+        if not self._artifacts_ready:
+            return False
+        with self._lock:
+            conn = self._connect()
+            try:
+                with conn:
+                    cur = conn.execute(
+                        "DELETE FROM artifacts WHERE agent_id = ? AND id = ?",
+                        (self._agent_id, int(artifact_id)),
+                    )
+                    return cur.rowcount > 0
+            finally:
+                conn.close()
+
+    def _latest_visible_user_seq(self, conn: sqlite3.Connection, session_id: str) -> Optional[int]:
+        """seq of the newest real user message in a session, if any."""
+        rows = conn.execute(
+            "SELECT seq, content FROM messages "
+            "WHERE agent_id = ? AND session_id = ? AND role = 'user' "
+            "ORDER BY seq DESC LIMIT 50",
+            (self._agent_id, session_id),
+        ).fetchall()
+        for seq, raw in rows:
+            try:
+                content = json.loads(raw)
+            except Exception:
+                content = raw
+            if _is_visible_user_message(content):
+                return int(seq)
+        return None
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
@@ -1982,9 +2310,32 @@ class ConversationStore:
             # half-applied upgrade or any other surprise degrades run tracking
             # instead of taking conversation history offline.
             self._init_runs(conn)
+            self._init_artifacts(conn)
         finally:
             conn.close()
         self._schema_identity = self._db_identity()
+
+    def _init_artifacts(self, conn: sqlite3.Connection) -> None:
+        """Create the artifacts index without ever risking the core schema."""
+        try:
+            conn.executescript(_ARTIFACTS_DDL)
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(artifacts)")}
+            for name, decl in _ARTIFACTS_ADDED_COLUMNS:
+                if name not in cols:
+                    conn.execute(f"ALTER TABLE artifacts ADD COLUMN {name} {decl}")
+            conn.executescript(_ARTIFACTS_INDEX_DDL)
+            conn.commit()
+            self._artifacts_ready = True
+        except Exception as e:
+            self._artifacts_ready = False
+            logger.warning(
+                f"[ConversationStore] Artifact index unavailable ({e}); "
+                "conversation history is unaffected"
+            )
+            try:
+                conn.rollback()
+            except Exception:
+                pass
 
     def _init_runs(self, conn: sqlite3.Connection) -> None:
         """Create the runs table without ever risking the core schema."""
@@ -2594,26 +2945,45 @@ def _merge_one_agent(conn: sqlite3.Connection, src_path: str, agent_id: str) -> 
         }
         with conn:
             if "sessions" in src_tables:
+                session_cols = {
+                    row[1] for row in conn.execute("PRAGMA src.table_info(sessions)")
+                }
+                # Secondary workspaces have not passed through _migrate():
+                # opening a store already resolves to the global file. Supply
+                # the same defaults for metadata added by skipped releases.
+                optional_session_cols = ", ".join(
+                    name if name in session_cols else default
+                    for name, default in (
+                        ("channel_type", "''"), ("title", "''"),
+                        ("context_start_seq", "0"),
+                    )
+                )
+                pinned = "pinned" if "pinned" in session_cols else "0"
                 conn.execute(
-                    """
+                    f"""
                     INSERT OR IGNORE INTO sessions
                         (agent_id, session_id, channel_type, title, context_start_seq,
                          created_at, last_active, msg_count, pinned)
-                    SELECT ?, session_id, channel_type, title, context_start_seq,
-                           created_at, last_active, msg_count, pinned
+                    SELECT ?, session_id, {optional_session_cols},
+                           created_at, last_active, msg_count, {pinned}
                     FROM src.sessions
                     """,
                     (agent_id,),
                 )
             if "messages" in src_tables:
+                message_cols = {
+                    row[1] for row in conn.execute("PRAGMA src.table_info(messages)")
+                }
+                extras = "COALESCE(extras, '')" if "extras" in message_cols else "''"
+                run_id = "COALESCE(run_id, '')" if "run_id" in message_cols else "''"
                 # id -> NULL so the global file re-issues AUTOINCREMENT ids and
                 # cross-file ids never collide; dedupe is on (agent_id, session_id, seq).
                 conn.execute(
-                    """
+                    f"""
                     INSERT OR IGNORE INTO messages
                         (agent_id, session_id, seq, role, content, created_at, extras, run_id)
                     SELECT ?, session_id, seq, role, content, created_at,
-                           COALESCE(extras, ''), COALESCE(run_id, '')
+                           {extras}, {run_id}
                     FROM src.messages
                     """,
                     (agent_id,),

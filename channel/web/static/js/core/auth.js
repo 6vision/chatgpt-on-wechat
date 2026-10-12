@@ -144,6 +144,7 @@ window.fetch = function(...args) {
 
 function initApp() {
     applyI18n();
+    menuLoad();
     _applyInputTooltips();
     _restoreSessionPanel();
     refreshWorkspaceSelector();

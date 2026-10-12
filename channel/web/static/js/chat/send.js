@@ -676,6 +676,29 @@ function startSSE(requestId, loadingEl, timestamp, titleInfo, replayItems, resum
                 mediaEl.appendChild(wrapper.firstElementChild || wrapper);
                 scrollChatToBottom();
 
+            } else if (item.type === 'file' && item.file_type === 'video') {
+                ensureBotEl();
+                const wrapper = document.createElement('div');
+                wrapper.innerHTML = _buildVideoHtml(item.content);
+                mediaEl.appendChild(wrapper.firstElementChild || wrapper);
+                scrollChatToBottom();
+
+            } else if (item.type === 'file' && item.abs_path && typeof appendArtifactCard === 'function') {
+                // A local document delivered with `send`: the same card as a
+                // file the agent wrote, so it previews and opens in Artifacts.
+                // A file the turn already produced keeps its one card.
+                ensureBotEl();
+                const name = item.file_name || item.abs_path.split(/[\\/]/).pop();
+                const kind = item.kind || wsKindOf(name);
+                appendArtifactCard(mediaEl, Object.assign({}, item, {
+                    file_name: name,
+                    kind: kind,
+                    rel_path: item.rel_path || name,
+                    raw_url: item.content,
+                    previewable: item.previewable != null ? item.previewable : WS_PREVIEWABLE.has(kind),
+                }));
+                scrollChatToBottom();
+
             } else if (item.type === 'file') {
                 ensureBotEl();
                 const fileName = item.file_name || item.content.split('/').pop();

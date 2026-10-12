@@ -397,13 +397,38 @@ class WechatMPChannel(ChatChannel):
                 logger.info("[wechatmp] Do send video to {}".format(receiver))
         return
 
+    def _passive_reply_key(self, session_id, context):
+        # passive_reply keys by openid; the callbacks get the queue key, which
+        # is "<agent_id>::<openid>" for a non-default Agent.
+        msg = context.get("msg")
+        from_user = getattr(msg, "from_user_id", None)
+        return from_user or session_id
+
+    def _release_passive_claim(self, context, session_id):
+        # Called when produce answers without queueing, so no done-callback will
+        # release the claim and passive_reply would ignore the user forever.
+        if self.passive_reply:
+            self.running.discard(self._passive_reply_key(session_id, context))
+
     def _success_callback(self, session_id, context, **kwargs):  # 线程异常结束时的回调函数
         logger.debug("[wechatmp] Success to generate reply, msgId={}".format(context["msg"].msg_id))
-        if self.passive_reply:
-            self.running.remove(session_id)
+        self._release_passive_claim(context, session_id)
+
+    def _discard_cached_reply(self, key):
+        """Drop one user's cached reply and delete any media it uploaded."""
+        for reply_type, content in self.cache_dict.pop(key, []):
+            if reply_type != "text" and content:
+                asyncio.run_coroutine_threadsafe(
+                    self.delete_media(content), self.delete_media_loop
+                )
 
     def _fail_callback(self, session_id, exception, context, **kwargs):  # 线程异常结束时的回调函数
         logger.exception("[wechatmp] Fail to generate reply to user, msgId={}, exception={}".format(context["msg"].msg_id, exception))
         if self.passive_reply:
-            assert session_id not in self.cache_dict
-            self.running.remove(session_id)
+            key = self._passive_reply_key(session_id, context)
+            if key in self.cache_dict:
+                # A leftover entry would make the user's next message drain this
+                # stale reply instead of starting a new task.
+                logger.warning("[wechatmp] Undrained reply cached for {}, dropping".format(key))
+                self._discard_cached_reply(key)
+            self.running.discard(key)

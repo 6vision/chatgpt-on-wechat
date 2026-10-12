@@ -4,6 +4,7 @@ Supports text files, images (jpg, png, gif, webp), and PDF files
 """
 
 import os
+import stat
 from typing import Dict, Any, Optional
 from pathlib import Path
 
@@ -184,6 +185,15 @@ class Read(BaseTool):
                 f"Use the ls tool to list what is inside it."
             )
         
+        # A FIFO has size zero yet open/read waits indefinitely for a writer.
+        # Inspect the resolved target before dispatching to any content parser.
+        try:
+            mode = os.stat(absolute_path).st_mode
+        except OSError as exc:
+            return ToolResult.fail(f"Error inspecting file: {exc}")
+        if not stat.S_ISREG(mode):
+            return ToolResult.fail(f"Error: {path} is not a regular file")
+
         # Check if readable
         if not os.access(absolute_path, os.R_OK):
             return ToolResult.fail(f"Error: File is not readable: {path}")
@@ -504,25 +514,21 @@ class Read(BaseTool):
                 from docx import Document
             except ImportError:
                 raise ImportError("Error: python-docx library not installed. Install with: pip install python-docx")
+            from common.office_text import iter_docx_body_text
             doc = Document(absolute_path)
-            paragraphs = [p.text for p in doc.paragraphs]
-            for table in doc.tables:
-                for row in table.rows:
-                    paragraphs.append('\t'.join(cell.text for cell in row.cells))
-            return '\n'.join(paragraphs)
+            return '\n'.join(iter_docx_body_text(doc))
 
         if file_ext in ('.xlsx', '.xls'):
             try:
                 from openpyxl import load_workbook
             except ImportError:
                 raise ImportError("Error: openpyxl library not installed. Install with: pip install openpyxl")
-            wb = load_workbook(absolute_path, read_only=True, data_only=True)
+            from common.office_text import spreadsheet_sheets
             parts = []
-            for ws in wb.worksheets:
-                parts.append(f"--- Sheet: {ws.title} ---")
-                for row in ws.iter_rows(values_only=True):
-                    parts.append('\t'.join(str(c) if c is not None else '' for c in row))
-            wb.close()
+            with spreadsheet_sheets(absolute_path, load_workbook) as sheets:
+                for name, rows in sheets:
+                    parts.append(f"--- Sheet: {name} ---")
+                    parts.extend('\t'.join(row) for row in rows)
             return '\n'.join(parts)
 
         if file_ext in ('.pptx', '.ppt'):
@@ -530,16 +536,12 @@ class Read(BaseTool):
                 from pptx import Presentation
             except ImportError:
                 raise ImportError("Error: python-pptx library not installed. Install with: pip install python-pptx")
+            from common.office_text import iter_pptx_shape_text
             prs = Presentation(absolute_path)
             parts = []
             for i, slide in enumerate(prs.slides, 1):
                 parts.append(f"--- Slide {i} ---")
-                for shape in slide.shapes:
-                    if shape.has_text_frame:
-                        for para in shape.text_frame.paragraphs:
-                            text = para.text.strip()
-                            if text:
-                                parts.append(text)
+                parts.extend(iter_pptx_shape_text(slide.shapes))
             return '\n'.join(parts)
 
         return ""

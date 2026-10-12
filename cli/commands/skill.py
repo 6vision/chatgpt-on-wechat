@@ -224,7 +224,7 @@ def _download_github_dir(owner, repo, branch, subpath, dest_dir):
         elif item["type"] == "dir":
             os.makedirs(local_path, exist_ok=True)
             child_subpath = item["path"]
-            _download_github_dir(owner, repo, branch, child_subpath, dest_dir)
+            _download_github_dir(owner, repo, branch, child_subpath, local_path)
 
 
 # Directories to search for skills following the Agent Skills convention
@@ -299,6 +299,21 @@ def _scan_skills_in_dir(directory: str) -> list:
     return found
 
 
+def _check_skill_copy_paths(source_dir: str, target_dir: str) -> None:
+    """Refuse copies that would delete their source or recurse into themselves."""
+    source = os.path.normcase(os.path.realpath(source_dir))
+    target = os.path.normcase(os.path.realpath(target_dir))
+    try:
+        common = os.path.commonpath((source, target))
+    except ValueError:
+        # Paths on different Windows drives cannot overlap.
+        return
+    if common in (source, target):
+        raise SkillInstallError(
+            "Skill source and destination overlap; use a separate source directory."
+        )
+
+
 def _batch_install_skills(discovered, spec, skills_dir, source, result: InstallResult, display_name: str = "", agent_id: str = None):
     """Install a list of discovered skills into skills_dir."""
     single = len(discovered) == 1
@@ -309,6 +324,7 @@ def _batch_install_skills(discovered, spec, skills_dir, source, result: InstallR
             result.messages.append(f"  Skipping '{sname}' (invalid name)")
             continue
         target_dir = os.path.join(skills_dir, safe_name)
+        _check_skill_copy_paths(sdir, target_dir)
         if os.path.exists(target_dir):
             shutil.rmtree(target_dir)
         shutil.copytree(sdir, target_dir)
@@ -346,6 +362,7 @@ def _install_local(path: str, result: InstallResult, agent_id: str = None):
         skill_name = re.sub(r'[^a-zA-Z0-9_\-]', '-', skill_name)[:64]
         _check_skill_name(skill_name)
         target_dir = os.path.join(skills_dir, skill_name)
+        _check_skill_copy_paths(path, target_dir)
         if os.path.exists(target_dir):
             shutil.rmtree(target_dir)
         shutil.copytree(path, target_dir)
@@ -416,17 +433,11 @@ def _register_installed_skill(name: str, source: str = "cowhub", display_name: s
 
 def _parse_skill_frontmatter(content: str) -> dict:
     """Parse YAML frontmatter from SKILL.md content and return a dict with name/description."""
-    result = {}
-    match = re.match(r'^---\s*\n(.*?)\n---\s*\n', content, re.DOTALL)
-    if not match:
-        return result
-    for line in match.group(1).split('\n'):
-        line = line.strip()
-        for key in ('name', 'description'):
-            if line.startswith(f'{key}:'):
-                val = line[len(key) + 1:].strip()
-                result[key] = val.strip('"').strip("'")
-    return result
+    from agent.skills.frontmatter import parse_frontmatter
+
+    frontmatter = parse_frontmatter(content)
+    return {key: frontmatter[key] for key in ('name', 'description')
+            if isinstance(frontmatter.get(key), str)}
 
 
 def _read_skill_description(skill_dir: str) -> str:
@@ -784,7 +795,7 @@ def _print_skill_table(entries):
     for e, label in zip(entries, labels):
         enabled = e.get("enabled", True)
         source = e.get("source", "")
-        desc = e.get("description", "") or ""
+        desc = " ".join((e.get("description", "") or "").split())
         if len(desc) > desc_w:
             desc = desc[:desc_w - 3] + "..."
 

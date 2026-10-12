@@ -71,6 +71,23 @@ def test_a_target_that_cannot_be_renamed_over_is_written_in_place(tmp_path, monk
     assert [p.name for p in tmp_path.iterdir()] == ["config.json"]
 
 
+@pytest.mark.parametrize("rename_fails", [False, True])
+def test_newline_reaches_the_file_on_both_paths(tmp_path, monkeypatch, rename_fails):
+    import errno
+
+    path = tmp_path / "notes.txt"
+    path.write_text("old", encoding="utf-8")
+    if rename_fails:
+        def busy(src, dst):
+            raise OSError(errno.EBUSY, "Device or resource busy")
+
+        monkeypatch.setattr(atomic_write.os, "replace", busy)
+
+    write_text_atomic(path, "a\nb\n", newline="\r\n")
+
+    assert path.read_bytes() == b"a\r\nb\r\n"
+
+
 def test_a_rename_failure_on_a_missing_target_still_raises(tmp_path, monkeypatch):
     import errno
 

@@ -8,7 +8,9 @@ Three modes, ordered from most to least restrictive:
                       writes, env edits) are refused.
 - ``workspace-write`` Free rein inside the session's working directory (the
                       project, plus the Agent's own state dir and the system
-                      temp dir); writes that land outside it are refused.
+                      temp dir); writes that land outside it are refused, as
+                      are writes to the files that widen the Agent's reach
+                      (MCP servers, config, credentials, session settings).
                       Reading anywhere is still allowed.
 - ``full-access``     No confinement. The historical behavior, kept as the
                       default so existing installs are untouched.
@@ -151,7 +153,7 @@ _READ_ONLY_COMMANDS = frozenset({
     "pwd", "echo", "printf", "which", "type", "whereis", "locate",
     # searching / comparing
     "grep", "egrep", "fgrep", "rg", "ag", "ack", "find", "fd", "diff", "cmp",
-    # text processing (these write only through a redirect, which is refused)
+    # text processing (writes are caught per-command by _READ_ONLY_WRITE_FORMS)
     "sort", "uniq", "cut", "paste", "join", "comm", "column", "tr", "awk", "sed",
     "jq", "yq", "xxd", "od", "strings", "fold", "rev", "expand", "unexpand",
     # hashing
@@ -167,6 +169,30 @@ _READ_ONLY_COMMANDS = frozenset({
     "dir", "findstr", "where", "ver", "systeminfo", "tasklist", "chdir", "cd",
 })
 
+# Allowlisted read-only commands that write a file through a flag rather than
+# a shell redirect (which is refused separately).
+_READ_ONLY_WRITE_FORMS = {
+    "find": ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fls",
+             "-fprint", "-fprintf"),
+    "fd": ("--exec", "--exec-batch"),
+    "sort": ("--output",),
+    "xxd": ("-r", "-revert"),
+    "sed": ("--in-place",),
+}
+
+# Short write options, which may be clustered (`-uo`) or carry a value (`-i.bak`).
+_READ_ONLY_WRITE_SHORT = {"fd": "xX", "sort": "o", "sed": "i"}
+
+_XXD_VALUE_FLAGS = frozenset({"-c", "-cols", "-g", "-groupsize", "-l", "-len",
+                              "-n", "-name", "-o", "-offset", "-s", "-seek"})
+
+# `sed` also writes through its `w` command (`sed -e 'w out.txt' in.txt`), which
+# takes a bare path inside the script rather than a flag.
+_SED_WRITE_COMMAND_RE = re.compile(r"(?:^|[;{}])\s*w\s+\S")
+
+# awk can hand a string to the shell, which makes any statement a write.
+_AWK_SHELL_RE = re.compile(r"\bsystem\s*\(|\bgetline\b[^\n]*\||\bprint\b[^\n]*>\s*\"")
+
 # git sub-commands that only read the repository.
 _GIT_READ_SUBCOMMANDS = frozenset({
     "status", "log", "diff", "show", "branch", "tag", "remote", "ls-files",
@@ -180,11 +206,41 @@ _GIT_READ_SUBCOMMANDS = frozenset({
 _GIT_WRITE_FLAGS = frozenset({
     "-d", "-D", "--delete", "-m", "-M", "--move", "-f", "--force", "--set-upstream",
     "--set-upstream-to", "--unset", "--unset-all", "--add", "--replace-all",
-    "--edit", "-e", "--prune", "--rename", "--create", "-c", "-C", "--amend",
+    "--edit", "-e", "--prune", "--rename", "--create", "--amend",
+})
+
+# `-c` / `-C` / `--copy` copy a branch under `git branch`, but only select
+# rename detection or a config value elsewhere, so they are checked per sub-command.
+_GIT_BRANCH_WRITE_FLAGS = frozenset({"-c", "-C", "--copy"})
+
+# git's own options that come before the sub-command and take a value.
+_GIT_GLOBAL_VALUE_OPTIONS = frozenset({
+    "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env",
 })
 
 # git sub-commands that only read in their "list" form.
 _GIT_LIST_ONLY = {"stash": "list", "worktree": "list", "notes": "list"}
+
+# Sub-commands that create a ref when handed a bare name (`git tag v1`), and
+# only list when invoked bare or with a listing flag.
+_GIT_LIST_OR_CREATE = frozenset({"branch", "tag"})
+
+# Flags that make those sub-commands list. `-a` is branch-only: it annotates a tag.
+_GIT_LISTING_FLAGS = frozenset({
+    "-l", "--list", "-v", "--verbose", "-i", "--ignore-case",
+    "--contains", "--no-contains", "--merged", "--no-merged", "--points-at",
+    "--format", "--sort", "--color", "--column", "--no-column",
+})
+
+_GIT_EXTRA_LISTING_FLAGS = {
+    "branch": frozenset({"-a", "-r", "--all", "--remotes"}),
+}
+
+# `git remote` verbs that change remotes; bare `git remote` / `show` only read.
+_GIT_REMOTE_WRITE_VERBS = frozenset({
+    "add", "rename", "remove", "rm", "set-head", "set-branches", "set-url",
+    "prune", "update", "set", "unset",
+})
 
 # `git config` only reads with one of these.
 _GIT_CONFIG_READ_FLAGS = frozenset({
@@ -201,12 +257,19 @@ _PATH_MUTATING_COMMANDS = frozenset({
     "shred", "ln", "mkdir", "touch", "chmod", "chown", "chgrp", "chflags",
     "tee", "sed", "zip", "unzip", "tar", "gzip", "gunzip", "del", "erase",
     "move", "copy", "ren", "rename", "md", "rd",
+    # Allowlisted text tools whose write form is a flag rather than a redirect.
+    "find", "fd", "sort", "xxd", "awk",
 })
 
 # For these only the destination (last positional) is written; reading a source
 # from outside the workspace is fine.
 _DESTINATION_ONLY_COMMANDS = frozenset({
     "cp", "copy", "rsync", "install", "ln", "unzip", "tar", "zip",
+})
+
+# When their last operand is a directory, the sources land inside it by name.
+_INTO_DIRECTORY_COMMANDS = frozenset({
+    "mv", "move", "cp", "copy", "rsync", "install", "ln",
 })
 
 # Privilege escalation is out of scope for every gated mode.
@@ -230,26 +293,97 @@ _SEPARATORS = frozenset({";", "&&", "||", "|", "&", "|&", "(", ")", "{", "}", "\
 
 _OPERATOR_CHARS = set("<>&|;()")
 
+# shlex does not treat backquotes as quotes, so ``echo `cmd``` lexes as one
+# token; the substituted command has to become its own segment.
+_BACKTICK_RE = re.compile(r"(?<!\\)`([^`]*)`")
+
+# ``<(cmd)`` / ``>(cmd)``: shlex emits ``<(`` as a plain token.
+_PROCESS_SUBST_CHARS = frozenset({"<", ">"})
+# Placeholder for a substitution passed as an argument; neither gate reads it.
+_SUBSTITUTION = "\x00"
+
 
 def _is_operator(token: str) -> bool:
     return bool(token) and all(ch in _OPERATOR_CHARS for ch in token)
 
 
-def _parse_segments(command: str) -> Optional[List[List[str]]]:
-    """Split a command line into per-command token lists, honoring quotes.
+def _split_process_substitutions(command: str) -> Tuple[str, List[str]]:
+    """Pull the bodies of ``<(...)`` / ``>(...)`` out of ``command``.
 
-    ``punctuation_chars`` makes the lexer emit ``&&``, ``|``, ``>`` and friends
-    as their own tokens while leaving quoted text alone, so ``grep "a|b"`` is one
-    command and not two. Returns None when the line cannot be lexed at all.
+    Returns the outer line with each substitution collapsed to a placeholder,
+    plus the bodies to classify on their own. Quoting is honoured so a ``(``
+    inside a string does not open a substitution.
     """
-    lexer = shlex.shlex(command or "", posix=True, punctuation_chars=True)
+    bodies: List[str] = []
+    out: List[str] = []
+    quote = ""
+    i = 0
+    while i < len(command):
+        char = command[i]
+        if quote:
+            out.append(char)
+            if char == quote and (i == 0 or command[i - 1] != "\\"):
+                quote = ""
+            i += 1
+            continue
+        if char in "'\"":
+            quote = char
+            out.append(char)
+            i += 1
+            continue
+        if char == "\\" and i + 1 < len(command):
+            out.append(command[i : i + 2])
+            i += 2
+            continue
+        if char in _PROCESS_SUBST_CHARS and command[i + 1 : i + 2] == "(":
+            depth = 1
+            j = i + 2
+            body: List[str] = []
+            while j < len(command) and depth:
+                if command[j] == "(":
+                    depth += 1
+                elif command[j] == ")":
+                    depth -= 1
+                    if not depth:
+                        j += 1
+                        break
+                body.append(command[j])
+                j += 1
+            if depth:
+                # Unbalanced: leave the text alone rather than guess.
+                out.append(command[i:j])
+            else:
+                bodies.append("".join(body))
+                out.append(_SUBSTITUTION)
+            i = j
+            continue
+        out.append(char)
+        i += 1
+    return "".join(out), bodies
+
+
+def _collect_segments(command: str, segments: List[List[str]]) -> bool:
+    """Append the token lists of ``command`` and of anything it substitutes.
+
+    Returns False when any part cannot be lexed, so the whole line fails closed.
+    """
+    command = _BACKTICK_RE.sub(
+        lambda match: f"$({match.group(1).strip()})" if match.group(1).strip() else "",
+        command,
+    )
+    outer, bodies = _split_process_substitutions(command)
+    # Classify substituted bodies first so the outer command cannot mask them.
+    for body in bodies:
+        if not _collect_segments(body, segments):
+            return False
+
+    lexer = shlex.shlex(outer, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     try:
         tokens = list(lexer)
     except ValueError:
-        return None
+        return False
 
-    segments: List[List[str]] = []
     current: List[str] = []
     for token in tokens:
         if token in _SEPARATORS:
@@ -260,6 +394,19 @@ def _parse_segments(command: str) -> Optional[List[List[str]]]:
         current.append(token)
     if current:
         segments.append(current)
+    return True
+
+
+def _parse_segments(command: str) -> Optional[List[List[str]]]:
+    """Split a command line into per-command token lists, honoring quotes.
+
+    ``punctuation_chars`` makes the lexer emit ``&&``, ``|``, ``>`` and friends
+    as their own tokens while leaving quoted text alone, so ``grep "a|b"`` is one
+    command and not two. Returns None when the line cannot be lexed at all.
+    """
+    segments: List[List[str]] = []
+    if not _collect_segments(command or "", segments):
+        return None
     return segments
 
 
@@ -366,6 +513,52 @@ def _inside_roots(path: str, roots: Sequence[str], cwd: Optional[str]) -> bool:
     return False
 
 
+def _normalize_protected(paths: Optional[Iterable[str]]) -> frozenset:
+    out = set()
+    for path in paths or []:
+        try:
+            out.add(os.path.normcase(os.path.realpath(os.path.expanduser(path))))
+        except Exception:
+            continue
+    return frozenset(out)
+
+
+def _is_protected(path: str, protected: frozenset, cwd: Optional[str]) -> bool:
+    return bool(protected) and os.path.normcase(_real(path, cwd)) in protected
+
+
+def _protected_operand(
+    name: str, paths: Sequence[str], protected: frozenset, cwd: Optional[str]
+) -> Optional[str]:
+    """The operand through which ``name`` would write a protected file, if any."""
+    if not protected or not paths:
+        return None
+    if name in _DESTINATION_ONLY_COMMANDS:
+        targets = paths[-1:] if len(paths) > 1 else []
+    else:
+        targets = paths
+    for path in targets:
+        if _is_protected(path, protected, cwd):
+            return path
+    if name in _INTO_DIRECTORY_COMMANDS and len(paths) > 1:
+        dest = _real(paths[-1], cwd)
+        if os.path.isdir(dest):
+            for src in paths[:-1]:
+                landed = os.path.join(dest, os.path.basename(src.rstrip("/\\")))
+                if _is_protected(landed, protected, cwd):
+                    return paths[-1]
+    return None
+
+
+def _deny_protected(path: str) -> Decision:
+    return _deny(
+        f"'{path}' controls what this Agent may run or reach (MCP servers, "
+        f"permissions, config or credentials), so it can only be changed in "
+        f"full-access mode. Nothing was written.",
+        WORKSPACE_WRITE,
+    )
+
+
 def _roots_hint(roots: Sequence[str]) -> str:
     return ", ".join(roots[:2]) if roots else "the working directory"
 
@@ -405,6 +598,7 @@ def check_tool_call(
     arguments: Optional[Dict[str, Any]] = None,
     cwd: Optional[str] = None,
     write_roots: Optional[Iterable[str]] = None,
+    protected_paths: Optional[Iterable[str]] = None,
 ) -> Decision:
     """Decide whether ``tool_name`` may run with ``arguments`` under ``mode``.
 
@@ -415,6 +609,7 @@ def check_tool_call(
         cwd: working directory that relative paths resolve against.
         write_roots: directories writes are confined to in workspace-write mode.
             ``cwd`` and the system temp dir are always included.
+        protected_paths: files workspace-write refuses even inside the roots.
 
     Returns:
         A :class:`Decision` whose ``reason`` is written for the model: what was
@@ -429,7 +624,7 @@ def check_tool_call(
 
     if mode == READ_ONLY:
         return _check_read_only(tool_name, args)
-    return _check_workspace_write(tool_name, args, cwd, write_roots)
+    return _check_workspace_write(tool_name, args, cwd, write_roots, protected_paths)
 
 
 def _check_read_only(tool_name: str, args: Dict[str, Any]) -> Decision:
@@ -474,11 +669,15 @@ def _check_workspace_write(
     args: Dict[str, Any],
     cwd: Optional[str],
     write_roots: Optional[Iterable[str]],
+    protected_paths: Optional[Iterable[str]] = None,
 ) -> Decision:
     roots = _normalize_roots(write_roots, cwd)
+    protected = _normalize_protected(protected_paths)
 
     if tool_name in _FILE_WRITE_TOOLS:
         path = str(args.get("path") or "")
+        if path and _is_protected(path, protected, cwd):
+            return _deny_protected(path)
         if path and not _inside_roots(path, roots, cwd):
             return _deny(
                 f"'{path}' is outside the writable area ({_roots_hint(roots)}), so "
@@ -489,9 +688,42 @@ def _check_workspace_write(
         return ALLOW
 
     if tool_name == "bash":
-        return _check_bash_workspace_write(args, cwd, roots)
+        return _check_bash_workspace_write(args, cwd, roots, protected)
 
     return ALLOW
+
+
+def _is_short_cluster(arg: str) -> bool:
+    return len(arg) > 1 and arg[0] == "-" and arg[1] != "-"
+
+
+def _xxd_output(args: Sequence[str]) -> List[str]:
+    """xxd writes its second operand, or stdout when there is none."""
+    operands = [a for i, a in enumerate(args) if not (i and args[i - 1] in _XXD_VALUE_FLAGS)]
+    return _positional_paths(operands)[1:2]
+
+
+def _read_only_write_form(
+    name: str,
+    args: Sequence[str],
+) -> Optional[str]:
+    """The flag or script form through which *name* writes a file, or None."""
+    forms = _READ_ONLY_WRITE_FORMS.get(name, ())
+    letters = _READ_ONLY_WRITE_SHORT.get(name, "")
+    for arg in args:
+        if any(arg == form or arg.startswith(form + "=") for form in forms):
+            return arg
+        if letters and _is_short_cluster(arg) and any(c in letters for c in arg[1:]):
+            return arg
+
+    if name == "sed":
+        if any(_SED_WRITE_COMMAND_RE.search(a) for a in args if not a.startswith("-")):
+            return "w"
+    elif name == "xxd" and _xxd_output(args):
+        return _xxd_output(args)[0]
+    elif name == "awk" and any(_AWK_SHELL_RE.search(a) for a in args):
+        return "system()"
+    return None
 
 
 def _check_bash_read_only(args: Dict[str, Any]) -> Decision:
@@ -527,8 +759,13 @@ def _check_bash_read_only(args: Dict[str, Any]) -> Decision:
             if not decision.allowed:
                 return decision
             continue
-        if name == "sed" and any(a.startswith("-i") for a in rest):
-            return _deny("'sed -i' edits files in place.", READ_ONLY)
+        write_form = _read_only_write_form(name, rest)
+        if write_form is not None:
+            return _deny(
+                f"'{name} {write_form}' writes a file without redirecting, so this "
+                f"session cannot run it.",
+                READ_ONLY,
+            )
         if name not in _READ_ONLY_COMMANDS:
             return _deny(
                 f"'{name}' is not on the read-only command allowlist, so it may change "
@@ -539,7 +776,16 @@ def _check_bash_read_only(args: Dict[str, Any]) -> Decision:
     return ALLOW
 
 
+def _skip_git_global_options(args: Sequence[str]) -> Sequence[str]:
+    """Drop git's leading global options (`-C dir`, `-c k=v`, `--no-pager`, ...)."""
+    i = 0
+    while i < len(args) and args[i].startswith("-"):
+        i += 2 if args[i] in _GIT_GLOBAL_VALUE_OPTIONS else 1
+    return args[i:]
+
+
 def _check_git_read_only(args: Sequence[str]) -> Decision:
+    args = _skip_git_global_options(args)
     positional = [a for a in args if not a.startswith("-") and not _is_operator(a)]
     sub = positional[0].lower() if positional else ""
     if not sub:
@@ -551,18 +797,76 @@ def _check_git_read_only(args: Sequence[str]) -> Decision:
         if second != _GIT_LIST_ONLY[sub]:
             return _deny(f"only 'git {sub} {_GIT_LIST_ONLY[sub]}' is read-only.", READ_ONLY)
         return ALLOW
+    # The operand checks below only refuse; whatever passes them still has to
+    # clear the write-flag check at the end (`git branch -v -D topic`).
+    if sub in _GIT_LIST_OR_CREATE:
+        listing = _GIT_LISTING_FLAGS | _GIT_EXTRA_LISTING_FLAGS.get(sub, frozenset())
+        if len(positional) > 1 and not any(a in listing for a in args):
+            return _deny(
+                f"'git {sub} {positional[1]}' creates a {sub}, so it was refused. "
+                f"Listing is read-only: 'git {sub}', or 'git {sub} -l <pattern>'.",
+                READ_ONLY,
+            )
+    if sub == "remote":
+        for verb in positional[1:]:
+            if verb.lower() in _GIT_REMOTE_WRITE_VERBS:
+                return _deny(
+                    f"'git remote {verb}' changes the repository's remotes.",
+                    READ_ONLY,
+                )
+    # A second operand makes symbolic-ref set the ref instead of reading it.
+    if sub == "symbolic-ref" and len(positional) > 2:
+        return _deny(
+            f"'git symbolic-ref {positional[1]} {positional[2]}' sets the "
+            "reference. Reading it is 'git symbolic-ref <ref>'.",
+            READ_ONLY,
+        )
     if sub == "config":
         if not any(a in _GIT_CONFIG_READ_FLAGS for a in args):
             return _deny("'git config' without --get/--list can write config.", READ_ONLY)
         return ALLOW
-    offending = [a for a in args if a in _GIT_WRITE_FLAGS]
+    write_flags = _GIT_WRITE_FLAGS | _GIT_BRANCH_WRITE_FLAGS if sub == "branch" else _GIT_WRITE_FLAGS
+    offending = [a for a in args if a in write_flags]
     if offending:
         return _deny(f"'git {sub} {offending[0]}' modifies the repository.", READ_ONLY)
     return ALLOW
 
 
+def _workspace_write_paths(name: str, args: Sequence[str]) -> List[str]:
+    """Paths a path-mutating command writes, including flag-driven forms."""
+    if name == "sort":
+        paths = []
+        for i, arg in enumerate(args):
+            nxt = args[i + 1] if i + 1 < len(args) else ""
+            if arg.startswith("--output"):
+                paths.append(arg.split("=", 1)[1] if "=" in arg else nxt)
+            elif _is_short_cluster(arg) and "o" in arg[1:]:
+                paths.append(arg[arg.index("o", 1) + 1:] or nxt)
+        return [p for p in paths if p]
+
+    if name == "sed":
+        # A `w` command names its destination inside the script text.
+        found = [f.group(0).split()[1:]
+                 for f in (_SED_WRITE_COMMAND_RE.search(a) for a in args
+                           if not a.startswith("-")) if f]
+        return found[0] if found else _positional_paths(args)
+
+    if name == "xxd":
+        return _xxd_output(args)
+
+    if name in ("find", "fd", "awk"):
+        # Their write forms act on whatever they match, so the search roots
+        # must stay inside the workspace.
+        if _read_only_write_form(name, args) is None:
+            return []
+        return _positional_paths(args)
+
+    return _positional_paths(args)
+
+
 def _check_bash_workspace_write(
-    args: Dict[str, Any], cwd: Optional[str], roots: Sequence[str]
+    args: Dict[str, Any], cwd: Optional[str], roots: Sequence[str],
+    protected: frozenset = frozenset(),
 ) -> Decision:
     command = str(args.get("command") or "").strip()
     if not command:
@@ -578,6 +882,8 @@ def _check_bash_workspace_write(
         for target in _redirect_targets(tokens):
             if target in _NULL_SINKS:
                 continue
+            if _is_protected(target, protected, cwd):
+                return _deny_protected(target)
             if not _inside_roots(target, roots, cwd):
                 return _deny(
                     f"the command writes to '{target}', outside the writable area "
@@ -592,13 +898,16 @@ def _check_bash_workspace_write(
             return _deny(f"'{name}' escalates privileges.", WORKSPACE_WRITE)
         if name not in _PATH_MUTATING_COMMANDS:
             continue
-        if name == "sed" and not any(a.startswith("-i") for a in rest):
+        if name == "sed" and _read_only_write_form(name, rest) is None:
             continue
 
-        paths = _positional_paths(rest)
+        paths = _workspace_write_paths(name, rest)
         if name == "dd":
             paths = [a.split("=", 1)[1] for a in rest if a.startswith("of=")]
-        elif name in _DESTINATION_ONLY_COMMANDS:
+        hit = _protected_operand(name, paths, protected, cwd)
+        if hit:
+            return _deny_protected(hit)
+        if name in _DESTINATION_ONLY_COMMANDS:
             paths = paths[-1:] if len(paths) > 1 else []
 
         for path in paths:
@@ -646,6 +955,8 @@ def describe_mode(mode: str, language: str = "zh", cwd: Optional[str] = None) ->
                 f"files inside {area}.",
                 "",
                 "- Writes outside it are refused; reading anywhere is fine.",
+                "- `mcp.json`, `config.json`, `.env` and the session settings files "
+                "are not writable in this mode, even inside it.",
                 "- If the task genuinely needs to write elsewhere, explain why and let "
                 "the user switch the permission mode.",
             ]
@@ -665,6 +976,7 @@ def describe_mode(mode: str, language: str = "zh", cwd: Optional[str] = None) ->
             f"当前会话为**工作区可写模式**：可以在 {area} 内自由创建和修改文件。",
             "",
             "- 该目录之外的写入会被拒绝；读取不受限制。",
+            "- `mcp.json`、`config.json`、`.env` 和会话设置文件在该模式下不可修改，即使位于该目录内。",
             "- 如果任务确实需要写到其他位置，请说明原因，由用户切换权限模式。",
         ]
     return ["## 🔐 权限", ""] + body + [""]

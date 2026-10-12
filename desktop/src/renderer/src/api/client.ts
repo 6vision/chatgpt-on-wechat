@@ -43,6 +43,8 @@ import type {
   ProjectState,
   ChannelsResponse,
   RosterSnapshot,
+  MenuDoc,
+  ArtifactListItem,
 } from '../types'
 import { getLang, t } from '../i18n'
 
@@ -688,6 +690,87 @@ class ApiClient {
     return this.request('/config', {
       method: 'POST',
       body: JSON.stringify({ updates }),
+    })
+  }
+
+  // ---------------------------------------------------------
+  // Menu (shared with the web console) and the artifacts it can hold
+  // ---------------------------------------------------------
+
+  /** The menu the user arranged, or null while they keep the built-in one. */
+  async getMenu(): Promise<ApiResult & { menu: MenuDoc | null }> {
+    return this.request('/api/menu')
+  }
+
+  /** Save the whole menu; null goes back to the built-in one. */
+  async saveMenu(menu: MenuDoc | null): Promise<ApiResult & { menu: MenuDoc | null }> {
+    return this.request('/api/menu', { method: 'POST', body: JSON.stringify({ menu }) })
+  }
+
+  /** Web pages and markdown documents produced across every Agent's conversations, newest first. */
+  async listPageArtifacts(query: string, limit = 40): Promise<ApiResult & { items: ArtifactListItem[] }> {
+    return this.listArtifacts({ scope: 'all', kind: 'page', q: query, limit })
+  }
+
+  // ---------------------------------------------------------
+  // Artifacts: the files the conversations produced, across Agents
+  // ---------------------------------------------------------
+
+  /**
+   * One page of the index, pinned first, then newest first. `scope` is `all`
+   * or an Agent id, and decides whose files are listed, so the active Agent is
+   * not carried.
+   */
+  async listArtifacts(params: {
+    scope: string
+    kind?: string
+    q?: string
+    path?: string
+    offset?: number
+    limit?: number
+  }): Promise<ApiResult & { items: ArtifactListItem[]; has_more: boolean }> {
+    const qs = new URLSearchParams({
+      scope: params.scope,
+      kind: params.kind || '',
+      q: params.q || '',
+      path: params.path || '',
+      offset: String(params.offset || 0),
+      limit: String(params.limit || 48),
+      agent_id: '',
+    })
+    return this.request(`/api/artifacts?${qs.toString()}`)
+  }
+
+  /** Put a file back in the index, attributed to the turn it came from. */
+  async addArtifact(body: {
+    path: string
+    session_id: string
+    agent_id: string
+    turn_seq: number | null
+  }): Promise<ApiResult & { item: ArtifactListItem | null }> {
+    return this.request('/api/artifacts/add', { method: 'POST', body: JSON.stringify(body) })
+  }
+
+  async pinArtifact(id: number, agentId: string, pinned: boolean): Promise<ApiResult & { pinned_at: number }> {
+    return this.request('/api/artifacts/pin', {
+      method: 'POST',
+      body: JSON.stringify({ id, agent_id: agentId, pinned }),
+    })
+  }
+
+  /** Name an entry in the view; the file keeps its name on disk, and '' restores it. */
+  async renameArtifact(id: number, agentId: string, title: string): Promise<ApiResult & { title: string }> {
+    return this.request('/api/artifacts/rename', {
+      method: 'POST',
+      body: JSON.stringify({ id, agent_id: agentId, title }),
+    })
+  }
+
+  /** Forget an entry; the file stays where it is. */
+  async deleteArtifact(id: number, agentId: string): Promise<ApiResult & { removed: boolean }> {
+    return this.request('/api/artifacts/delete', {
+      method: 'POST',
+      body: JSON.stringify({ id, agent_id: agentId }),
     })
   }
 

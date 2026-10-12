@@ -266,6 +266,31 @@ class Agent:
             roots.append(self.workspace_dir)
         return roots
 
+    def protected_paths(self) -> list:
+        """Files that decide what the Agent may run or reach: MCP servers,
+        session permissions, project directories, config and credentials.
+
+        Most sit inside the writable roots, so workspace-write refuses them
+        explicitly; otherwise a session could grant itself more than its mode.
+        """
+        paths = []
+        try:
+            from config import get_data_root
+            paths.append(os.path.join(get_data_root(), "config.json"))
+        except Exception:
+            pass
+        bases = {self.workspace_dir} if self.workspace_dir else set()
+        try:
+            from common.state_dir import shared_root
+            from agent.workspace import project_store, session_prefs
+            bases.add(str(shared_root()))
+            paths += [session_prefs._store_file(), project_store._store_file()]
+        except Exception:
+            pass
+        for base in bases:
+            paths += [os.path.join(base, "mcp.json"), os.path.join(base, ".env")]
+        return paths
+
     def get_skills_prompt(self, skill_filter=None) -> str:
         """
         Get the skills prompt to append to system prompt.
@@ -901,8 +926,13 @@ class Agent:
         )
 
         with self.messages_lock:
-            before = len(self.messages)
-            turns = identify_complete_turns(self.messages)
+            # Kept so the write-back can tell whether the history it is about to
+            # replace is still the one the summary was computed from. The
+            # summarize call below runs without the lock, and a turn that lands
+            # meanwhile writes self.messages as a whole new list.
+            snapshot = list(self.messages)
+            before = len(snapshot)
+            turns = identify_complete_turns(snapshot)
 
             if len(turns) <= keep_recent_turns:
                 return {
@@ -960,6 +990,22 @@ class Agent:
         # that would break strict user/assistant alternation on some providers.
         turn_count = len(discarded_turns)
         with self.messages_lock:
+            if self.messages[:before] != snapshot[:before]:
+                # The history was rewritten rather than appended to, so the kept
+                # turns no longer describe it. Say so instead of overwriting.
+                return {
+                    "ok": False,
+                    "reason": "history_changed",
+                    "compacted_turns": 0,
+                    "before": before,
+                    "after": len(self.messages),
+                }
+
+            # Messages a concurrent turn appended while the summary was being
+            # produced are still the user's. They are not part of any kept turn,
+            # so they go after the compacted history instead of being lost.
+            arrived = self.messages[before:]
+
             new_messages = []
             for turn in kept_turns:
                 new_messages.extend(turn["messages"])
@@ -979,6 +1025,7 @@ class Agent:
                     }],
                 })
 
+            new_messages.extend(arrived)
             self.messages = new_messages
             after = len(self.messages)
 

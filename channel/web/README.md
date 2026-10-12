@@ -14,7 +14,7 @@ scheduled tasks, logs).
 
 # Backend layout
 
-`web_channel.py` is the URL table and nothing else: 77 routes, `build_app()`,
+`web_channel.py` is the URL table and nothing else: 89 routes, `build_app()`,
 and the imports that put every handler in scope. web.py resolves the handler
 names in the table against a namespace dict, so every handler has to be
 importable there -- that is why the file imports names it never calls.
@@ -37,8 +37,10 @@ The code sits in two packages, mirroring the frontend's `core/` and `views/`:
 | `pages.py` | `/`, `/chat`, the in-app view paths, `/assets/*`, `/health` |
 | `auth.py` | `/api/auth/*`, the MCP OAuth callback |
 | `chat.py` | `/api/message`, `/api/poll`, `/api/cancel`, the SSE stream |
-| `files.py` | Uploads, `/api/file`, `/uploads/*`, `/preview/*`, ASR and TTS |
+| `files.py` | Uploads, `/api/file`, `/api/file/reveal` (local-only show in folder), `/uploads/*`, `/preview/*`, ASR and TTS |
 | `sessions.py` | `/api/sessions/*`, `/api/history`, per-session settings and context |
+| `artifacts.py` | `/api/artifacts`, `/api/artifacts/add`, `/api/artifacts/pin`, `/api/artifacts/rename`, `/api/artifacts/delete`: the cross-Agent index of files the conversations produced |
+| `menu.py` | `/api/menu`: the menu the user arranged, shared with the desktop client; its custom pages open at `/m/<id>` |
 | `agents.py` | `/api/agents/*`, core files, avatars |
 | `config.py` | `/api/config` |
 | `models.py` | `/api/models` |
@@ -115,10 +117,11 @@ Two rules for includes:
 | File | Contents |
 |---|---|
 | `layout/login.html` | Login overlay |
-| `layout/sidebar.html` | Left navigation (`data-view` names the target), the update menu on the version row, mobile overlay |
+| `layout/sidebar.html` | Left navigation (`data-view` names the target; this is the default menu, redrawn by `core/menu.js` once a saved one loads), the update menu on the version row, the rail toggle, mobile overlay |
 | `layout/session-panel.html` | Session history side panel |
-| `layout/header.html` | Top bar: panel toggle, breadcrumb, language/theme switches, logout |
+| `layout/header.html` | Top bar: panel toggle, breadcrumb (with an open-outside button for menu pages), language/theme switches, logout |
 | `views/chat.html` | Chat view: message list, composer card, workspace panel |
+| `views/artifacts.html` | Artifacts view: day-grouped gallery and preview pane |
 | `views/agents.html` | Agent team: list, detail drawer, create form |
 | `views/config.html` | Settings view with the "basic" and "models" tabs |
 | `views/skills.html` | Skill list, and the viewer for one skill: its file tree beside the file on screen (adding one is `modals/skill-add.html`) |
@@ -127,6 +130,7 @@ Two rules for includes:
 | `views/channels.html` | Channels view (content injected by JS) |
 | `views/tasks.html` | Scheduled tasks and run records |
 | `views/logs.html` | Log terminal |
+| `views/custom.html` | A page the user put in the menu: an embedded web page or artifact, at `/m/<id>` |
 | `modals/team-chat.html` | New multi-agent conversation |
 | `modals/knowledge-dialog.html` | Knowledge create/rename/delete dialog |
 | `modals/skill-add.html` | Add skill: install from a market or an upload after a preview, or write a new one from a form (attachments picked as files or as a folder) |
@@ -137,6 +141,7 @@ Two rules for includes:
 | `modals/custom-provider.html` | Custom OpenAI-compatible provider |
 | `modals/task-edit.html` | Scheduled task create/edit |
 | `modals/run-detail.html` | Run record detail |
+| `modals/menu-editor.html` | Menu editor frame |
 
 Names that are easy to misread:
 
@@ -298,6 +303,7 @@ auth), see `tests/test_web_console_routing.py`.
 | `core/confirm.js` | Scripted confirm dialog shared by the views |
 | `core/notify.js` | Task completion notifications and notification permission |
 | `core/nav.js` | `navigateTo` view switching and each view's lazy-load hook |
+| `core/menu.js` | The sidebar drawn from the default or saved menu (a group header's pencil opens the editor), and the custom pages it opens |
 | `core/router.js` | Address-bar routing: parsing and writing `/view/tab`, Back/Forward; see above |
 | `core/auth.js` | Login screen, logout, the 401 interceptor on `fetch`, the auth gate for background pollers. **Loads last, see below** |
 
@@ -337,6 +343,8 @@ auth), see `tests/test_web_console_routing.py`.
 | `views/doc-viewers.js` | Viewer/editor for memory files, and the pieces the skill viewer shares with it |
 | `views/knowledge.js` | Knowledge tree, import, document editor, relation graph |
 | `views/logs.js` | Live log stream |
+| `views/artifacts.js` | Artifacts view: gallery, thumbnails, preview pane, jump back to the producing turn |
+| `views/menu-editor.js` | Menu editor: groups, drag ordering, names and icons, hiding, adding artifacts, links and pages |
 | `boot.js` | Startup: apply theme and language, auth gate, first fetch of config and history |
 
 ### Three load-order constraints that must not move
@@ -405,13 +413,15 @@ section before reordering or inserting a file.**
 | File | Responsibility |
 |---|---|
 | `base.css` | Keyframes, scrollbars, shared tooltip, `.view` switching, chat column layout, mobile adjustments |
-| `sessions.css` | Sidebar, session history panel and list, project grouping, drag ordering, rename |
+| `sessions.css` | Sidebar and its collapsed rail, session history panel and list, project grouping, drag ordering, rename |
 | `components.css` | Controls shared across views: `cfg-dropdown`, form controls, confirm dialog, update menu, API key masking, floating tooltip |
 | `markdown.css` | Message body rendering: markdown, thinking/tool/subagent steps, log colouring, code block frame |
 | `chat.css` | Input and composer card, attachment bar, slash command menu, context usage popover, drop overlay, voice pill |
 | `workspace.css` | Workspace panel and project selector, document editor, artifact cards, `@` mention menu |
 | `knowledge.css` | Knowledge document tree and relation graph |
 | `agents.css` | Agent cards, detail drawer, composer identity badge |
+| `artifacts.css` | Artifacts view, and the lit state of the header's view buttons |
+| `menu.css` | Custom sidebar labels, custom pages, menu editor |
 
 Two things to watch when moving rules:
 

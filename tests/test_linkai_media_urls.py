@@ -52,8 +52,18 @@ def test_downloaded_file_name_excludes_query(monkeypatch, tmp_path):
     from common import state_dir
     from models.linkai import link_ai_bot
 
+    # The download checks the status before writing, so the stand-in response
+    # has to carry one the way a real requests.Response does.
     monkeypatch.setattr(
-        link_ai_bot.requests, "get", lambda url, **kw: type("R", (), {"content": b"x"})()
+        link_ai_bot.requests,
+        "get",
+        lambda url, **kw: type(
+            "R", (), {
+                "content": b"x",
+                "status_code": 200,
+                "raise_for_status": lambda self: None,
+            }
+        )(),
     )
     # The download belongs in the agent's managed tmp dir, not a `tmp/` resolved
     # against the process CWD.

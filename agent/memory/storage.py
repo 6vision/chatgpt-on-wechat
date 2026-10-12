@@ -13,7 +13,7 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from agent.memory.vector_backend import (
     SQLiteVectorBackend,
@@ -48,7 +48,7 @@ _CJK_RANGES = (
 )
 _RE_CONTAINS_CJK   = re.compile(f'[{_CJK_RANGES}]')
 _RE_CJK_WORDS      = re.compile(f'[{_CJK_RANGES}]+')
-_RE_TRIGRAM_TOKENS = re.compile(f'[{_CJK_RANGES}]+|[A-Za-z0-9_]+')
+_RE_TRIGRAM_TOKENS = re.compile(rf'[{_CJK_RANGES}]+|[^\W{_CJK_RANGES}]+')
 
 # sqlite3.OperationalError subclasses DatabaseError, so "database is locked",
 # "disk I/O error" and friends must be told apart from actual corruption before
@@ -393,9 +393,15 @@ class MemoryStorage:
                 hash TEXT NOT NULL,
                 metadata TEXT,
                 created_at INTEGER DEFAULT (strftime('%s', 'now')),
-                updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                hit_count INTEGER NOT NULL DEFAULT 0,
+                last_hit_at INTEGER
             )
         """)
+
+        # Older builds created chunks without hit tracking; add the columns
+        # in place so an existing index keeps working without a rebuild.
+        self._migrate_hit_columns()
 
         # Create indexes
         self.conn.execute("""
@@ -439,14 +445,14 @@ class MemoryStorage:
                     (_FTS_REBUILD_PENDING,),
                 )
                 repair_pending = True
+            if self._migrate_legacy_fts_triggers():
+                repair_pending = True
             self._create_fts5_objects(self.conn)
 
         # Create trigram FTS5 table for CJK / mixed-language search
         self.trigram_fts5_available = False
         if self.fts5_available:
             try:
-                if self._migrate_legacy_trigram_update_trigger():
-                    repair_pending = True
                 self._create_trigram_objects(self.conn)
                 # CREATE ... IF NOT EXISTS says nothing when the table is
                 # already there: SQLite skips it without loading the module, so
@@ -508,33 +514,46 @@ class MemoryStorage:
             from common.log import logger
             logger.warning("[MemoryStorage] Failed to drop trigram triggers", exc_info=True)
 
-    def _migrate_legacy_trigram_update_trigger(self) -> bool:
-        """Replace the legacy chunks_trigram_au trigger if present.
+    def _migrate_hit_columns(self):
+        """Add hit tracking columns to a chunks table created by an older build.
 
-        Older versions synced updates with a bare
-        "UPDATE chunks_fts_trigram SET ...", which corrupts the external-content
-        trigram index on chunk updates. We detect that shape via the stored
-        trigger SQL, drop it (dropping a trigger touches no data), and flag a
-        trigram rebuild so any already-damaged index is repaired in the
-        background. Returns True when the rebuild was flagged.
+        PRAGMA table_info is metadata-only, so the check is cheap enough to run
+        on every open; ALTER TABLE only fires when the columns are missing.
         """
-        try:
+        cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(chunks)")}
+        if "hit_count" not in cols:
+            self.conn.execute(
+                "ALTER TABLE chunks ADD COLUMN hit_count INTEGER NOT NULL DEFAULT 0"
+            )
+        if "last_hit_at" not in cols:
+            self.conn.execute("ALTER TABLE chunks ADD COLUMN last_hit_at INTEGER")
+
+    def _migrate_legacy_fts_triggers(self) -> bool:
+        """Drop external-content triggers that cannot read the previous row text.
+
+        AFTER DELETE/UPDATE triggers must feed FTS5 the old column values, so the
+        old shapes are dropped here and recreated by ``_create_*_objects``. Only
+        the original trigram UPDATE trigger flags a rebuild; other stale entries
+        are left to the integrity scan, which rebuilds an index it finds damaged.
+        Returns True when a rebuild was flagged.
+        """
+        legacy = []
+        for trigger, table, operation in (
+            ("chunks_ad", "chunks_fts", "DELETE FROM"),
+            ("chunks_au", "chunks_fts", "UPDATE"),
+            ("chunks_trigram_ad", "chunks_fts_trigram", "DELETE FROM"),
+            ("chunks_trigram_au", "chunks_fts_trigram", "UPDATE"),
+        ):
             row = self.conn.execute(
-                "SELECT sql FROM sqlite_master WHERE type='trigger' "
-                "AND name='chunks_trigram_au'"
+                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+                (trigger,),
             ).fetchone()
-        except Exception:
+            if row and row[0] and f"{operation} {table}".upper() in " ".join(row[0].upper().split()):
+                legacy.append(trigger)
+        for trigger in legacy:
+            self.conn.execute(f"DROP TRIGGER {trigger}")
+        if "chunks_trigram_au" not in legacy:
             return False
-        if not row or not row[0]:
-            return False
-        if "UPDATE chunks_fts_trigram" not in row[0]:
-            return False
-        from common.log import logger
-        logger.warning(
-            "[MemoryStorage] Replacing legacy chunks_trigram_au trigger; "
-            "rebuilding the trigram index in the background."
-        )
-        self.conn.execute("DROP TRIGGER IF EXISTS chunks_trigram_au")
         self.conn.execute("DELETE FROM _meta WHERE key = ?", (_TRIGRAM_DONE,))
         return True
 
@@ -588,15 +607,16 @@ class MemoryStorage:
         """)
         conn.execute("""
             CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
-                DELETE FROM chunks_fts WHERE rowid = old.rowid;
+                INSERT INTO chunks_fts(chunks_fts, rowid, text, id, user_id, path, source, scope)
+                VALUES ('delete', old.rowid, old.text, old.id, old.user_id, old.path, old.source, old.scope);
             END
         """)
         conn.execute("""
             CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
-                UPDATE chunks_fts SET text = new.text, id = new.id,
-                                     user_id = new.user_id, path = new.path,
-                                     source = new.source, scope = new.scope
-                WHERE rowid = new.rowid;
+                INSERT INTO chunks_fts(chunks_fts, rowid, text, id, user_id, path, source, scope)
+                VALUES ('delete', old.rowid, old.text, old.id, old.user_id, old.path, old.source, old.scope);
+                INSERT INTO chunks_fts(rowid, text, id, user_id, path, source, scope)
+                VALUES (new.rowid, new.text, new.id, new.user_id, new.path, new.source, new.scope);
             END
         """)
 
@@ -633,7 +653,8 @@ class MemoryStorage:
         conn.execute("""
             CREATE TRIGGER IF NOT EXISTS chunks_trigram_ad
             AFTER DELETE ON chunks BEGIN
-                DELETE FROM chunks_fts_trigram WHERE rowid = old.rowid;
+                INSERT INTO chunks_fts_trigram(chunks_fts_trigram, rowid, text, id, user_id, path, source, scope)
+                VALUES ('delete', old.rowid, old.text, old.id, old.user_id, old.path, old.source, old.scope);
             END
         """)
         # External-content FTS5 requires the delete+insert pattern on
@@ -800,7 +821,47 @@ class MemoryStorage:
             return None
         
         return self._row_to_chunk(row)
-    
+
+    def record_hits(self, keys: List[Tuple[str, int, int]]):
+        """Count one retrieval hit per chunk key (path, start_line, end_line).
+
+        Called from the search path, so it stays a single small transaction
+        that only touches the matched rows. Callers are expected to wrap it in
+        try/except: bookkeeping must never break the search that produced it.
+        """
+        if not keys:
+            return
+        with self._lock:
+            try:
+                self.conn.executemany(
+                    "UPDATE chunks SET hit_count = hit_count + 1, "
+                    "last_hit_at = strftime('%s', 'now') "
+                    "WHERE path = ? AND start_line = ? AND end_line = ?",
+                    [(path, start_line, end_line) for path, start_line, end_line in keys],
+                )
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                raise
+
+    def get_hit_stats(
+        self, keys: List[Tuple[str, int, int]]
+    ) -> Dict[Tuple[str, int, int], Tuple[int, Optional[int]]]:
+        """Read (hit_count, last_hit_at) per chunk key; absent keys are omitted."""
+        stats: Dict[Tuple[str, int, int], Tuple[int, Optional[int]]] = {}
+        for path, start_line, end_line in keys:
+            row = self.conn.execute(
+                "SELECT hit_count, last_hit_at FROM chunks "
+                "WHERE path = ? AND start_line = ? AND end_line = ? LIMIT 1",
+                (path, start_line, end_line),
+            ).fetchone()
+            if row:
+                stats[(path, start_line, end_line)] = (
+                    int(row["hit_count"] or 0),
+                    row["last_hit_at"],
+                )
+        return stats
+
     def search_vector(
         self,
         query_embedding: List[float],
@@ -880,9 +941,11 @@ class MemoryStorage:
             if trigram_results:
                 return trigram_results
 
-        # Step 3: LIKE fallback — last resort (FTS5 unavailable, or CJK tokens
-        # shorter than 3 characters that trigram cannot match, e.g. a single-char query).
-        if not self.fts5_available or MemoryStorage._contains_cjk(query):
+        # Step 3: LIKE fallback — last resort (FTS5 unavailable, CJK queries
+        # trigram cannot match, or an FTS5 stage that found nothing).
+        if (not self.fts5_available
+                or MemoryStorage._contains_cjk(query)
+                or fts1_attempted):
             return self._search_like(query, user_id, scopes, limit)
 
         return []
@@ -955,13 +1018,13 @@ class MemoryStorage:
         """LIKE-based search.
 
         Used as the keyword-search fallback when FTS5 is unavailable, fails,
-        or returns empty. Supports both CJK runs (1+ chars) and ASCII word
+        or returns empty. Supports both CJK runs (1+ chars) and Unicode word
         tokens (3+ chars) so it can serve as a true safety net for any query.
         """
-        # CJK runs (1+ chars, wide Unicode range) + ASCII words (3+ chars to avoid noise)
+        # Keep CJK runs separate from adjacent words, as in the trigram query.
         cjk_words = _RE_CJK_WORDS.findall(query)
-        ascii_words = [t for t in re.findall(r'[A-Za-z0-9_]+', query) if len(t) >= 3]
-        words = cjk_words + ascii_words
+        word_text = _RE_CONTAINS_CJK.sub(' ', query)
+        words = cjk_words + [t for t in re.findall(r'\w+', word_text) if len(t) >= 3]
         if not words:
             return []
 
@@ -1176,7 +1239,7 @@ class MemoryStorage:
     def _build_trigram_query(raw_query: str) -> Optional[str]:
         """
         Build FTS5 MATCH query for the trigram tokenizer.
-        Extracts CJK sequences (including single characters) and ASCII words,
+        Extracts CJK sequences (including single characters) and Unicode words,
         joining them with AND so all terms must appear in the matched chunk.
         """
         tokens = _RE_TRIGRAM_TOKENS.findall(raw_query)
@@ -1253,8 +1316,8 @@ class MemoryStorage:
         Works best for English and word-based languages.
         For CJK characters, LIKE search will be used as fallback.
         """
-        # Extract words (primarily English words and numbers)
-        tokens = re.findall(r'[A-Za-z0-9_]+', raw_query)
+        # SQLite's unicode61 tokenizer supports words outside the ASCII alphabet.
+        tokens = re.findall(r'\w+', raw_query)
         if not tokens:
             return None
         

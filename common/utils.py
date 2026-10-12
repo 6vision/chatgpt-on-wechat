@@ -1,3 +1,4 @@
+import hmac
 import io
 import os
 import re
@@ -42,6 +43,8 @@ def compress_imgfile(file, max_size):
 
 
 def split_string_by_utf8_length(string, max_length, max_split=0):
+    if max_length <= 0:
+        raise ValueError("max_length must be positive")
     encoded = string.encode("utf-8")
     start, end = 0, 0
     result = []
@@ -53,13 +56,17 @@ def split_string_by_utf8_length(string, max_length, max_split=0):
         # 如果当前字节不是 UTF-8 编码的开始字节，则向前查找直到找到开始字节为止
         while end < len(encoded) and (encoded[end] & 0b11000000) == 0b10000000:
             end -= 1
+        if end == start:
+            raise ValueError("max_length cannot fit the next UTF-8 character")
         result.append(encoded[start:end].decode("utf-8"))
         start = end
     return result
 
 
 def get_path_suffix(path):
-    path = urlparse(path).path
+    # Local filenames may legitimately contain URL query/fragment characters.
+    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", path):
+        path = urlparse(path).path
     return os.path.splitext(path)[-1].lstrip('.')
 
 
@@ -121,6 +128,19 @@ def expand_path(path: str) -> str:
                 expanded = os.path.join(home, path[2:])
     
     return expanded
+
+
+def constant_time_equals(left: str, right: str) -> bool:
+    """Timing-safe string comparison that answers False instead of raising.
+
+    ``hmac.compare_digest`` raises on non-ASCII ``str``, so request-supplied
+    values are compared as UTF-8 bytes; ``surrogatepass`` also covers the lone
+    surrogates JSON and query strings can carry.
+    """
+    return hmac.compare_digest(
+        left.encode("utf-8", "surrogatepass"),
+        right.encode("utf-8", "surrogatepass"),
+    )
 
 
 def is_cloud_deployment() -> bool:
@@ -324,3 +344,48 @@ def get_cloud_headers(api_key: str) -> dict:
         pass
     apply_client_source(headers)
     return apply_cloud_user(headers)
+
+
+_TAIL_CHUNK_BYTES = 8192
+
+
+def tail_lines(path, limit, end_offset=None):
+    """Return the last *limit* lines of *path*, without reading the whole file.
+
+    Lines keep their trailing newline (the last one may have none).
+    An optional byte offset limits replay to an already captured file boundary.
+    """
+    if limit <= 0:
+        return []
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        remaining = f.tell()
+        if end_offset is not None:
+            remaining = min(remaining, end_offset)
+        blocks = []
+        newlines = 0
+        while remaining > 0 and newlines <= limit:
+            read_size = min(_TAIL_CHUNK_BYTES, remaining)
+            remaining -= read_size
+            f.seek(remaining)
+            block = f.read(read_size)
+            newlines += block.count(b"\n")
+            blocks.append(block)
+        data = b"".join(reversed(blocks))
+    return [
+        line.decode("utf-8", errors="replace")
+        for line in data.splitlines(keepends=True)[-limit:]
+    ]
+
+
+# requests quotes the full URL, query included, in the exceptions it raises.
+_SECRET_QUERY_RE = re.compile(
+    r"((?:access_token|refresh_token|api_key|apikey|client_secret|client_id"
+    r"|app_secret|app_key|secret|token|password)=)[^&\s\"')\]]+",
+    re.IGNORECASE,
+)
+
+
+def scrub_secrets(text) -> str:
+    """Mask credential query values in *text* before it is logged or shown."""
+    return _SECRET_QUERY_RE.sub(r"\1***", str(text))

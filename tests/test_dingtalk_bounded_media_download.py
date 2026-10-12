@@ -94,3 +94,18 @@ def test_local_file_url_still_uploaded(monkeypatch, tmp_path):
     post = FakeResp(json_data={"errcode": 0, "media_id": "mid-2"})
     _stub(monkeypatch, FakeResp(), post, tmp_path)
     assert _channel().upload_media("file://" + str(local), "video") == "mid-2"
+
+
+def test_http_url_download_is_guarded(monkeypatch, tmp_path):
+    from channel.dingtalk import dingtalk_channel as mod
+
+    seen = {}
+
+    def download_to_file(url, path, max_bytes, **kwargs):
+        seen.update(kwargs)
+        raise mod.MediaTooLargeError("stop")
+
+    _stub(monkeypatch, FakeResp(), FakeResp(), tmp_path)
+    monkeypatch.setattr(mod, "download_to_file", download_to_file)
+    assert _channel().upload_media("https://cdn.example/a.pdf", "file") is None
+    assert seen.get("guarded") is True

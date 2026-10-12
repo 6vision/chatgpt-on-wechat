@@ -17,6 +17,11 @@ from common.log import logger
 from config import conf
 
 
+# `tool_call` / `skill_call` would run a tool on a timer without the agent's
+# permission check, so neither route may produce them.
+_ALLOWED_ACTION_TYPES = ("send_message", "agent_task")
+
+
 def _resolve_instance_agent_id(instance_id: str) -> str:
     """The Agent a channel instance is currently bound to, or "" for none.
 
@@ -244,9 +249,16 @@ class SchedulerToggleHandler:
             store = _global_task_store()
             if store is None:
                 return json.dumps({"status": "error", "message": "Scheduler store unavailable"})
-            store.enable_task(task_id, enabled)
             task = store.get_task(task_id)
-            return json.dumps({"status": "success", "task": task}, ensure_ascii=False)
+            if not task:
+                return json.dumps(
+                    {"status": "error", "message": f"Task '{task_id}' not found"}
+                )
+            store.enable_task(task_id, enabled)
+            return json.dumps(
+                {"status": "success", "task": store.get_task(task_id)},
+                ensure_ascii=False,
+            )
         except Exception as e:
             logger.error(f"[WebChannel] Scheduler toggle error: {e}")
             return json.dumps({"status": "error", "message": str(e)})
@@ -282,7 +294,13 @@ class SchedulerUpdateHandler:
             
             # Update schedule
             if "schedule" in body:
-                updates["schedule"] = body["schedule"]
+                schedule_patch = body["schedule"]
+                if not isinstance(schedule_patch, dict) or not schedule_patch.get("type"):
+                    return json.dumps({
+                        "status": "error",
+                        "message": "schedule must be an object with a type"
+                    }, ensure_ascii=False)
+                updates["schedule"] = schedule_patch
                 # If schedule config changed, recalculate next_run_at
                 # Build merged temp task data for calculation (without modifying the original object)
                 merged = dict(original_task)
@@ -320,6 +338,11 @@ class SchedulerUpdateHandler:
                 action = dict(original_action)
                 action.update(action_patch)
                 action_type = action.get("type")
+                if action_type not in _ALLOWED_ACTION_TYPES:
+                    return json.dumps({
+                        "status": "error",
+                        "message": "unsupported action type",
+                    }, ensure_ascii=False)
                 if action_type == "send_message":
                     action.pop("task_description", None)
                     action.pop("silent", None)
@@ -354,29 +377,39 @@ class SchedulerUpdateHandler:
                     # actually owns it.
                     new_instance = (action.get("instance_id") or channel_type).strip()
                     new_receiver = action.get("receiver")
-                    changed = (
+                    repointed = (
                         channel_type != old_channel
                         or new_instance != (original_action.get("instance_id") or old_channel)
                         or new_receiver != original_action.get("receiver")
                     )
-                    if changed:
-                        from agent.tools.scheduler.integration import get_recipient_store
-                        target = get_recipient_store().get(new_instance, new_receiver)
-                        if not target:
-                            return json.dumps({
-                                "status": "error",
-                                "message": "recipient is not in the trusted directory",
-                            }, ensure_ascii=False)
-                        action["channel_type"] = target["channel_type"]
-                        action["instance_id"] = target.get("instance_id") or new_instance
-                        action["receiver"] = target["receiver"]
-                        action["receiver_name"] = target.get("name") or target["receiver"]
-                        action["is_group"] = bool(target.get("is_group", False))
-                        action["notify_session_id"] = target.get("session_id") or target["receiver"]
-                        # No need to touch agent_id: the effective owner of an IM
-                        # task is derived from instance_id's live binding, so
-                        # switching the delivery instance here already moves the
-                        # task to the new instance's Agent on the next tick.
+                    from agent.tools.scheduler.integration import get_recipient_store
+                    target = get_recipient_store().get(new_instance, new_receiver)
+                    if repointed and not target:
+                        return json.dumps({
+                            "status": "error",
+                            "message": "recipient is not in the trusted directory",
+                        }, ensure_ascii=False)
+                    # The delivery identity (notify_session_id decides where output is written)
+                    # never comes from the request body: re-derive it from the directory on every
+                    # IM edit, falling back to the stored value when the recipient is unknown.
+                    source = target or original_action
+                    action["channel_type"] = source.get("channel_type") or channel_type
+                    action["instance_id"] = source.get("instance_id") or new_instance
+                    action["receiver"] = source.get("receiver") or new_receiver
+                    action["receiver_name"] = (
+                        source.get("name")
+                        or source.get("receiver_name")
+                        or action["receiver"]
+                    )
+                    action["is_group"] = bool(
+                        source.get("is_group", action.get("is_group", False))
+                    )
+                    action["notify_session_id"] = (
+                        source.get("session_id")
+                        or source.get("notify_session_id")
+                        or action["receiver"]
+                    )
+                    # agent_id follows instance_id's live binding, so it needs no update here.
                 updates["action"] = action
                 
                 # If schedule was not updated but action was, ensure next_run_at exists
@@ -590,7 +623,7 @@ class SchedulerCreateHandler:
                 return json.dumps({"status": "error", "message": "action is required"})
 
             action_type = action_in.get("type")
-            if action_type not in ("send_message", "agent_task"):
+            if action_type not in _ALLOWED_ACTION_TYPES:
                 return json.dumps({"status": "error", "message": "unsupported action type"})
 
             channel_type = (action_in.get("channel_type") or "").strip()

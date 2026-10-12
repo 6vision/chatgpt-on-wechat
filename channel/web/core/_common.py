@@ -17,6 +17,8 @@ import hmac
 import json
 import os
 import re
+import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -32,6 +34,7 @@ from bridge.context import ContextType
 from channel.chat_message import ChatMessage
 from common.channel_registry import get_channel_manager
 from common.log import logger
+from common.utils import constant_time_equals
 from config import conf, get_data_root, read_config_template
 
 
@@ -56,6 +59,21 @@ def _is_loopback_request() -> bool:
     return addr in ("::1", "::ffff:127.0.0.1") or addr.startswith("127.")
 
 
+def _can_reveal_in_file_manager() -> bool:
+    """Whether opening a folder here lands in front of the person asking.
+
+    Only when the browser is on this very machine and the machine has a
+    desktop: for a remote or proxied console, or a headless server, the file
+    manager would open somewhere nobody is looking, if at all.
+    """
+    if not _is_loopback_request():
+        return False
+    if sys.platform in ("darwin", "win32"):
+        return True
+    has_display = os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    return bool(has_display and shutil.which("xdg-open"))
+
+
 def _desktop_token_matches() -> bool:
     """Whether the request carries the secret the desktop shell handed us.
 
@@ -70,7 +88,7 @@ def _desktop_token_matches() -> bool:
         return False
     env = getattr(web.ctx, "env", {}) or {}
     provided = env.get("HTTP_X_COW_DESKTOP_TOKEN", "")
-    return bool(provided) and hmac.compare_digest(provided, expected)
+    return bool(provided) and constant_time_equals(provided, expected)
 
 
 @dataclass
@@ -103,9 +121,6 @@ def _read_config_file_for_write() -> dict:
     """
     config_path = os.path.join(get_data_root(), "config.json")
     if os.path.exists(config_path):
-        # utf-8-sig tolerates a UTF-8 BOM (common when the file was edited with
-        # Windows Notepad / PowerShell). Plain utf-8 would raise "Unexpected
-        # UTF-8 BOM" here and fail every config write from the web console.
         with open(config_path, "r", encoding="utf-8-sig") as f:
             return json.load(f)
     return read_config_template()
@@ -269,7 +284,7 @@ def _verify_auth_token(token):
         ts_hex.encode(),
         hashlib.sha256,
     ).hexdigest()
-    return hmac.compare_digest(sig, expected)
+    return constant_time_equals(sig, expected)
 
 
 def _get_bearer_token():

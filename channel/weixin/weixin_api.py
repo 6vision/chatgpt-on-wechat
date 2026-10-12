@@ -16,13 +16,13 @@ import base64
 import hashlib
 import os
 import random
-import struct
 import time
 import uuid
 
 import requests
 
 from common.log import logger
+from common.media_download import MAX_FILE_BYTES, read_response
 
 DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com"
 CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c"
@@ -34,6 +34,15 @@ BOT_TYPE = "3"
 # Retry policy for outbound sendMessage calls on transient transport errors.
 SEND_RETRIES = 2
 SEND_RETRY_BACKOFF_BASE = 1.0
+
+# Transient transport errors worth retrying. A read timeout is not one of them:
+# the request may already have been delivered, so a retry could send it twice.
+RETRYABLE_ERRORS = (
+    requests.exceptions.ConnectTimeout,
+    requests.exceptions.SSLError,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.ChunkedEncodingError,
+)
 
 
 # The Weixin CDN only accepts legacy TLS1.2 + RSA cipher suites (e.g.
@@ -143,15 +152,10 @@ class WeixinApi:
                 resp = requests.post(url, json=body, headers=headers, timeout=timeout)
                 resp.raise_for_status()
                 return resp.json()
-            except requests.exceptions.Timeout:
-                logger.debug(f"[Weixin] API timeout: {endpoint}")
-                return {"ret": 0, "msgs": []}
-            except (requests.exceptions.SSLError,
-                    requests.exceptions.ConnectionError,
-                    requests.exceptions.ChunkedEncodingError) as e:
-                # Transient transport-level errors (e.g. SSLEOFError from the
-                # peer dropping the connection) are usually recoverable, so
-                # retry a few times with exponential backoff before giving up.
+            except requests.exceptions.ReadTimeout as e:
+                logger.error(f"[Weixin] API read timeout {endpoint}: {e}")
+                raise
+            except RETRYABLE_ERRORS as e:
                 if attempt < retries:
                     backoff = SEND_RETRY_BACKOFF_BASE * (2 ** attempt)
                     attempt += 1
@@ -169,9 +173,14 @@ class WeixinApi:
     # ── getUpdates (long-poll) ─────────────────────────────────────────
 
     def get_updates(self, get_updates_buf: str = "", timeout: int = DEFAULT_LONG_POLL_TIMEOUT) -> dict:
-        return self._post("ilink/bot/getupdates", {
-            "get_updates_buf": get_updates_buf,
-        }, timeout=timeout + 5)
+        try:
+            return self._post("ilink/bot/getupdates", {
+                "get_updates_buf": get_updates_buf,
+            }, timeout=timeout + 5)
+        except requests.exceptions.ReadTimeout:
+            # A long poll that times out just means no message arrived.
+            logger.debug("[Weixin] getUpdates read timeout: empty poll")
+            return {"ret": 0, "msgs": []}
 
     # ── sendMessage ────────────────────────────────────────────────────
 
@@ -328,7 +337,9 @@ def _aes_ecb_decrypt(data: bytes, key: bytes) -> bytes:
     cipher = AES.new(key, AES.MODE_ECB)
     decrypted = cipher.decrypt(data)
     pad_len = decrypted[-1]
-    if pad_len > 16:
+    # 0 is never a PKCS#7 pad length (the encoding always emits 1..16), and
+    # data[:-0] is the empty sequence, so it would discard the whole plaintext.
+    if pad_len == 0 or pad_len > 16:
         return decrypted
     return decrypted[:-pad_len]
 
@@ -463,8 +474,9 @@ def download_media_from_cdn(cdn_base_url: str, encrypt_query_param: str,
     """
     from urllib.parse import quote
     url = f"{cdn_base_url}/download?encrypted_query_param={quote(encrypt_query_param)}"
-    resp = _get_cdn_session().get(url, timeout=60)
+    resp = _get_cdn_session().get(url, timeout=60, stream=True)
     resp.raise_for_status()
+    body = read_response(resp, MAX_FILE_BYTES)
 
     # Determine key format:
     # 1) 32-char hex string → 16 raw bytes
@@ -480,13 +492,13 @@ def download_media_from_cdn(cdn_base_url: str, encrypt_query_param: str,
             try:
                 key_bytes = bytes.fromhex(decoded.decode("ascii"))
             except (ValueError, UnicodeDecodeError):
-                raise ValueError(f"Invalid AES key: 32 bytes but not valid hex")
+                raise ValueError("Invalid AES key: 32 bytes but not valid hex")
         elif len(decoded) == 16:
             key_bytes = decoded
         else:
             raise ValueError(f"Invalid AES key length after base64 decode: {len(decoded)}")
 
-    decrypted = _aes_ecb_decrypt(resp.content, key_bytes)
+    decrypted = _aes_ecb_decrypt(body, key_bytes)
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     with open(save_path, "wb") as f:

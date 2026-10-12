@@ -18,6 +18,7 @@ from channel.web.core._common import (
     _session_expire_seconds,
 )
 from common.log import logger
+from common.utils import constant_time_equals
 
 
 def _create_auth_token():
@@ -110,7 +111,7 @@ class AuthLoginHandler:
             return json.dumps({"status": "error", "message": "Invalid request"})
         password = str(data.get("password", "") or "")
         expected = _get_web_password()
-        if not hmac.compare_digest(password, expected):
+        if not constant_time_equals(password, expected):
             logger.warning("[WebChannel] Invalid login attempt")
             return json.dumps({"status": "error", "message": "Wrong password"})
         token = _create_auth_token()

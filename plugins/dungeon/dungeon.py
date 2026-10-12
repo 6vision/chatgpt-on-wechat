@@ -69,6 +69,8 @@ class Dungeon(Plugin):
             return
         bot = Bridge().get_bot("chat")
         content = e_context["context"].content[:]
+        if not content.strip():
+            return
         clist = e_context["context"].content.split(maxsplit=1)
         sessionid = e_context["context"]["session_id"]
         logger.debug("[Dungeon] on_handle_context. content: %s" % clist)
