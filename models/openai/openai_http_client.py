@@ -440,36 +440,42 @@ class OpenAIHTTPClient:
             return
 
         if resp.status_code >= 400:
-            # Read full body once for error reporting
             try:
-                body = resp.json()
-            except ValueError:
-                body = {"raw": resp.text[:1000]}
-            err_msg = ""
-            err_code = ""
-            err_type = ""
-            if isinstance(body, dict):
-                err = body.get("error") or {}
-                if isinstance(err, dict):
-                    err_msg = err.get("message") or ""
-                    err_code = err.get("code") or ""
-                    err_type = err.get("type") or ""
-                elif isinstance(err, str):
-                    err_msg = err
-            if not err_msg:
-                err_msg = str(body)[:500]
-            yield {
-                "error": {
+                # Read full body once for error reporting
+                try:
+                    body = resp.json()
+                except ValueError:
+                    body = {"raw": resp.text[:1000]}
+                err_msg = ""
+                err_code = ""
+                err_type = ""
+                if isinstance(body, dict):
+                    err = body.get("error") or {}
+                    if isinstance(err, dict):
+                        err_msg = err.get("message") or ""
+                        err_code = err.get("code") or ""
+                        err_type = err.get("type") or ""
+                    elif isinstance(err, str):
+                        err_msg = err
+                if not err_msg:
+                    err_msg = str(body)[:500]
+                yield {
+                    "error": {
+                        "message": err_msg,
+                        "code": err_code,
+                        "type": err_type,
+                    },
+                    # Top-level fields kept for backward compatibility with the
+                    # error-shape that `_handle_stream_response` previously emitted.
                     "message": err_msg,
-                    "code": err_code,
-                    "type": err_type,
-                },
-                # Top-level fields kept for backward compatibility with the
-                # error-shape that `_handle_stream_response` previously emitted.
-                "message": err_msg,
-                "status_code": resp.status_code,
-            }
-            return
+                    "status_code": resp.status_code,
+                }
+                return
+            finally:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
 
         # IMPORTANT: do NOT use `iter_lines(decode_unicode=True)`.
         #
