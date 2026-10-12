@@ -29,6 +29,7 @@ is worth a word.
 import fnmatch
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -718,7 +719,8 @@ class SearchFiles(BaseTool):
 
     def _python_scan_file(self, fp: str, compiled, opts: "_SearchOptions") -> Tuple[List[dict], bool, bool]:
         try:
-            if os.path.getsize(fp) > MAX_FILE_BYTES:
+            info = os.stat(fp)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_FILE_BYTES:
                 return [], False, False
         except OSError:
             return [], False, False
