@@ -116,12 +116,12 @@ def _get_api_key(provider: str) -> str:
 
 def _anysearch_anonymous_enabled() -> bool:
     """Check if AnySearch anonymous mode is enabled via config."""
-    return bool(_tools_web_search_conf().get("anysearch_anonymous"))
+    return _tools_web_search_conf().get("anysearch_anonymous") is True
 
 
 def _keenable_anonymous_enabled() -> bool:
     """Check if Keenable anonymous (keyless) mode is enabled via config."""
-    return bool(_tools_web_search_conf().get("keenable_anonymous"))
+    return _tools_web_search_conf().get("keenable_anonymous") is True
 
 
 def _get_searxng_url() -> str:
