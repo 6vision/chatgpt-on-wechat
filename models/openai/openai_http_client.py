@@ -25,6 +25,7 @@ Design goals:
 import hashlib
 import json
 import os
+import re
 import uuid
 from typing import Any, Dict, Generator, Optional
 from urllib.parse import urlparse
@@ -439,36 +440,42 @@ class OpenAIHTTPClient:
             return
 
         if resp.status_code >= 400:
-            # Read full body once for error reporting
             try:
-                body = resp.json()
-            except ValueError:
-                body = {"raw": resp.text[:1000]}
-            err_msg = ""
-            err_code = ""
-            err_type = ""
-            if isinstance(body, dict):
-                err = body.get("error") or {}
-                if isinstance(err, dict):
-                    err_msg = err.get("message") or ""
-                    err_code = err.get("code") or ""
-                    err_type = err.get("type") or ""
-                elif isinstance(err, str):
-                    err_msg = err
-            if not err_msg:
-                err_msg = str(body)[:500]
-            yield {
-                "error": {
+                # Read full body once for error reporting
+                try:
+                    body = resp.json()
+                except ValueError:
+                    body = {"raw": resp.text[:1000]}
+                err_msg = ""
+                err_code = ""
+                err_type = ""
+                if isinstance(body, dict):
+                    err = body.get("error") or {}
+                    if isinstance(err, dict):
+                        err_msg = err.get("message") or ""
+                        err_code = err.get("code") or ""
+                        err_type = err.get("type") or ""
+                    elif isinstance(err, str):
+                        err_msg = err
+                if not err_msg:
+                    err_msg = str(body)[:500]
+                yield {
+                    "error": {
+                        "message": err_msg,
+                        "code": err_code,
+                        "type": err_type,
+                    },
+                    # Top-level fields kept for backward compatibility with the
+                    # error-shape that `_handle_stream_response` previously emitted.
                     "message": err_msg,
-                    "code": err_code,
-                    "type": err_type,
-                },
-                # Top-level fields kept for backward compatibility with the
-                # error-shape that `_handle_stream_response` previously emitted.
-                "message": err_msg,
-                "status_code": resp.status_code,
-            }
-            return
+                    "status_code": resp.status_code,
+                }
+                return
+            finally:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
 
         # IMPORTANT: do NOT use `iter_lines(decode_unicode=True)`.
         #
@@ -529,73 +536,54 @@ class OpenAIHTTPClient:
         ``[DONE]`` is yielded as a literal string so the caller can break.
         """
         buf = b""
-        for raw in resp.iter_content(chunk_size=None, decode_unicode=False):
-            if not raw:
-                continue
-            buf += raw
-            # Find complete events (terminated by a blank line).
-            while True:
-                # Look for the earliest event terminator. SSE allows three
-                # forms; check all and pick the earliest match.
-                idx_nn = buf.find(b"\n\n")
-                idx_rr = buf.find(b"\r\r")
-                idx_rnrn = buf.find(b"\r\n\r\n")
-                candidates = [i for i in (idx_nn, idx_rr, idx_rnrn) if i != -1]
-                if not candidates:
-                    break
-                # We need to know the length of the matched terminator to
-                # advance past it correctly.
-                end_pos = min(candidates)
-                if end_pos == idx_rnrn:
-                    term_len = 4
-                else:
-                    term_len = 2
-                event_bytes = buf[:end_pos]
-                buf = buf[end_pos + term_len:]
+        data_lines = []
+        first_line = True
+        skip_lf = False
+        newline = re.compile(rb"\r\n|\r|\n")
 
-                # Decode the full event as UTF-8. ``errors="replace"`` is a
-                # belt-and-suspenders safety net for truly malformed upstream
-                # bytes; it should never trigger for well-formed providers.
-                try:
-                    event_text = event_bytes.decode("utf-8")
-                except UnicodeDecodeError:
-                    event_text = event_bytes.decode("utf-8", errors="replace")
-
-                data_lines = []
-                for line in event_text.splitlines():
-                    if not line or line.startswith(":"):
-                        continue
-                    field, _, value = line.partition(":")
-                    # Per SSE spec, a single optional space after the colon
-                    # is part of the framing, not the value.
-                    if value.startswith(" "):
-                        value = value[1:]
-                    if field == "data":
-                        data_lines.append(value)
-                    # Other fields (event/id/retry) are intentionally ignored
-                    # — chat-completion endpoints don't use them in a way we
-                    # need for parsing.
+        def consume_line(raw_line):
+            nonlocal first_line
+            # Only the stream's initial BOM is framing. Other Unicode line
+            # separators are payload and must survive inside JSON strings.
+            encoding = "utf-8-sig" if first_line else "utf-8"
+            first_line = False
+            line = raw_line.decode(encoding, errors="replace")
+            if not line:
                 if data_lines:
-                    yield "\n".join(data_lines)
-
-        # Flush any trailing bytes the server forgot to terminate. This is
-        # rare but spec-allowed (some providers omit the final \n\n).
-        if buf.strip():
-            try:
-                event_text = buf.decode("utf-8")
-            except UnicodeDecodeError:
-                event_text = buf.decode("utf-8", errors="replace")
-            data_lines = []
-            for line in event_text.splitlines():
-                if not line or line.startswith(":"):
-                    continue
+                    event = "\n".join(data_lines)
+                    data_lines.clear()
+                    return event
+            elif not line.startswith(":"):
                 field, _, value = line.partition(":")
                 if value.startswith(" "):
                     value = value[1:]
                 if field == "data":
                     data_lines.append(value)
-            if data_lines:
-                yield "\n".join(data_lines)
+            return None
+
+        for raw in resp.iter_content(chunk_size=None, decode_unicode=False):
+            if not raw:
+                continue
+            # A CR at a network-chunk boundary already ended its line. The
+            # optional following LF belongs to that same delimiter.
+            if skip_lf:
+                if raw.startswith(b"\n"):
+                    raw = raw[1:]
+                skip_lf = False
+            buf += raw
+            while (match := newline.search(buf)) is not None:
+                raw_line = buf[:match.start()]
+                skip_lf = match.group() == b"\r" and match.end() == len(buf)
+                buf = buf[match.end():]
+                event = consume_line(raw_line)
+                if event is not None:
+                    yield event
+
+        # Preserve compatibility with proxies that omit the final blank line.
+        if buf:
+            consume_line(buf)
+        if data_lines:
+            yield "\n".join(data_lines)
 
     @staticmethod
     def _make_error_chunk(status_code: int, message: str) -> Dict[str, Any]:

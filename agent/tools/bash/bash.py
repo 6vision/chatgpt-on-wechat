@@ -202,7 +202,7 @@ SAFETY:
             if os.path.exists(env_file):
                 try:
                     from dotenv import dotenv_values
-                    dotenv_vars = dotenv_values(env_file)
+                    dotenv_vars = {key: value for key, value in dotenv_values(env_file).items() if value is not None}
                     env.update(dotenv_vars)
                     logger.debug(f"[Bash] Loaded {len(dotenv_vars)} variables from {env_file}")
                 except ImportError:

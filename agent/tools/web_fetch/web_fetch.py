@@ -20,7 +20,7 @@ from agent.tools.base_tool import BaseTool, ToolResult
 from agent.tools.utils.truncate import truncate_head, format_size
 from agent.tools.utils.url_safety import validate_url_safe, safe_get
 from common.log import logger
-from common.media_download import MediaTooLargeError, read_response
+from common.media_download import MediaTooLargeError, read_response, save_response
 
 
 DEFAULT_TIMEOUT = 30
@@ -233,8 +233,13 @@ class WebFetch(BaseTool):
 
             response.encoding = self._detect_encoding(response)
             html = response.text
-            title = self._extract_title(html)
-            text = self._extract_text(html)
+            media_type = content_type.split(";", 1)[0].strip().lower()
+            if media_type in ("text/plain", "application/json"):
+                title = "Untitled"
+                text = html
+            else:
+                title = self._extract_title(html)
+                text = self._extract_text(html)
 
             return ToolResult.success(f"Title: {title}\n\nContent:\n{text}")
         finally:
@@ -262,24 +267,17 @@ class WebFetch(BaseTool):
                     response = self._safe_get(url, stream=True)
                 response.raise_for_status()
 
-                content_length = int(response.headers.get("Content-Length", 0))
+                content_length = _parse_content_length(response)
                 if content_length > MAX_FILE_SIZE:
                     return ToolResult.fail(
                         f"Error: File too large ({format_size(content_length)} > {format_size(MAX_FILE_SIZE)})"
                     )
 
-                downloaded = 0
-                with open(local_path, "wb") as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        downloaded += len(chunk)
-                        if downloaded > MAX_FILE_SIZE:
-                            f.close()
-                            os.remove(local_path)
-                            return ToolResult.fail(
-                                f"Error: File too large (>{format_size(MAX_FILE_SIZE)}), download aborted"
-                            )
-                        f.write(chunk)
+                save_response(response, local_path, MAX_FILE_SIZE, max_seconds=PAGE_READ_SECONDS)
 
+            except MediaTooLargeError:
+                self._cleanup_file(local_path)
+                return ToolResult.fail(f"Error: File too large (>{format_size(MAX_FILE_SIZE)}), download aborted")
             except requests.Timeout:
                 self._cleanup_file(local_path)
                 return ToolResult.fail(f"Error: Download from {parsed.netloc} timed out after {DEFAULT_TIMEOUT}s")
