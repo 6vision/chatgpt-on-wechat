@@ -284,6 +284,24 @@ class SchedulerTool(BaseTool):
         # Calculate initial next_run_at
         next_run = self._calculate_next_run(task_data)
         if next_run:
+            # A one-time task whose run time has already passed would be
+            # stored all the same, then deleted on the service's first
+            # tick once the catch-up window has passed
+            # (SchedulerService._is_task_due): the reminder never fires
+            # and only a server-side log says why. Refuse it here, where
+            # the caller can still pick another time - the service's own
+            # _calculate_next_run answers a past run_at with no next run.
+            # Compared in the task's own mode (aware UTC for a declared
+            # zone, naive local otherwise) so a zoned task cannot raise
+            # a naive/aware TypeError.
+            if schedule.get("type") == "once" and next_run <= scheduled_reference_time(
+                task_data, datetime.now()
+            ):
+                return (
+                    f"错误: 定时时间已过去 - {schedule.get('run_at')}。"
+                    "一次性任务只能安排在将来的时间，请改用一个将来的时间"
+                    "或 +10m 这类相对时间。"
+                )
             task_data["next_run_at"] = next_run.isoformat()
         
         # Save task
