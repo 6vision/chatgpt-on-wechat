@@ -268,7 +268,7 @@ def _is_onboarding_done(workspace_dir: str) -> bool:
                 content = f.read()
         except Exception:
             continue
-        if not any(p in content for p in placeholders):
+        if content.strip() and not any(p in content for p in placeholders):
             return True
     return False
 
