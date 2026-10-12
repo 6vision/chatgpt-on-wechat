@@ -734,8 +734,12 @@ def _run_scheduled_task(
         elif action_type == "skill_call":
             ok = _execute_skill_call(task, agent_bridge, agent_id, output_sink=sink)
         else:
-            logger.warning(f"[Scheduler] Unknown action type: {action_type}")
-            ok = True
+            logger.warning(f"[Scheduler] Task {task.get('id')}: unknown action type: {action_type}")
+            # A permanent misconfiguration: retrying every tick can't help, so
+            # report it as handled (like other malformed tasks) but record the run as failed.
+            status = "error"
+            error = f"unknown action type: {action_type}"
+            return True
         if not ok:
             status = "error"
             error = "deferred or delivery failed"
