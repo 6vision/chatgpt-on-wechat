@@ -17,6 +17,9 @@ from common.log import logger
 from common.markdown_fence import replace_fenced_blocks
 
 _STREAM_THROTTLE_S = 0.15
+# How long the finalizing card update may take before we stop waiting; a
+# timeout feeds back into the delivery claim.
+_FINALIZE_JOIN_SECONDS = 8.0
 _FENCE_RE = re.compile(r"```[\w+-]*\n.*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 # Only real HTML element names are stripped: generics such as List<String>,
@@ -190,13 +193,14 @@ class DingTalkCardStreamer:
             if self._ensure_card() is None:
                 return
             if not markdown.strip():
-                self._submit("fail", wait=True)
+                delivered = self._submit("fail", wait=True)
             else:
                 body, buttons = build_dingtalk_card_finish_payload(
                     self.context, markdown
                 )
-                self._submit("finish", (body, buttons), wait=True)
-            self._mark_streamed()
+                delivered = self._submit("finish", (body, buttons), wait=True)
+            if delivered:
+                self._mark_streamed()
             return
 
         markdown = str(final_response) if final_response else accumulated
@@ -205,8 +209,8 @@ class DingTalkCardStreamer:
         if self._ensure_card() is None:
             return
         body, buttons = build_dingtalk_card_finish_payload(self.context, markdown)
-        self._submit("finish", (body, buttons), wait=True)
-        self._mark_streamed()
+        if self._submit("finish", (body, buttons), wait=True):
+            self._mark_streamed()
 
     def _mark_streamed(self) -> None:
         if self.context is None:
@@ -244,7 +248,7 @@ class DingTalkCardStreamer:
         return card
 
     def _start_worker(self) -> None:
-        if self.immediate or self._worker is not None:
+        if self.immediate or (self._worker is not None and self._worker.is_alive()):
             return
         worker = threading.Thread(
             target=self._run_worker,
@@ -255,12 +259,17 @@ class DingTalkCardStreamer:
         worker.start()
 
     def _run_worker(self) -> None:
-        while True:
-            item = self._queue.get()
-            if item is None:
-                return
-            kind, payload = item
-            self._apply(kind, payload)
+        try:
+            while True:
+                item = self._queue.get()
+                if item is None:
+                    return
+                kind, payload = item
+                self._apply(kind, payload)
+        finally:
+            # The sentinel retires this worker; drop it so _start_worker can start a new one.
+            if self._worker is threading.current_thread():
+                self._worker = None
 
     def _enqueue_stream(self, force: bool) -> None:
         with self._lock:
@@ -275,17 +284,27 @@ class DingTalkCardStreamer:
         self._last_streamed = markdown
         self._submit("stream", markdown, wait=False)
 
-    def _submit(self, kind: str, payload=None, wait: bool = False) -> None:
+    def _submit(self, kind: str, payload=None, wait: bool = False) -> bool:
+        """Queue one card update; report whether it was applied.
+        
+        Streaming pushes return True once queued; a waiting submit (finalize)
+        returns True only after the worker ran it, so send() knows whether it still
+        owes a webhook fallback.
+        """
         if self.immediate:
             self._apply(kind, payload)
-            return
+            return True
         if self._worker is None:
             self._start_worker()
         self._queue.put((kind, payload))
-        if wait:
-            self._queue.put(None)
-            if self._worker is not None:
-                self._worker.join(timeout=8)
+        if not wait:
+            return True
+        self._queue.put(None)
+        worker = self._worker
+        if worker is None:
+            return False
+        worker.join(timeout=_FINALIZE_JOIN_SECONDS)
+        return not worker.is_alive() and not self.disabled
 
     def _apply(self, kind: str, payload) -> None:
         card = self.card

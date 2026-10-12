@@ -742,10 +742,7 @@ class ModelScopeBot(Bot):
             
         except Exception as e:
             logger.error("[MODELSCOPE] stream tool call error: {}".format(e))
-            error_msg = "{}".format(e)
-            def error_generator():
-                yield {"error": True, "message": error_msg, "status_code": 500}
-            return error_generator()
+            yield {"error": True, "message": "{}".format(e), "status_code": 500}
 
     # ==================== Format Conversion ====================
 

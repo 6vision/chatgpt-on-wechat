@@ -68,8 +68,11 @@ def load_config_json() -> dict:
     if not os.path.exists(config_path):
         return {}
     try:
+        _ensure_project_on_path()
+        from cli.config_json import merge_duplicate_keys
+
         with open(config_path, "r", encoding="utf-8-sig") as f:
-            return json.load(f)
+            return json.load(f, object_pairs_hook=merge_duplicate_keys)
     except Exception:
         return {}
 

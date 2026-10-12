@@ -43,7 +43,7 @@ def test_exit_code_comes_from_the_last_command_in_the_chain():
 
 
 def test_separators_inside_quotes_do_not_split_the_command():
-    assert interpret('echo "a; b" && grep x f', 1) == (False, "No matches found")
+    assert interpret('echo "a; b"; grep x f', 1) == (False, "No matches found")
 
 
 def test_env_assignment_prefix_is_skipped():
@@ -69,3 +69,43 @@ def test_a_real_failure_is_still_reported(tmp_path):
     result = tool.execute({"command": "cat definitely-missing.txt"})
 
     assert result.status == "error"
+
+
+@posix_only
+@pytest.mark.parametrize("command", [
+    "false && grep hello f.txt",
+    "false && grep hello f.txt || false && grep hello f.txt",
+    "false && cat f.txt | grep hello",
+])
+def test_skipped_conditional_search_is_not_reported_as_no_matches(tmp_path, command):
+    (tmp_path / "f.txt").write_text("hello\n")
+    result = Bash({"cwd": str(tmp_path)}).execute({"command": command})
+    assert result.status == "error"
+    assert result.result["exit_code"] == 1
+    assert "No matches found" not in result.result["output"]
+
+
+@posix_only
+@pytest.mark.parametrize("command", [
+    "true && grep zzzz f.txt", "false || grep zzzz f.txt",
+])
+def test_conditional_exit_source_is_conservatively_unknown(tmp_path, command):
+    (tmp_path / "f.txt").write_text("hello\n")
+    result = Bash({"cwd": str(tmp_path)}).execute({"command": command})
+    assert result.status == "error"
+    assert result.result["exit_code"] == 1
+    assert "No matches found" not in result.result["output"]
+
+
+@posix_only
+@pytest.mark.parametrize("command", [
+    "false && cat f.txt; grep zzzz f.txt",
+    "false && cat f.txt\ngrep zzzz f.txt",
+    "cat f.txt | grep zzzz",
+    "grep 'z&&z' f.txt",
+])
+def test_unconditional_and_quoted_separator_controls_remain_informational(tmp_path, command):
+    (tmp_path / "f.txt").write_text("hello\n")
+    result = Bash({"cwd": str(tmp_path)}).execute({"command": command})
+    assert result.status == "success"
+    assert "No matches found" in result.result["output"]

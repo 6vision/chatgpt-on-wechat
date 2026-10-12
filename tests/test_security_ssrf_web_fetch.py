@@ -12,28 +12,10 @@ No real network is used: DNS resolution and ``requests.get`` are stubbed.
 """
 import os
 import sys
-import types
 import unittest
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-# Stub 'requests' if not installed so the module can be imported for testing.
-if "requests" not in sys.modules:
-    _requests_stub = types.ModuleType("requests")
-    _requests_stub.get = lambda *a, **k: None
-
-    class _Exc(Exception):
-        pass
-
-    _requests_stub.Timeout = type("Timeout", (_Exc,), {})
-    _requests_stub.ConnectionError = type("ConnectionError", (_Exc,), {})
-    _requests_stub.HTTPError = type("HTTPError", (_Exc,), {})
-    _requests_stub.Response = object
-    _compat = types.SimpleNamespace(urljoin=__import__("urllib.parse", fromlist=["urljoin"]).urljoin)
-    _requests_stub.compat = _compat
-    sys.modules["requests"] = _requests_stub
-
 
 def _gai(ip_str):
     """Build a socket.getaddrinfo return value for a single IPv4 address."""

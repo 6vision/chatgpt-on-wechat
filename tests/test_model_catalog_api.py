@@ -376,6 +376,12 @@ class TestCatalogNormalization(unittest.TestCase):
         entry = model_catalog.normalize_entry({"name": "m", "capabilities": ["text", "telepathy"]})
         self.assertEqual(entry["capabilities"], ["text"])
 
+    def test_a_capitalised_capability_is_kept_lowercased(self):
+        from models import model_catalog
+
+        entry = model_catalog.normalize_entry({"name": "m", "capabilities": [" Vision ", "TEXT"]})
+        self.assertEqual(entry["capabilities"], ["vision", "text"])
+
     def test_a_row_of_only_unknown_capabilities_falls_back_to_text(self):
         from models import model_catalog
 

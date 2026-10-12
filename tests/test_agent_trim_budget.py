@@ -7,7 +7,8 @@ even when the estimated token total was well under the model budget.
 The trimming pass now enforces both constraints together:
 - keep every complete turn while the history fits the input window *and*
   stays within ``max_context_turns``
-- discard only the minimum older turns needed when over budget
+- when over a limit, cut to TRIM_TARGET_RATIO of it (not half), so the next
+  turns append without another trim and the prompt prefix stays cacheable
 - apply ``max_context_turns`` as an explicit cost cap on what survives
 - flush / summarize only when turns were actually discarded
 """
@@ -93,8 +94,9 @@ def test_many_short_turns_under_budget_do_not_summarize():
 def test_turn_cap_trims_even_when_under_token_budget():
     """31 tiny turns fit the token budget but exceed the turn cap.
 
-    ``max_context_turns`` is an explicit cost limit, so the oldest turn is
-    still discarded (and summarized) even though the tokens would fit.
+    ``max_context_turns`` is an explicit cost limit, so older turns are still
+    discarded (and summarized) even though the tokens would fit; the cut goes
+    down to 24 turns (80% of the cap).
     """
     executor, memory_manager = _make_executor(
         turn_count=31,
@@ -106,10 +108,33 @@ def test_turn_cap_trims_even_when_under_token_budget():
     executor._trim_messages()
 
     kept_turns = identify_complete_turns(executor.messages)
-    assert len(kept_turns) == 30
-    assert _user_texts(executor.messages) == [f"q{i}" for i in range(1, 31)]
+    assert len(kept_turns) == 24
+    assert _user_texts(executor.messages) == [f"q{i}" for i in range(7, 31)]
     assert len(memory_manager.flush_calls) == 1
-    assert _user_texts(memory_manager.flush_calls[0]["messages"]) == ["q0"]
+    assert _user_texts(memory_manager.flush_calls[0]["messages"]) == [f"q{i}" for i in range(7)]
+
+
+def test_turns_after_a_trim_append_without_trimming_again():
+    """The history prefix must stay put for a while after a trim.
+
+    Dropping the oldest turn on every new message would change the start of
+    the prompt each request, so the provider's prefix cache would never hit.
+    """
+    executor, memory_manager = _make_executor(
+        turn_count=31,
+        max_context_turns=30,
+        tokens_per_message=1,
+        max_tokens=1000,
+    )
+    executor._trim_messages()
+    head = executor.messages[0]
+
+    executor.messages.extend(_make_turn_messages(1))
+    executor._trim_messages()
+
+    assert executor.messages[0] is head
+    assert len(identify_complete_turns(executor.messages)) == 25
+    assert len(memory_manager.flush_calls) == 1
 
 
 def test_over_budget_still_trims():
@@ -130,38 +155,39 @@ def test_over_budget_still_trims():
     assert executor.messages[-1]["content"][0]["text"] == "a9"
 
 
-def test_over_budget_discards_minimum_turns_not_half():
-    """Budget that fits 7 of 10 equal turns must keep 7, not drop half.
+def test_over_budget_trims_to_the_target_not_half():
+    """Over budget, keep what fits 80% of the budget, not half of the turns.
 
     Each turn is 2 messages * 100 tokens = 200. System prompt is 100.
-    max_tokens=1500 leaves a 1400-token turn budget = 7 turns.
-    The old half-drop would keep 5.
+    max_tokens=3100 leaves a 3000-token turn budget; the 2400-token target
+    keeps 12 of 20 turns. The old half-drop would keep 10.
     """
     executor, memory_manager = _make_executor(
-        turn_count=10,
+        turn_count=20,
         max_context_turns=30,
         tokens_per_message=100,
-        max_tokens=1500,
+        max_tokens=3100,
     )
 
     executor._trim_messages()
 
     kept_turns = identify_complete_turns(executor.messages)
-    assert len(kept_turns) == 7
-    assert _user_texts(executor.messages) == [f"q{i}" for i in range(3, 10)]
-    assert executor.messages[-1]["content"][0]["text"] == "a9"
+    assert len(kept_turns) == 12
+    assert _user_texts(executor.messages) == [f"q{i}" for i in range(8, 20)]
+    assert executor.messages[-1]["content"][0]["text"] == "a19"
     assert len(memory_manager.flush_calls) == 1
     flushed = memory_manager.flush_calls[0]["messages"]
-    assert _user_texts(flushed) == ["q0", "q1", "q2"]
+    assert _user_texts(flushed) == [f"q{i}" for i in range(8)]
     assert memory_manager.flush_calls[0]["reason"] == "trim"
     assert memory_manager.flush_calls[0]["context_summary_callback"] is not None
 
 
 def test_over_budget_respects_max_context_turns_safety_net():
-    """When already over budget, cap kept turns at max_context_turns.
+    """When already over budget, the turn cap still bounds what is kept.
 
     20 turns * 20 tokens = 400, system = 10, max_tokens=250 -> 240-token
-    budget keeps 12 turns. Safety net then caps at 8. Half-drop would keep 10.
+    budget, 192-token target keeps 9 turns. The turn target (80% of 8) then
+    caps at 6.
     """
     executor, memory_manager = _make_executor(
         turn_count=20,
@@ -173,8 +199,8 @@ def test_over_budget_respects_max_context_turns_safety_net():
     executor._trim_messages()
 
     kept_turns = identify_complete_turns(executor.messages)
-    assert len(kept_turns) == 8
-    assert _user_texts(executor.messages) == [f"q{i}" for i in range(12, 20)]
+    assert len(kept_turns) == 6
+    assert _user_texts(executor.messages) == [f"q{i}" for i in range(14, 20)]
     assert executor.messages[-1]["content"][0]["text"] == "a19"
     assert memory_manager.flush_calls
 

@@ -80,31 +80,36 @@ def _tools_web_search_conf() -> dict:
     return block if isinstance(block, dict) else {}
 
 
+def _conf_str(value, default: str = "") -> str:
+    """A stripped string config value; non-strings (hand-edited JSON) and blanks give ``default``."""
+    return (value.strip() if isinstance(value, str) else "") or default
+
+
 def _get_api_key(provider: str) -> str:
     """Resolve API key for a provider, with conf -> env fallback."""
     if provider == "bocha":
-        key = (_tools_web_search_conf().get("bocha_api_key") or "").strip()
+        key = _conf_str(_tools_web_search_conf().get("bocha_api_key"), "")
         return key or os.environ.get("BOCHA_API_KEY", "").strip()
     if provider == "zhipu":
-        key = (conf().get("zhipu_ai_api_key") or "").strip()
+        key = _conf_str(conf().get("zhipu_ai_api_key"), "")
         return key or os.environ.get("ZHIPUAI_API_KEY", "").strip()
     if provider == "qianfan":
-        key = (conf().get("qianfan_api_key") or "").strip()
+        key = _conf_str(conf().get("qianfan_api_key"), "")
         return key or os.environ.get("QIANFAN_API_KEY", "").strip()
     if provider == "linkai":
-        key = (conf().get("linkai_api_key") or "").strip()
+        key = _conf_str(conf().get("linkai_api_key"), "")
         return key or os.environ.get("LINKAI_API_KEY", "").strip()
     if provider == "anysearch":
-        key = (_tools_web_search_conf().get("anysearch_api_key") or "").strip()
+        key = _conf_str(_tools_web_search_conf().get("anysearch_api_key"), "")
         return key or os.environ.get("ANYSEARCH_API_KEY", "").strip()
     if provider == "serply":
-        key = (_tools_web_search_conf().get("serply_api_key") or "").strip()
+        key = _conf_str(_tools_web_search_conf().get("serply_api_key"), "")
         return key or os.environ.get("SERPLY_API_KEY", "").strip()
     if provider == "tavily":
-        key = (_tools_web_search_conf().get("tavily_api_key") or "").strip()
+        key = _conf_str(_tools_web_search_conf().get("tavily_api_key"), "")
         return key or os.environ.get("TAVILY_API_KEY", "").strip()
     if provider == "keenable":
-        key = (_tools_web_search_conf().get("keenable_api_key") or "").strip()
+        key = _conf_str(_tools_web_search_conf().get("keenable_api_key"), "")
         return key or os.environ.get("KEENABLE_API_KEY", "").strip()
     return ""
 
@@ -121,7 +126,7 @@ def _keenable_anonymous_enabled() -> bool:
 
 def _get_searxng_url() -> str:
     """Resolve SearXNG instance URL from config or environment."""
-    url = (_tools_web_search_conf().get("searxng_url") or "").strip()
+    url = _conf_str(_tools_web_search_conf().get("searxng_url"), "")
     return url or os.environ.get("SEARXNG_URL", "").strip()
 
 
@@ -143,11 +148,11 @@ def configured_providers() -> List[str]:
     return result
 
 def _configured_strategy() -> str:
-    return (_tools_web_search_conf().get("strategy") or "auto").strip().lower()
+    return _conf_str(_tools_web_search_conf().get("strategy"), "auto").lower()
 
 
 def _configured_provider() -> str:
-    return (_tools_web_search_conf().get("provider") or "").strip().lower()
+    return _conf_str(_tools_web_search_conf().get("provider"), "").lower()
 
 
 class WebSearch(BaseTool):
@@ -393,7 +398,7 @@ class WebSearch(BaseTool):
         # Zhipu Web Search expects `search_query` <= 70 chars; truncate
         # gracefully so a long agent-supplied query doesn't get rejected.
         trimmed_query = (query or "")[:70]
-        engine = (_tools_web_search_conf().get("zhipu_search_engine") or "search_pro").strip().lower()
+        engine = _conf_str(_tools_web_search_conf().get("zhipu_search_engine"), "search_pro").lower()
         if engine not in ("search_std", "search_pro", "search_pro_sogou", "search_pro_quark"):
             engine = "search_pro"
 
@@ -406,7 +411,7 @@ class WebSearch(BaseTool):
                 "oneDay", "oneWeek", "oneMonth", "oneYear", "noLimit"
             ) else "noLimit",
         }
-        content_size = (_tools_web_search_conf().get("zhipu_content_size") or "").strip().lower()
+        content_size = _conf_str(_tools_web_search_conf().get("zhipu_content_size"), "").lower()
         if content_size in ("medium", "high"):
             payload["content_size"] = content_size
 
@@ -587,12 +592,12 @@ class WebSearch(BaseTool):
         # AnySearch accepts 1-10 results; the shared tool schema allows 1-10.
         max_results = max(1, min(int(count or 10), 10))
         payload = {"query": query, "max_results": max_results, "format": "json"}
-        zone = (_tools_web_search_conf().get("anysearch_zone") or "").strip().lower()
+        zone = _conf_str(_tools_web_search_conf().get("anysearch_zone"), "").lower()
         if zone in ("cn", "intl"):
             payload["zone"] = zone
         # Forward any configured language; the API validates it. Whitelisting
         # only zh-CN/en silently dropped every other language the user set.
-        language = (_tools_web_search_conf().get("anysearch_language") or "").strip()
+        language = _conf_str(_tools_web_search_conf().get("anysearch_language"), "")
         if language:
             payload["language"] = language
         logger.debug(f"[WebSearch] anysearch: query='{query}', max_results={max_results}, has_key={bool(api_key)}")
@@ -871,7 +876,7 @@ class WebSearch(BaseTool):
             "Accept": "application/json",
         }
         max_results = max(1, min(int(count or 10), 20))
-        search_depth = (_tools_web_search_conf().get("tavily_search_depth") or "basic").strip().lower()
+        search_depth = _conf_str(_tools_web_search_conf().get("tavily_search_depth"), "basic").lower()
         if search_depth not in ("basic", "advanced"):
             search_depth = "basic"
 
@@ -925,10 +930,10 @@ class WebSearch(BaseTool):
             "format": "json",
             "pageno": 1,
         }
-        language = (_tools_web_search_conf().get("searxng_language") or "").strip()
+        language = _conf_str(_tools_web_search_conf().get("searxng_language"), "")
         if language:
             params["language"] = language
-        categories = (_tools_web_search_conf().get("searxng_categories") or "general").strip()
+        categories = _conf_str(_tools_web_search_conf().get("searxng_categories"), "general")
         if categories:
             params["categories"] = categories
 

@@ -122,12 +122,17 @@ class WechatKfMessage(ChatMessage):
                     filename = safe_filename(
                         _extract_filename(response.headers.get("Content-Disposition", ""))
                     ) or media_id
-                    self.content = os.path.join(_get_tmp_dir(), filename)
+                    save_path = os.path.join(_get_tmp_dir(), filename)
                     try:
-                        save_response(response, self.content, MAX_FILE_BYTES)
+                        save_response(response, save_path, MAX_FILE_BYTES)
                     except Exception as e:
+                        # Leave content empty; the caller caches it as a readable file reference.
+                        self.content = ""
                         logger.error(f"[wechat_kf] Failed to download file: {e}")
+                    else:
+                        self.content = save_path
                 else:
+                    self.content = ""
                     logger.info(f"[wechat_kf] Failed to download file, {response.content}")
 
             self._prepare_fn = download_file

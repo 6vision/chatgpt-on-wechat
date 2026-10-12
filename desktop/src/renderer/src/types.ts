@@ -18,6 +18,8 @@ export interface ElectronAPI {
   selectFile: (filters?: { name: string; extensions: string[] }[]) => Promise<string | null>
   /** Open a local file with the OS default app. Resolves to '' on success. */
   openPath: (targetPath: string) => Promise<string>
+  /** Show a local file selected in Finder / Explorer. */
+  revealPath?: (targetPath: string) => Promise<void>
   // Listener registrars return an unsubscribe fn for cleanup.
   onBackendStatus: (callback: (data: BackendStatusEvent) => void) => () => void
   onBackendLog: (callback: (line: string) => void) => () => void
@@ -163,6 +165,16 @@ export interface MessageStep {
 }
 
 /** Local UI message model (superset of backend history message). */
+/** Provider-reported token usage summed over one reply's model calls. */
+export interface MessageUsage {
+  prompt_tokens?: number
+  completion_tokens?: number
+  total_tokens?: number
+  prompt_cache_hit_tokens?: number
+  prompt_cache_miss_tokens?: number
+  calls?: number
+}
+
 export interface ChatMessage {
   id: string
   role: Role
@@ -181,6 +193,7 @@ export interface ChatMessage {
   /** Sequence numbers from backend (for delete/regenerate). */
   userSeq?: number
   botSeq?: number
+  usage?: MessageUsage
   /** Self-evolution bubble flag; 'divider' renders a context-cleared separator. */
   kind?: 'evolution' | 'divider'
   extras?: Record<string, unknown>
@@ -238,6 +251,8 @@ export interface WorkspaceEntry {
   abs_path?: string
   raw_url?: string
   preview_url?: string
+  /** The conversation turn that produced it, when a file card or the turn's auto-open opened it. */
+  origin?: ArtifactOrigin
 }
 
 /** Response of GET /api/workspace/read: the editor's initial content. */
@@ -302,6 +317,72 @@ export interface Artifact {
   size: number
   raw_url: string
   preview_url: string
+}
+
+/** Where in the conversations a file was produced. */
+export interface ArtifactOrigin {
+  session_id: string
+  agent_id: string
+  /** The turn's question, or null for a turn not persisted yet. */
+  turn_seq: number | null
+}
+
+/** One row of GET /api/artifacts: a file some conversation produced. */
+export interface ArtifactListItem extends Artifact {
+  id: number
+  /** The name the user gave it in the view; '' shows the file name. */
+  title: string
+  exists: boolean
+  agent_id: string
+  agent_name: string
+  session_id: string
+  session_title: string
+  turn_seq: number | null
+  /** The producing conversation is a console one that still exists. */
+  can_jump: boolean
+  source: string
+  created_at: number
+  updated_at: number
+  pinned_at: number
+}
+
+// ============================================================
+// Menu the user arranged (/api/menu), shared with the web console
+// ============================================================
+
+/** What the backend works out on each read to show an artifact entry. */
+export interface MenuFile {
+  file_name: string
+  kind: FileKind
+  exists: boolean
+  previewable?: boolean
+  raw_url: string
+  preview_url: string
+}
+
+export interface MenuItem {
+  id: string
+  /** `builtin` names a page by `view`; `artifact` shows a file by `path`; `url` shows a web page. */
+  type: 'builtin' | 'artifact' | 'url'
+  title: string
+  icon: string
+  view?: string
+  hidden?: boolean
+  path?: string
+  url?: string
+  open?: 'embed' | 'tab'
+  file?: MenuFile
+}
+
+export interface MenuGroup {
+  id: string
+  title: string
+  items: MenuItem[]
+}
+
+export interface MenuDoc {
+  version?: number
+  groups: MenuGroup[]
 }
 
 /** Live tool event during SSE streaming. */
@@ -392,6 +473,8 @@ export interface StreamEvent {
   timestamp?: number
   user_seq?: number
   bot_seq?: number
+  /** `done`: usage of the reply just persisted. */
+  usage?: MessageUsage
   message?: string
 }
 
@@ -489,6 +572,7 @@ export interface HistoryMessage {
   artifacts?: Artifact[]
   /** Per-message sequence number used by delete/regenerate APIs. */
   _seq?: number
+  usage?: MessageUsage
   /** Set on an assistant turn whose run stopped short of its answer. */
   run_state?: RunState
 }
@@ -760,6 +844,7 @@ export type ModelsAction =
   // (edited/added entries) and `hidden` the removed preset names; the backend
   // drops the provider's overlay entirely when both are empty (back to presets).
   | { action: 'save_catalog'; provider_id: string; models: ModelCatalogEntry[]; hidden: string[] }
+  | { action: 'discover_models'; provider_id?: string; api_key?: string; api_base?: string }
   // `chat_fallback` is not a first-class CapabilityKey (it has no top-level
   // card), but it is persisted through the same set_capability action, so it
   // is accepted here alongside its opt-in fields.
@@ -960,6 +1045,34 @@ export interface SkillContent extends WorkspaceReadResult {
   ships_with_install: boolean
 }
 
+/**
+ * One entry of GET /api/skills/files: a file or directory inside a skill.
+ *
+ * Listed depth first in the order a tree draws them, so `depth` is all a
+ * renderer needs to show the nesting.
+ */
+export interface SkillFileEntry {
+  /** Relative to the skill's own directory, as the content endpoint takes it. */
+  path: string
+  name: string
+  depth: number
+  is_dir: boolean
+  /** Coarse preview kind: `markdown`, `code`, `image`, `directory`, ... */
+  kind: string
+  /** Whether showing it as text is meaningful; false for a bundled asset. */
+  text: boolean
+  size: number
+  mtime: number
+}
+
+/** Response of POST /api/skills/create: the skill written from the form. */
+export interface SkillCreateResult {
+  /** The name it was created under, reduced from the title that was typed. */
+  name: string
+  /** The bundled files, by the path each kept inside the skill directory. */
+  files: string[]
+}
+
 // ============================================================
 // Memory
 // ============================================================
@@ -1016,6 +1129,20 @@ export interface KnowledgeList {
   enabled: boolean
 }
 
+// What `/api/knowledge/read` answers. `mtime` and `editable` mirror the
+// workspace read endpoint, which is what lets a knowledge page drive the same
+// document editor the memory and skill pages use.
+export interface KnowledgeReadResult {
+  status: string
+  message?: string
+  content: string
+  path: string
+  mtime: number
+  editable: boolean
+  /** Absolute directory of the page, for resolving its relative image srcs. */
+  dir?: string
+}
+
 export interface KnowledgeGraph {
   nodes: Array<{ id: string; label: string; category?: string }>
   links: Array<{ source: string; target: string }>
@@ -1026,6 +1153,12 @@ export interface KnowledgeGraph {
 export type KnowledgeAction = { agent_id?: string } & (
   | { action: 'create_category'; payload: { path: string } }
   | { action: 'create_document'; payload: { path: string; content: string; overwrite?: boolean } }
+  // `expected_mtime` is the timestamp the editor started from; the backend
+  // refuses the save when the Agent has rewritten the page since.
+  | {
+      action: 'update_document'
+      payload: { path: string; content: string; expected_mtime?: number | null }
+    }
   | { action: 'rename_category'; payload: { path: string; new_path: string } }
   | { action: 'delete_category'; payload: { path: string; confirm?: boolean } }
   | { action: 'delete_documents'; payload: { paths: string[] } }

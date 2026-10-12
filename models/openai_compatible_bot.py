@@ -92,6 +92,11 @@ class OpenAICompatibleBot:
             
             # Convert messages from Claude format to OpenAI format
             messages = self._convert_messages_to_openai_format(messages)
+            # "_"-prefixed keys are in-memory markers; strict endpoints reject them.
+            messages = [
+                {k: v for k, v in msg.items() if not k.startswith("_")}
+                for msg in messages
+            ]
             
             # Convert tools from Claude format to OpenAI format
             if tools:

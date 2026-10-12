@@ -4,6 +4,7 @@ Supports text files, images (jpg, png, gif, webp), and PDF files
 """
 
 import os
+import stat
 from typing import Dict, Any, Optional
 from pathlib import Path
 
@@ -238,6 +239,15 @@ class Read(BaseTool):
                 f"Use the ls tool to list what is inside it."
             )
         
+        # A FIFO has size zero yet open/read waits indefinitely for a writer.
+        # Inspect the resolved target before dispatching to any content parser.
+        try:
+            mode = os.stat(absolute_path).st_mode
+        except OSError as exc:
+            return ToolResult.fail(f"Error inspecting file: {exc}")
+        if not stat.S_ISREG(mode):
+            return ToolResult.fail(f"Error: {path} is not a regular file")
+
         # Check if readable
         if not os.access(absolute_path, os.R_OK):
             return ToolResult.fail(f"Error: File is not readable: {path}")
@@ -595,16 +605,12 @@ class Read(BaseTool):
                 from pptx import Presentation
             except ImportError:
                 raise ImportError("Error: python-pptx library not installed. Install with: pip install python-pptx")
+            from common.office_text import iter_pptx_shape_text
             prs = Presentation(absolute_path)
             parts = []
             for i, slide in enumerate(prs.slides, 1):
                 parts.append(f"--- Slide {i} ---")
-                for shape in slide.shapes:
-                    if shape.has_text_frame:
-                        for para in shape.text_frame.paragraphs:
-                            text = para.text.strip()
-                            if text:
-                                parts.append(text)
+                parts.extend(iter_pptx_shape_text(slide.shapes))
             return '\n'.join(parts)
 
         return ""

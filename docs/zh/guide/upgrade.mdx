@@ -84,7 +84,7 @@ sudo docker compose up -d
 ```
 
 <Tip>
-  升级前建议备份 `config.json` 配置文件。Docker 环境下如需保留数据，可通过 volume 挂载持久化工作空间目录。
+  升级前建议备份 `config.json` 配置文件。配置和渠道登录信息保存在挂载的 `./cow-data` 目录，工作空间保存在 `./cow` 目录，重建容器不会丢失。`docker-compose.yml` 中填写了值的环境变量会在每次启动时覆盖控制台里的同名配置。
 </Tip>
 
 ## 客户端升级

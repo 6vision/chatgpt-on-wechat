@@ -93,6 +93,48 @@ class TestFallbackConfig:
             {"provider": "openai", "model": "backup-model"}
         ]
 
+    def test_a_same_model_link_behind_another_provider_is_kept(self, monkeypatch):
+        """The same model name behind another provider — a second account or
+        endpoint of it — is a legitimate backup, not a duplicate of the primary.
+        The dedup used to compare the model name alone whenever the primary
+        carried no provider pin, silently dropping every such link."""
+        model = _model(
+            monkeypatch,
+            _chain(("custom:agnes-2", "agnes-2.5-flash"), ("baishan", "glm-4.7")),
+            model="agnes-2.5-flash",
+            bot_type="custom:agnes-1",
+        )
+        assert model.fallback_config()["chain"] == [
+            {"provider": "custom:agnes-2", "model": "agnes-2.5-flash"},
+            {"provider": "baishan", "model": "glm-4.7"},
+        ]
+
+    def test_the_primarys_own_route_is_stripped_with_a_custom_provider(self, monkeypatch):
+        """A link naming the primary's provider *and* model is still dropped:
+        that one would bounce the turn straight back onto the failed route."""
+        model = _model(
+            monkeypatch,
+            _chain(("custom:agnes-1", "agnes-2.5-flash"), ("baishan", "glm-4.7")),
+            model="agnes-2.5-flash",
+            bot_type="custom:agnes-1",
+        )
+        assert model.fallback_config()["chain"] == [
+            {"provider": "baishan", "model": "glm-4.7"}
+        ]
+
+    def test_the_linkai_route_is_stripped(self, monkeypatch):
+        """use_linkai routes the primary through LinkAI; a link naming that
+        provider with the primary's model is the same route, so it drops."""
+        model = _model(
+            monkeypatch,
+            _chain(("linkai", "primary-model"), ("openai", "backup-model")),
+            use_linkai=True,
+            linkai_api_key="sk-live",
+        )
+        assert model.fallback_config()["chain"] == [
+            {"provider": "openai", "model": "backup-model"}
+        ]
+
     def test_the_legacy_single_model_shape_is_honored(self, monkeypatch):
         """A pre-chain config keeps working: config.py normally upgrades it at
         load time, but a caller handing over the raw dict must not lose it."""

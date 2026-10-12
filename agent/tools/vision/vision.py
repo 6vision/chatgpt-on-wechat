@@ -18,6 +18,7 @@ Provider resolution:
 
 import base64
 import os
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -544,23 +545,41 @@ class Vision(BaseTool):
         vendor-foreign model name is forwarded.
 
         Resolution order:
-          1. If the bot explicitly declares `supports_vision`, trust it.
+          1. The user ticked vision for the main model in the model catalog
+             (the only way to declare it for a custom provider's models).
+          2. If the bot explicitly declares `supports_vision`, trust it.
              This lets bots opt in or out based on their own runtime
              configuration (e.g. the currently selected model).
-          2. Otherwise, fall back to a model-name prefix heuristic: trust
+          3. Otherwise, fall back to a model-name prefix heuristic: trust
              call_vision when the main model looks like an OpenAI family
              model or matches a known multimodal vendor prefix.
         """
         if bot is None:
             return False
+        if self._catalog_declares_vision():
+            return True
         if hasattr(bot, "supports_vision"):
             return bool(getattr(bot, "supports_vision"))
         main_model = self._current_main_model().lower()
         if not main_model:
             return False
-        if main_model.startswith(_OPENAI_MODEL_PREFIXES):
-            return True
-        return self._infer_provider_from_model(main_model) is not None
+        # Gateways namespace upstream models ("cn:glm-5v", "openai/gpt-4o").
+        # The bot still sends the full name; only the match uses the tail.
+        for name in {main_model, re.split(r"[:/]", main_model)[-1]}:
+            if name.startswith(_OPENAI_MODEL_PREFIXES) or self._infer_provider_from_model(name):
+                return True
+        return False
+
+    def _catalog_declares_vision(self) -> bool:
+        """Positive only: catalog entries default to text, so a missing tag is no verdict."""
+        meta = getattr(self.model, "catalog_model_meta", None)
+        if not callable(meta):
+            return False
+        try:
+            caps = (meta() or {}).get("capabilities")
+        except Exception:
+            return False
+        return isinstance(caps, list) and "vision" in caps
 
     def _build_main_model_provider(self) -> Optional[VisionProvider]:
         """
@@ -641,7 +660,9 @@ class Vision(BaseTool):
         """Build a VisionProvider from a custom:<id> entry in custom_providers.
         Uses the standard OpenAI /chat/completions endpoint — any
         OpenAI-compatible multimodal endpoint works."""
-        from models.custom_provider import parse_custom_bot_type, get_custom_providers, _find_provider_by_id
+        from models.custom_provider import (
+            parse_custom_bot_type, get_custom_providers, get_provider_headers, _find_provider_by_id,
+        )
         _, custom_id = parse_custom_bot_type(provider_id)
         if not custom_id:
             return None
@@ -662,6 +683,7 @@ class Vision(BaseTool):
             name=entry.get("name") or provider_id,
             api_key=api_key,
             api_base=self._ensure_v1(api_base.rstrip("/")),
+            extra_headers=get_provider_headers(entry),
             model_override=model,
         )
 
@@ -817,13 +839,27 @@ class Vision(BaseTool):
 
         def _try_sips(max_dim: str, quality: str) -> bool:
             try:
+                info = subprocess.run(
+                    ["sips", "-g", "pixelHeight", "-g", "pixelWidth", path],
+                    capture_output=True, text=True, check=True,
+                )
+                dimensions = {}
+                for line in info.stdout.splitlines():
+                    name, _, value = line.strip().partition(": ")
+                    if name in ("pixelHeight", "pixelWidth"):
+                        dimensions[name] = int(value)
+                if len(dimensions) != 2 or min(dimensions.values()) <= 0:
+                    return False
+                # Unlike convert's ">" geometry, sips -Z also enlarges images.
+                # Omit resampling when the source already fits the maximum.
+                resize = ["-Z", max_dim] if max(dimensions.values()) > int(max_dim) else []
                 subprocess.run(
-                    ["sips", "-Z", max_dim, "-s", "formatOptions", quality,
+                    ["sips", *resize, "-s", "formatOptions", quality,
                      path, "--out", tmp.name],
                     capture_output=True, check=True,
                 )
                 return True
-            except (FileNotFoundError, subprocess.CalledProcessError):
+            except (FileNotFoundError, subprocess.CalledProcessError, ValueError):
                 return False
 
         def _try_convert(max_dim: str, quality: str) -> bool:
@@ -880,12 +916,6 @@ class Vision(BaseTool):
             ],
         }
 
-        headers = {
-            "Authorization": f"Bearer {provider.api_key}",
-            "Content-Type": "application/json",
-            **provider.extra_headers,
-        }
-
         endpoint = "/chat/completions"
         if provider.use_responses:
             from models.openai import responses_adapter
@@ -897,8 +927,17 @@ class Vision(BaseTool):
             )
             endpoint = "/responses"
 
+        from models.openai.openai_http_client import resolve_host_headers
+        url = f"{provider.api_base}{endpoint}"
+        headers = {
+            "Authorization": f"Bearer {provider.api_key}",
+            "Content-Type": "application/json",
+            **resolve_host_headers(url),
+            **provider.extra_headers,
+        }
+
         resp = requests.post(
-            f"{provider.api_base}{endpoint}",
+            url,
             headers=headers,
             json=payload,
             timeout=DEFAULT_TIMEOUT,

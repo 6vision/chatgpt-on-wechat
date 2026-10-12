@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
-import { Copy, Check, RefreshCw, Trash2, File as FileIcon, Folder, Sprout } from 'lucide-react'
-import type { ChatMessage } from '../types'
-import { t } from '../i18n'
+import { Copy, Check, ChartColumn, RefreshCw, Trash2, File as FileIcon, Folder, Sprout } from 'lucide-react'
+import type { ChatMessage, MessageUsage } from '../types'
+import { t, tf } from '../i18n'
 import apiClient from '../api/client'
 import { useWorkspaceStore } from '../store/workspaceStore'
 import Markdown from './Markdown'
@@ -10,6 +10,7 @@ import MessageSteps, { ReplyStatus, ThinkingStep } from './MessageSteps'
 import FileCard from './FileCard'
 import { useLightboxStore } from './Lightbox'
 import AgentAvatar from './AgentAvatar'
+import Tooltip from './Tooltip'
 import { useAgentStore, findAgent } from '../store/agentStore'
 import { useSessionSettingsStore, selectSharedConversation } from '../store/sessionSettingsStore'
 import { product } from '@product'
@@ -22,6 +23,8 @@ interface MessageBubbleProps {
   /** Fired when an inline image/video finishes loading, so the parent can
    *  re-scroll to the bottom (async media changes bubble height after mount). */
   onMediaLoad?: () => void
+  /** Seq of the question opening this turn, for the file cards it shows. */
+  turnSeq?: number | null
 }
 
 function fmtTime(ts: number): string {
@@ -36,18 +39,46 @@ const HoverAction: React.FC<{ onClick: () => void; title: string; danger?: boole
   danger,
   children,
 }) => (
-  <button
-    onClick={onClick}
-    title={title}
-    className={`inline-flex items-center justify-center w-7 h-7 rounded-md cursor-pointer transition-colors text-content-tertiary ${
-      danger ? 'hover:text-danger hover:bg-danger-soft' : 'hover:text-content hover:bg-surface-2'
-    }`}
-  >
-    {children}
-  </button>
+  <Tooltip label={title}>
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center justify-center w-7 h-7 rounded-md cursor-pointer transition-colors text-content-tertiary ${
+        danger ? 'hover:text-danger hover:bg-danger-soft' : 'hover:text-content hover:bg-surface-2'
+      }`}
+    >
+      {children}
+    </button>
+  </Tooltip>
 )
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onRegenerate, onEdit, onDelete, onMediaLoad }) => {
+/** One-line summary of a reply's provider usage, or '' when there is none. */
+function usageLabel(usage?: MessageUsage): string {
+  if (!usage) return ''
+  const n = (v?: number) => Math.max(0, Number(v) || 0)
+  const input = n(usage.prompt_tokens)
+  const output = n(usage.completion_tokens)
+  const total = n(usage.total_tokens) || input + output
+  if (!total) return ''
+  const cached = n(usage.prompt_cache_hit_tokens)
+  const calls = n(usage.calls)
+  const parts = [
+    `${t('msg_usage_total')} ${total.toLocaleString()}`,
+    `${t('msg_usage_in')} ${input.toLocaleString()}`,
+    `${t('msg_usage_out')} ${output.toLocaleString()}`,
+  ]
+  if (cached && input) parts.push(`${t('msg_usage_cached')} ${Math.round((cached * 100) / input)}%`)
+  if (calls > 1) parts.push(tf('msg_usage_calls', { n: calls }))
+  return parts.join(' · ')
+}
+
+const MessageBubble: React.FC<MessageBubbleProps> = ({
+  message,
+  onRegenerate,
+  onEdit,
+  onDelete,
+  onMediaLoad,
+  turnSeq = null,
+}) => {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
   const preview = useWorkspaceStore((s) => s.preview)
@@ -209,7 +240,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onRegenerate, on
           {message.artifacts && message.artifacts.length > 0 && (
             <div className="flex flex-col items-start">
               {message.artifacts.map((a) => (
-                <FileCard key={a.abs_path || a.rel_path} meta={a} />
+                <FileCard key={a.abs_path || a.rel_path} meta={a} turnSeq={turnSeq} />
               ))}
             </div>
           )}
@@ -279,6 +310,13 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onRegenerate, on
             <HoverAction onClick={copy} title={t('msg_copy')}>
               {copied ? <Check size={13} /> : <Copy size={13} />}
             </HoverAction>
+            {usageLabel(message.usage) && (
+              <Tooltip label={usageLabel(message.usage)}>
+                <span className="inline-flex items-center justify-center w-7 h-7 rounded-md cursor-pointer transition-colors text-content-tertiary hover:text-content hover:bg-surface-2">
+                  <ChartColumn size={13} />
+                </span>
+              </Tooltip>
+            )}
             {onRegenerate && (
               <HoverAction onClick={() => onRegenerate(message.id)} title={t('msg_regenerate')}>
                 <RefreshCw size={13} />

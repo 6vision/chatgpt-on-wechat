@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 import requests
 import web
 
+from common.atomic_write import write_json_atomic
 from bridge.context import Context
 from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
@@ -167,8 +168,7 @@ def _persist_feishu_credentials(app_id: str, app_secret: str) -> bool:
             existing.append("feishu")
             file_cfg["channel_type"] = ",".join(existing)
 
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(file_cfg, f, indent=4, ensure_ascii=False)
+        write_json_atomic(config_path, file_cfg)
 
         # 同步到内存中的 conf()，让本次启动直接生效
         conf()["feishu_app_id"] = app_id
@@ -1891,7 +1891,7 @@ class FeiShuChanel(ChatChannel):
         # only removed after a successful upload, so a failed upload left it
         # behind in the working directory.
         try:
-            image_bytes = download_bytes(img_url, MAX_IMAGE_BYTES, timeout=(5, 30))
+            image_bytes = download_bytes(img_url, MAX_IMAGE_BYTES, timeout=(5, 30), guarded=True)
         except Exception as e:
             # The caller relies on None here:
             # `if not reply_content: logger.warning("upload image failed")`.

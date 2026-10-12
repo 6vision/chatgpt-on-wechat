@@ -97,7 +97,10 @@ class Write(BaseTool):
             if self.memory_manager and feeds_memory_index(
                 absolute_path, self.memory_manager, self.cwd
             ):
-                self.memory_manager.mark_dirty()
+                try:
+                    self.memory_manager.mark_dirty()
+                except Exception as exc:
+                    syntax_warning = " ".join(filter(None, (syntax_warning, f"File saved, but memory index notification failed: {exc}")))
             
             result = {
                 "message": f"Successfully wrote {bytes_written} bytes to {path}",

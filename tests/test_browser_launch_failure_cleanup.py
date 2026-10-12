@@ -1,0 +1,116 @@
+"""A browser launch that fails must not leave its driver and Chrome behind."""
+
+import queue
+import threading
+import unittest
+
+from agent.tools.browser.browser_service import BrowserService
+
+
+class _Recorder:
+    def __init__(self):
+        self.stopped = False
+        self.closed = False
+
+    def stop(self):
+        self.stopped = True
+
+    def close(self):
+        self.closed = True
+
+
+class _FakePlaywright:
+    def __init__(self, driver):
+        self.chromium = self
+        self._driver = driver
+
+    def start(self):
+        return self._driver
+
+    def connect_over_cdp(self, endpoint):
+        raise AssertionError("not reached in this test")
+
+
+class BrowserLaunchFailureCleanupTest(unittest.TestCase):
+
+    def _service(self, launcher_error):
+        service = BrowserService.__new__(BrowserService)
+        service._lock = threading.RLock()
+        service._task_queue = queue.Queue()
+        service._ready = threading.Event()
+        service._alive = True
+        service._thread = None
+        service._playwright = None
+        service._chrome_launcher = None
+        service._browser = None
+        service._context = None
+        service._page = None
+        service._launch_mode = "system-cdp"
+        service._needs_restart = False
+        service._idle_timer = None
+        service._reaped = []
+        service._reap_spawned_processes = lambda: None
+        service._cancel_idle_timer = lambda: None
+
+        driver = _Recorder()
+        launcher = _Recorder()
+        service._driver = driver
+        service._launcher = launcher
+
+        def launcher_impl(launch_args, viewport):
+            # Chrome is spawned, then attaching to it fails.
+            service._chrome_launcher = launcher
+            raise launcher_error
+
+        service._launch_system_cdp = launcher_impl
+
+        def fake_launch_browser():
+            service._playwright = _FakePlaywright(driver).start()
+            service._launch_system_cdp([], {"width": 1, "height": 1})
+
+        service._launch_browser = fake_launch_browser
+        return service, driver, launcher
+
+    def test_a_failed_launch_reclaims_the_driver_and_the_browser(self):
+        service, driver, launcher = self._service(RuntimeError("cdp refused"))
+
+        service._run_loop()
+
+        self.assertTrue(driver.stopped)
+        self.assertTrue(launcher.closed)
+
+    @staticmethod
+    def _pending_call(service):
+        slot = {"value": None, "error": None, "event": threading.Event()}
+        service._task_queue.put((lambda: None, (), {}, slot))
+        return slot
+
+    def test_the_caller_is_still_told_the_launch_failed(self):
+        service, _, _ = self._service(RuntimeError("cdp refused"))
+        slot = self._pending_call(service)
+
+        service._run_loop()
+
+        self.assertTrue(slot["event"].is_set())
+        self.assertIsInstance(slot["error"], RuntimeError)
+        self.assertIn("cdp refused", str(slot["error"]))
+        self.assertFalse(service._alive)
+
+    def test_a_cleanup_failure_does_not_hide_the_launch_error(self):
+        service, driver, _ = self._service(RuntimeError("cdp refused"))
+
+        def exploding_shutdown():
+            raise RuntimeError("teardown blew up too")
+
+        service._shutdown_browser = exploding_shutdown
+        slot = self._pending_call(service)
+
+        service._run_loop()  # must not raise
+
+        self.assertTrue(slot["event"].is_set())
+        self.assertIn("cdp refused", str(slot["error"]))
+        self.assertTrue(service._ready.is_set())
+
+
+if __name__ == "__main__":
+    unittest.main()
