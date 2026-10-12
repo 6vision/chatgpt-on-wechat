@@ -960,6 +960,9 @@ class Vision(BaseTool):
         if choices:
             content = choices[0].get("message", {}).get("content", "")
 
+        if not isinstance(content, str) or not content.strip():
+            raise VisionAPIError("Vision API returned no text content")
+
         usage = data.get("usage", {})
         result = {
             "model": model,
