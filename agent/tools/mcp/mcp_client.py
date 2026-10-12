@@ -206,10 +206,13 @@ class McpClient:
         try:
             resp = self._send_request("tools/call", {"name": name, "arguments": arguments})
             self._raise_for_rpc_error(resp)
-            content = (resp.get("result") or {}).get("content", [])
+            result = resp.get("result") or {}
+            content = result.get("content", [])
             parts = [item.get("text", "") for item in content if item.get("type") == "text"]
             text = "\n".join(parts)
-            if (resp.get("result") or {}).get("isError"):
+            if not parts and "structuredContent" in result:
+                text = json.dumps(result["structuredContent"], ensure_ascii=False)
+            if result.get("isError"):
                 raise McpToolExecutionError(text or "MCP tool execution failed")
             return text
         except McpToolExecutionError:
