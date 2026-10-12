@@ -274,6 +274,27 @@ class ChatChannel(Channel):
                 return
         return reply
 
+    def _safe_text_to_voice(self, text):
+        """Synthesise ``text`` into a voice Reply, or ``None`` when TTS is unusable.
+
+        ``build_text_to_voice`` is not failure-safe: an unknown vendor raises
+        from the voice factory and custom vendors answer ERROR when their
+        endpoint/model is misconfigured. Unprotected, the exception reaches
+        ``_fail_callback`` (log only) and the user loses the turn, and the
+        ERROR Reply replaces the answer with a generic error. ``voice_to_text``
+        already degrades gracefully in ``_generate_reply``; TTS should too.
+        """
+        try:
+            voice_reply = super().build_text_to_voice(text)
+        except Exception as e:
+            logger.warning("[chat_channel] build_text_to_voice error, fallback to text: " + str(e))
+            return None
+        if voice_reply is None or voice_reply.type != ReplyType.VOICE:
+            bad_type = getattr(voice_reply, "type", None)
+            logger.warning("[chat_channel] build_text_to_voice returned {}, fallback to text".format(bad_type))
+            return None
+        return voice_reply
+
     def _decorate_reply(self, context: Context, reply: Reply) -> Reply:
         if reply and reply.type:
             e_context = PluginManager().emit_event(
@@ -294,10 +315,13 @@ class ChatChannel(Channel):
                 if reply.type == ReplyType.TEXT:
                     reply_text = reply.content
                     if desire_rtype == ReplyType.VOICE and ReplyType.VOICE not in self.NOT_SUPPORT_REPLYTYPE:
-                        # Preserve original text for the "text-then-voice" pattern in _send_reply.
-                        context["voice_reply_text"] = reply.content
-                        reply = super().build_text_to_voice(reply.content)
-                        return self._decorate_reply(context, reply)
+                        voice_reply = self._safe_text_to_voice(reply.content)
+                        if voice_reply is not None:
+                            # Preserve original text for the "text-then-voice" pattern in _send_reply.
+                            context["voice_reply_text"] = reply.content
+                            return self._decorate_reply(context, voice_reply)
+                        # TTS unusable: fall through so the answer is still
+                        # delivered as text instead of losing the turn.
                     if context.get("isgroup", False):
                         if not context.get("no_need_at", False):
                             reply_text = "@" + context["msg"].actual_user_nickname + "\n" + reply_text.strip()
