@@ -126,7 +126,16 @@ class SQLiteVectorBackend(VectorBackend):
         valid_rows = []
         vectors = []
         for row in rows:
-            vector = self._decode_embedding(row["embedding"])
+            try:
+                decoded = self._decode_embedding(row["embedding"])
+                vector = [float(value) for value in decoded] if decoded else []
+                if not all(math.isfinite(value) for value in vector):
+                    raise ValueError("embedding contains nonfinite values")
+            except (ValueError, TypeError, OverflowError, struct.error) as exc:
+                from common.log import logger
+
+                logger.warning("[SQLiteVectorBackend] Skipping malformed embedding for chunk %s: %s", row["id"], exc)
+                continue
             if not vector:
                 continue
             if len(vector) != expected_dim:
