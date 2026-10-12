@@ -84,7 +84,7 @@ sudo docker compose up -d
 ```
 
 <Tip>
-  Back up `config.json` before upgrading. For Docker deployments, mount the workspace directory as a volume to persist data across upgrades.
+  Back up `config.json` before upgrading. Settings and channel logins live in the mounted `./cow-data` directory and the workspace in `./cow`, so recreating the container keeps them. Environment variables given a value in `docker-compose.yml` override the same settings from the console on every start.
 </Tip>
 
 ## Desktop client upgrade
