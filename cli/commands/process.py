@@ -148,6 +148,7 @@ def start(foreground, no_logs):
         with open(log_file, "a") as log:
             proc = subprocess.Popen(
                 [python, app_py],
+                stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=log,
                 **popen_kwargs,
