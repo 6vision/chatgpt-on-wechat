@@ -5,6 +5,7 @@ pytts voice service (offline)
 import os
 import sys
 import time
+import uuid
 
 import pyttsx3
 
@@ -41,7 +42,7 @@ class PyttsVoice(Voice):
     def textToVoice(self, text):
         try:
             # Avoid the same filename under multithreading
-            wavFileName = "reply-" + str(int(time.time())) + "-" + str(hash(text) & 0x7FFFFFFF) + ".wav"
+            wavFileName = "reply-" + uuid.uuid4().hex + ".wav"
             wavFile = TmpDir().path() + wavFileName
             logger.info("[Pytts] textToVoice text={} voice file name={}".format(text, wavFile))
 
