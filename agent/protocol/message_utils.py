@@ -255,7 +255,7 @@ def drop_orphaned_tool_results_openai(messages: List[Dict]) -> List[Dict]:
 
         if msg.get("role") == "tool":
             ref_id = msg.get("tool_call_id", "")
-            if ref_id and ref_id not in known_ids:
+            if not ref_id or ref_id not in known_ids:
                 logger.warning(
                     f"[MessageSanitizer] Dropping orphaned tool result "
                     f"(tool_call_id={ref_id} not in known ids)"
