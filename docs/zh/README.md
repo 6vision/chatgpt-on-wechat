@@ -27,7 +27,7 @@ CowAgent 轻量、易部署、可扩展，自由接入主流大模型，覆盖�
   <a href="https://docs.cowagent.ai/zh/guide/quick-start">🚀 快速开始</a> &nbsp;·&nbsp;
   <a href="https://skills.cowagent.ai/">🧩 技能广场</a> &nbsp;·&nbsp;
   <a href="https://cowagent.ai/zh/download/">💻 下载客户端</a> &nbsp;·&nbsp;
-  <a href="https://link-ai.tech/cowagent/create">☁️ 在线体验</a>
+  <a href="https://link-ai.tech/cowagent/create?utm_source=cowagent&utm_medium=readme&utm_campaign=nav">☁️ 在线体验</a>
 </p>
 
 <br/>
@@ -266,7 +266,7 @@ CowAgent 支持国内外主流厂商的大语言模型。**文本对话、图像
 还可通过以下方式获取支持：
 
 - 🐛 [提交 Issue](https://github.com/zhayujie/CowAgent/issues)
-- 🤖 在线 AI 助手：[项目小助手](https://link-ai.tech/app/Kv2fXJcH)（基于项目知识库）
+- 🤖 在线 AI 助手：[项目小助手](https://link-ai.tech/app/Kv2fXJcH?utm_source=cowagent&utm_medium=readme&utm_campaign=support)（基于项目知识库）
 
 <br/>
 
@@ -280,11 +280,11 @@ CowAgent 支持国内外主流厂商的大语言模型。**文本对话、图像
 
 ## 🏢 企业服务
 
-<a href="https://link-ai.tech" target="_blank"><img width="650" src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/community/link-ai-intro.png" /></a>
+<a href="https://link-ai.tech/?utm_source=cowagent&utm_medium=readme&utm_campaign=enterprise" target="_blank"><img width="650" src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/community/link-ai-intro.png" /></a>
 
-> [LinkAI](https://link-ai.tech/) 是面向企业和个人的一站式 AI 智能体平台，为 CowAgent 提供云端托管和企业级支持：
+> [LinkAI](https://link-ai.tech/?utm_source=cowagent&utm_medium=readme&utm_campaign=enterprise) 是面向企业和个人的一站式 AI 智能体平台，为 CowAgent 提供云端托管和企业级支持：
 >
-> - **🚀 免部署在线运行**：无需服务器即可创建 [CowAgent 在线助理](https://link-ai.tech/cowagent/create)，1 分钟拥有专属 Agent
+> - **🚀 免部署在线运行**：无需服务器即可创建 [CowAgent 在线助理](https://link-ai.tech/cowagent/create?utm_source=cowagent&utm_medium=readme&utm_campaign=enterprise)，1 分钟拥有专属 Agent
 > - **🧠 Agent 基础设施**：聚合主流大模型、知识库、数据库、技能、工作流，提供开箱即用的 Agent 能力扩展
 > - **🏢 企业级协作**：提供团队协作、权限分级、审计日志、私有化部署等能力，让 Agent 安全落地企业场景
 

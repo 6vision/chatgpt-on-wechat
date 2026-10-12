@@ -27,7 +27,7 @@ CowAgent is lightweight, easy to deploy, and built to extend. Plug in any major 
   <a href="https://docs.cowagent.ai/guide/quick-start">🚀 Quick Start</a> &nbsp;·&nbsp;
   <a href="https://skills.cowagent.ai/">🧩 Skill Hub</a> &nbsp;·&nbsp;
   <a href="https://cowagent.ai/download/">💻 Download</a> &nbsp;·&nbsp;
-  <a href="https://link-ai.tech/cowagent/create">☁️ Try Online</a>
+  <a href="https://link-ai.tech/cowagent/create?utm_source=cowagent&utm_medium=readme&utm_campaign=nav">☁️ Try Online</a>
 </p>
 
 <br/>
@@ -274,9 +274,9 @@ You can also [file an issue](https://github.com/zhayujie/CowAgent/issues) on Git
 
 ## 🏢 Enterprise Services
 
-[**LinkAI**](https://link-ai.tech/) is an all-in-one AI Agent platform for enterprises and developers, offering managed hosting and enterprise-grade support for CowAgent:
+[**LinkAI**](https://link-ai.tech/?utm_source=cowagent&utm_medium=readme&utm_campaign=enterprise) is an all-in-one AI Agent platform for enterprises and developers, offering managed hosting and enterprise-grade support for CowAgent:
 
-- **🚀 Zero-deployment hosted runtime** — spin up a [CowAgent online assistant](https://link-ai.tech/cowagent/create) in under a minute, no server required
+- **🚀 Zero-deployment hosted runtime** — spin up a [CowAgent online assistant](https://link-ai.tech/cowagent/create?utm_source=cowagent&utm_medium=readme&utm_campaign=enterprise) in under a minute, no server required
 - **🧠 Agent infrastructure** — unified access to LLMs, knowledge bases, databases, skills, and workflows; plug-and-play building blocks that extend what CowAgent can do
 - **🏢 Team & enterprise features** — workspaces, role-based access, audit logs, and private deployment for production use cases
 
