@@ -12,7 +12,6 @@ import os
 import re
 import shutil
 import time
-import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -57,13 +56,23 @@ def create_backup(workspace_dir: Path, files: List[Path]) -> Optional[str]:
     if not existing:
         return None
 
-    backup_id = datetime.now().strftime("%Y%m%d-%H%M%S-") + f"{time.time_ns()}{uuid.uuid4().int:039d}"
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-") + f"{int(time.time() * 1000) % 1000:03d}"
     root = _backups_root(workspace_dir)
-    target = root / backup_id
-    created = False
+    target = None
     try:
-        target.mkdir(parents=True, exist_ok=False)
-        created = True
+        root.mkdir(parents=True, exist_ok=True)
+        # Snapshots taken in the same millisecond must not share a directory,
+        # or undoing one would restore the other's files.
+        for attempt in range(100):
+            backup_id = stamp + (f"{attempt:02d}" if attempt else "")
+            try:
+                (root / backup_id).mkdir()
+            except FileExistsError:
+                continue
+            target = root / backup_id
+            break
+        else:
+            raise FileExistsError(f"no free backup id for {stamp}")
         ws = Path(workspace_dir)
         manifest = []
         for idx, src in enumerate(existing):
@@ -86,7 +95,7 @@ def create_backup(workspace_dir: Path, files: List[Path]) -> Optional[str]:
     except Exception as e:
         logger.warning(f"[Evolution] Failed to create backup: {e}")
         # A half-written snapshot must not take one of the _MAX_BACKUPS slots.
-        if created:
+        if target is not None:
             _discard_incomplete(target)
         return None
 
