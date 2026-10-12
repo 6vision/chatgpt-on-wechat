@@ -1,8 +1,9 @@
+import importlib
 import json
 import pytest
 import plugins
 plugins.instance.current_plugin_path = "./plugins/role"
-from plugins.role import role as role_module  # noqa: F401 - import registers the decorated plugin
+importlib.import_module("plugins.role.role")  # Registers the decorated plugin.
 plugins.instance.current_plugin_path = None
 Role = plugins.instance.plugins["ROLE"]
 
