@@ -39,10 +39,15 @@ def _is_system_asset_rel(rel_path: str) -> bool:
     return p in _SYSTEM_ASSET_FILES or p.startswith(_SYSTEM_ASSET_PREFIXES)
 
 
-def _system_workspace_service():
+def _system_workspace_service(agent_id: str = None):
     from agent.workspace.service import WorkspaceService
+    from common.runtime_identity import RuntimeIdentity
     from common.state_dir import state_root_str
-    return WorkspaceService(state_root_str())
+    # HTTP handlers resolve their requested Agent explicitly; they do not
+    # install its runtime identity. A project's system-file fallback must
+    # follow that same Agent instead of the ambient/default workspace.
+    root = state_root_str(RuntimeIdentity(agent_id=agent_id)) if agent_id else state_root_str()
+    return WorkspaceService(root)
 
 
 def _decorate_entry(svc, entry: dict) -> dict:
@@ -136,7 +141,7 @@ class WorkspaceResolveHandler:
                     # Memory/knowledge live in state_root, not the project. Retry
                     # there so their cards still preview when a project is open.
                     if _is_system_asset_rel(raw_path):
-                        entry = _system_workspace_service().stat_file(raw_path)
+                        entry = _system_workspace_service(params.agent or params.agent_id or None).stat_file(raw_path)
                     else:
                         raise
 
@@ -176,7 +181,7 @@ def _editable_target(raw_path: str, session_id: str = None, agent_id: str = None
     assets that live there even while a project is open.
     """
     svc = _workspace_service(session_id, agent_id)
-    system = _system_workspace_service()
+    system = _system_workspace_service(agent_id)
     try:
         rel = svc.to_workspace_rel(raw_path)
     except ValueError:
