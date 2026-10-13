@@ -12,6 +12,7 @@ import re
 import shutil
 import tempfile
 from typing import List, Optional
+from common.directory_replace import replace_directory
 from common.log import logger
 from agent.skills.archive import extract_archive
 from agent.skills.manager import SkillManager
@@ -478,10 +479,9 @@ class SkillService:
 
         skill_dir = self._safe_skill_dir(name)
 
-        tmp_dir = skill_dir + ".tmp"
-        if os.path.exists(tmp_dir):
-            shutil.rmtree(tmp_dir)
-        os.makedirs(tmp_dir, exist_ok=True)
+        parent = os.path.dirname(skill_dir)
+        os.makedirs(parent, exist_ok=True)
+        tmp_dir = tempfile.mkdtemp(prefix=f".{os.path.basename(skill_dir)}.download-", dir=parent)
 
         try:
             for file_info in files:
@@ -492,13 +492,9 @@ class SkillService:
                     continue
                 dest = self._safe_file_path(tmp_dir, rel_path)
                 self._download_file(url, dest)
-        except Exception:
+            replace_directory(tmp_dir, skill_dir, move_source=True)
+        finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
-            raise
-
-        if os.path.exists(skill_dir):
-            shutil.rmtree(skill_dir)
-        os.rename(tmp_dir, skill_dir)
 
         logger.info(f"[SkillService] add: skill '{name}' installed via url ({len(files)} files)")
 
@@ -543,9 +539,7 @@ class SkillService:
                 if os.path.isdir(single):
                     extract_dir = single
 
-            if os.path.exists(skill_dir):
-                shutil.rmtree(skill_dir)
-            shutil.copytree(extract_dir, skill_dir)
+            replace_directory(extract_dir, skill_dir)
 
         logger.info(f"[SkillService] add: skill '{name}' installed via package ({url})")
 
