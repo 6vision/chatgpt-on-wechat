@@ -570,6 +570,7 @@
                 "group": "发布记录",
                 "pages": [
                   "zh/releases/overview",
+                  "zh/releases/v2.2.1",
                   "zh/releases/v2.2.0",
                   "zh/releases/v2.1.9",
                   "zh/releases/v2.1.8",
