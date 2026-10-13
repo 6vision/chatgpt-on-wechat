@@ -1,0 +1,305 @@
+---
+title: チャット API
+description: OpenAI 互換の /v1/chat/completions エンドポイントから CowAgent を呼び出す
+---
+
+> CowAgent は OpenAI Chat Completions プロトコル互換のチャットエンドポイントを、Web コンソールと同じポートで提供します。OpenAI プロトコルに対応したアプリ、SDK、ワークフローからそのまま接続できます。
+
+モデルを直接呼び出すのとは異なり、エンドポイントの背後では完全な Agent が動作します。ツール、スキル、メモリ、ナレッジベースを使ってタスクを完了し、思考過程、ツール呼び出し、トークン使用量も回答と一緒に返します。
+
+## API を有効にする
+
+API は初期状態では無効です。有効にした後は、リクエストに API キーが必要です。
+
+### コンソールから有効にする
+
+「設定 → 基本設定 → チャット API」でスイッチをオンにし、確認すると API キーが生成されます。エンドポイントのアドレスとコピーしてすぐ使える呼び出し例（cURL / Python / Node.js）も表示されます。
+
+{/* TODO: スクリーンショット - 設定ページの「チャット API」カード */}
+
+- **再生成**：新しい API キーを発行します。古いキーはすぐに無効になります
+- **スイッチをオフ**：API の提供を停止します。API キーは保持され、再度オンにするとそのまま使えます
+
+### 設定ファイルから有効にする
+
+`config.json` に次の 2 項目を設定し、サービスを再起動します：
+
+```json
+{
+  "external_api_enabled": true,
+  "external_api_token": "sk-your-random-key"
+}
+```
+
+| 設定項目 | 説明 |
+| --- | --- |
+| `external_api_enabled` | API を有効にするかどうか。デフォルトは `false` |
+| `external_api_token` | API キー。十分に長いランダムな文字列を推奨します。API を無効にしても保持されます |
+
+<Note>
+  API は Web コンソールと同じアドレスとポートを使います。デフォルトでは `127.0.0.1` のみで待ち受けるため、このマシンからしかアクセスできません。他のマシンから呼び出す場合は、[Web コンソール](/ja/channels/web) を参照して `web_host` を `0.0.0.0` に設定し、ポートを開放してください。API キーはコンソールのパスワード `web_password` とは独立しています。
+</Note>
+
+## クイックスタート
+
+以下の例はサービスがこのマシンの `9899` ポートで動作していることを前提とします。モデルも Agent も指定しないため、デフォルト Agent が自身のデフォルトモデルで回答します。
+
+<Tabs>
+  <Tab title="cURL">
+    ```bash
+    curl http://localhost:9899/v1/chat/completions \
+      -H "Authorization: Bearer $API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{"messages": [{"role": "user", "content": "ワークスペースにあるファイルをまとめて"}]}'
+    ```
+  </Tab>
+  <Tab title="Python">
+    ```python
+    import requests
+
+    resp = requests.post(
+        "http://localhost:9899/v1/chat/completions",
+        headers={"Authorization": "Bearer your-api-key"},
+        json={"messages": [{"role": "user", "content": "ワークスペースにあるファイルをまとめて"}]},
+    )
+    print(resp.json()["choices"][0]["message"]["content"])
+    ```
+  </Tab>
+  <Tab title="Node.js">
+    ```javascript
+    const resp = await fetch("http://localhost:9899/v1/chat/completions", {
+      method: "POST",
+      headers: { "Authorization": "Bearer your-api-key", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: "ワークスペースにあるファイルをまとめて" }],
+      }),
+    });
+    const data = await resp.json();
+    console.log(data.choices[0].message.content);
+    ```
+  </Tab>
+</Tabs>
+
+## エンドポイント
+
+### 認証
+
+すべてのリクエストのヘッダーに API キーを含めます：
+
+```
+Authorization: Bearer <API キー>
+```
+
+### チャット
+
+`POST /v1/chat/completions`
+
+| パラメータ | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `messages` | array | はい | 会話メッセージ。`system`、`developer`、`user`、`assistant` ロールに対応。`content` は文字列、または `type` が `text` のパーツ配列 |
+| `model` | string | いいえ | 回答に使うモデル。省略時は Agent のデフォルトモデル。[モデル一覧](#モデル一覧) を参照 |
+| `agent_id` | string | いいえ | CowAgent 拡張パラメータ。回答する Agent を指定します。省略時はデフォルト Agent。[Agent の指定](#agent-の指定) を参照 |
+| `stream` | boolean | いいえ | ストリーミング出力するかどうか。デフォルトは `false` |
+| `stream_options` | object | いいえ | `{"include_usage": true}` を指定すると、ストリームの最後にトークン使用量を返します |
+| `conversation_id` | string | いいえ | CowAgent 拡張パラメータ。指定するとサーバーが会話履歴を保持します。[会話の管理](#会話の管理) を参照 |
+
+Agent は自身のツールとシステムプロンプトを使うため、`temperature`、`max_tokens`、`tools` などのパラメータは無視されます。
+
+### Agent の指定
+
+[マルチエージェント](/ja/multi-agent/team) を設定している場合、`agent_id` でどの Agent に回答させるかを指定できます。Agent ID は「エージェント」ページの名前の下に表示され、横のアイコンでコピーできます。`default` は常にデフォルト Agent を表します。存在しない、またはアーカイブ済みの Agent を指定すると 404 が返ります。
+
+```bash
+curl http://localhost:9899/v1/chat/completions \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "research",
+    "model": "deepseek-chat",
+    "messages": [{"role": "user", "content": "最近のオープンソース Agent フレームワークを調べて"}]
+  }'
+```
+
+`model` はそのリクエストにのみ適用され、Agent や会話のモデル設定は変わりません。
+
+### モデル一覧
+
+`GET /v1/models`
+
+利用できるモデル、つまり「設定 → モデル設定」で設定済みのプロバイダーのチャットモデルを返します。`owned_by` はプロバイダーです。一覧にない `model` を指定すると 404 が返ります。
+
+```json
+{
+  "object": "list",
+  "data": [
+    { "id": "deepseek-chat", "object": "model", "created": 0, "owned_by": "deepseek" },
+    { "id": "qwen-max", "object": "model", "created": 0, "owned_by": "dashscope" }
+  ]
+}
+```
+
+## 会話の管理
+
+API は 2 つの会話方式に対応しています：
+
+- **ステートレス（デフォルト）**：`conversation_id` を指定せず、通常のモデルと同じように毎回 `messages` 全体を送ります。最後の `user` メッセージが今回の入力、それ以前の `user` / `assistant` メッセージがコンテキストになります。CowAgent の会話履歴には書き込まれません。
+- **ステートフル**：`conversation_id` を指定すると、会話履歴を CowAgent が保持します。以降は新しいメッセージだけを送ればよく、`messages` 内の以前のメッセージは無視されます。同じ会話のリクエストは順番に 1 つずつ処理されます。
+
+```json
+{
+  "conversation_id": "order-bot-user-42",
+  "messages": [{ "role": "user", "content": "前回の続きをお願い" }]
+}
+```
+
+<Note>
+  リクエスト内の `system` メッセージは無視され、Agent は常に自身のペルソナ、スキル、メモリを使います。どちらの方式でも、Agent はツールを通じてワークスペースとメモリファイルを読み書きできます。
+</Note>
+
+## レスポンス形式
+
+### 非ストリーミング
+
+標準の OpenAI レスポンスに加えて、`message` に思考過程とツール呼び出しの記録が含まれます：
+
+```json
+{
+  "id": "chatcmpl-82c19c44...",
+  "object": "chat.completion",
+  "created": 1791861130,
+  "model": "deepseek-chat",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "ワークスペースには 4 つのコアファイルと 7 つのフォルダがあります……",
+        "reasoning_content": "ユーザーはワークスペースの内容を知りたいので、まず一覧を取得する……",
+        "tool_trace": [
+          {
+            "type": "tool_result",
+            "id": "call_00_wYInMZ...",
+            "name": "ls",
+            "arguments": { "path": "." },
+            "result": "AGENT.md\nMEMORY.md\n...",
+            "status": "success",
+            "elapsed": "0.01s"
+          }
+        ]
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 18151,
+    "completion_tokens": 180,
+    "total_tokens": 18331,
+    "prompt_tokens_details": { "cached_tokens": 11392 }
+  }
+}
+```
+
+| フィールド | 説明 |
+| --- | --- |
+| `model` | 回答に使われたモデル |
+| `message.content` | 最終的な回答 |
+| `message.reasoning_content` | 思考過程。ディープシンキングが有効で、モデルが対応している場合に返されます |
+| `message.tool_trace` | CowAgent 拡張フィールド。ツール呼び出しの記録で、各呼び出しの引数、結果、ステータス、所要時間を含みます。他の Agent への委任や生成されたファイルもここに記録され、形式は下記の [プロセスイベント](#プロセスイベント) と同じです |
+| `usage` | トークン使用量。Agent は 1 ターンでモデルを複数回呼び出すことがあり、ここはその合計です。`prompt_tokens_details.cached_tokens` はキャッシュから提供された入力トークン数です。モデルが使用量を返さない場合は含まれません |
+
+### ストリーミング
+
+`"stream": true` を指定すると、標準の `chat.completion.chunk` を SSE で返します：
+
+- 回答は `choices[0].delta.content`
+- 思考過程は `choices[0].delta.reasoning_content`
+- ツール呼び出しなどのプロセスイベントはトップレベルの `cow_event` フィールドにあり、このとき `delta` は空です
+- 最後のチャンクの `finish_reason` は `stop`。`stream_options.include_usage` を指定した場合は、続けて `choices` が空で `usage` を含むチャンクが送られます
+- `data: [DONE]` で終了します
+
+```
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":null}],"cow_event":{"type":"tool_start","id":"call_1","name":"ls","arguments":{"path":"."}}}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"ワークスペースには"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":18151,"completion_tokens":180,"total_tokens":18331,"prompt_tokens_details":{"cached_tokens":11392}}}
+
+data: [DONE]
+```
+
+ストリームを読み取る例：
+
+```python
+import json
+import requests
+
+resp = requests.post(
+    "http://localhost:9899/v1/chat/completions",
+    headers={"Authorization": "Bearer your-api-key"},
+    json={"messages": [{"role": "user", "content": "ワークスペースにあるファイルをまとめて"}], "stream": True},
+    stream=True,
+)
+for line in resp.iter_lines(decode_unicode=True):
+    if not line.startswith("data: ") or line == "data: [DONE]":
+        continue
+    chunk = json.loads(line[len("data: "):])
+    event = chunk.get("cow_event")
+    if event and event["type"] == "tool_start":
+        print(f"\n[ツール呼び出し] {event['name']} {event['arguments']}")
+    for choice in chunk["choices"]:
+        print(choice["delta"].get("content") or "", end="", flush=True)
+```
+
+### プロセスイベント
+
+`cow_event.type` は次の値を取ります：
+
+| タイプ | 説明 | 主なフィールド |
+| --- | --- | --- |
+| `tool_start` | ツール呼び出しの開始 | `id`、`name`、`arguments` |
+| `tool_result` | ツール呼び出しの完了 | `id`、`name`、`arguments`、`result`、`status`、`elapsed` |
+| `subagent_step` | サブ Agent が実行したステップ | `card_id`、`step_id`、`phase`、`tool`、`status` |
+| `peer_start` | タスクを他の Agent に委任。以降の回答はその Agent によるもの | `card_id`、`agent_id`、`agent_name` |
+| `peer_end` | 委任先の Agent の処理が完了 | `card_id`、`agent_id`、`status` |
+| `artifact` | Agent が生成したファイル | `artifact` |
+| `reasoning` | 思考過程。`delta.reasoning_content` と同じ内容 | `delta` |
+| `error` | 実行エラー | `message` |
+
+## エラー処理
+
+エラーレスポンスは OpenAI の形式に従います：
+
+```json
+{ "error": { "message": "Invalid authentication credentials.", "type": "api_error", "code": "invalid_api_key" } }
+```
+
+| ステータス | `code` | 説明 |
+| --- | --- | --- |
+| 400 | `invalid_request` / `invalid_json` | リクエストの形式が不正 |
+| 401 | `invalid_api_key` | API キーが正しくない |
+| 404 | `model_not_found` | `model` が [モデル一覧](#モデル一覧) にない |
+| 404 | `agent_not_found` | `agent_id` で指定した Agent が存在しない、またはアーカイブ済み |
+| 503 | `api_disabled` | API が無効 |
+| 500 | `internal_error` / `timeout` | Agent の実行失敗またはタイムアウト |
+
+ストリーミングリクエストは、Agent が最初のイベントを生成するまで最大 30 秒待機します。それまでにエラーやタイムアウトが発生した場合は上表の JSON エラーを返し、タイムアウト時はそのリクエストをキャンセルします。ストリームの開始後は HTTP ステータスを変更できないため、以降のエラーは `cow_event.type=error` のチャンクとして返され、続いて `finish_reason=error` の終了チャンクと `data: [DONE]` が送られます。
+
+## 他のアプリから使う
+
+カスタム OpenAI エンドポイントに対応したクライアントやプラットフォームなら、そのまま接続できます。「OpenAI」または「OpenAI 互換」タイプを選び、次のように入力します：
+
+- **API アドレス**：`http://<サーバーアドレス>:9899/v1`（アドレスとポートだけを入力し、`/v1` を自動で補うアプリもあります）
+- **API キー**：コンソールで生成したキー
+- **モデル**：[モデル一覧](#モデル一覧) から選択
+
+これらのアプリからのリクエストにはデフォルト Agent が回答します。
+
+API はクロスオリジンリクエスト（CORS）に対応しているため、ブラウザ上のアプリからも直接呼び出せます。
+
+<Note>
+  現在はテキスト入力のみに対応しており、画像などのマルチモーダルコンテンツには対応していません。呼び出し側が `tools` を渡す関数呼び出しにも対応しておらず、Agent は自身のツールでタスクを完了します。
+</Note>

@@ -53,6 +53,11 @@ export interface ApiResult {
   message?: string
 }
 
+export interface ExternalApiState {
+  enabled: boolean
+  api_key: string
+}
+
 export interface UploadResult {
   status: string
   file_path: string
@@ -691,6 +696,17 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ updates }),
     })
+  }
+
+  /** The OpenAI-compatible chat API: whether it is on, its key, and the Agents it serves. */
+  async getExternalApi(): Promise<ApiResult & ExternalApiState> {
+    return this.request('/api/external_api')
+  }
+
+  async updateExternalApi(
+    action: 'enable' | 'disable' | 'regenerate'
+  ): Promise<ApiResult & ExternalApiState> {
+    return this.request('/api/external_api', { method: 'POST', body: JSON.stringify({ action }) })
   }
 
   // ---------------------------------------------------------

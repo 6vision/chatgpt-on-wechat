@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, Plus, Users, Trash2, Star, Upload, Check, Save, MessageSquare, Eye, Pencil } from 'lucide-react'
+import { Loader2, Plus, Users, Trash2, Star, Upload, Check, Copy, Save, MessageSquare, Eye, Pencil } from 'lucide-react'
 import { t, localizedLabel } from '../i18n'
 import apiClient from '../api/client'
 import type { AgentProfile, SkillInfo, SessionModelProvider } from '../types'
@@ -9,6 +9,7 @@ import { useSessionStore, sessionOwner } from '../store/sessionStore'
 import { useSessionSettingsStore } from '../store/sessionSettingsStore'
 import { startNewChat } from '../lib/newChat'
 import AgentAvatar from '../components/AgentAvatar'
+import Tooltip from '../components/Tooltip'
 import Markdown from '../components/Markdown'
 import { Btn, TextInput, Modal, Toggle, Dropdown, Field, FieldTip, type DropdownOption } from './settings/primitives'
 
@@ -173,6 +174,26 @@ const AgentCard: React.FC<{
 
 type Mutate = (body: Record<string, unknown>) => Promise<{ ok: boolean; message?: string }>
 
+const CopyIdButton: React.FC<{ id: string }> = ({ id }) => {
+  const [copied, setCopied] = useState(false)
+  return (
+    <Tooltip label={t('agents_copy_id')}>
+      <button
+        type="button"
+        onClick={() => {
+          void navigator.clipboard.writeText(id).then(() => {
+            setCopied(true)
+            setTimeout(() => setCopied(false), 1200)
+          })
+        }}
+        className="flex-shrink-0 p-0.5 hover:text-content-secondary cursor-pointer transition-colors"
+      >
+        {copied ? <Check size={12} /> : <Copy size={12} />}
+      </button>
+    </Tooltip>
+  )
+}
+
 // The editor: identity header, tab bar, one pane at a time. Each pane owns the
 // full remaining height so long content (a skill library, a core file) has
 // room instead of stacking into one endless form.
@@ -265,7 +286,10 @@ const AgentDetail: React.FC<{
                 </span>
               )}
             </div>
-            <p className="text-xs text-content-tertiary font-mono mt-0.5">{agent.id}</p>
+            <div className="flex items-center gap-1 mt-0.5 min-w-0 text-xs text-content-tertiary">
+              <span className="font-mono truncate">ID: {agent.id}</span>
+              <CopyIdButton id={agent.id} />
+            </div>
             {avatarStatus && <p className="text-xs text-danger mt-1">{avatarStatus}</p>}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">

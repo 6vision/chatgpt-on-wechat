@@ -39,12 +39,15 @@ class ChatService:
         speaker_agent_id: str = None,
         members: list = None,
         transcript: list = None,
+        persist: bool = True,
+        model_override: tuple = None,
     ):
         """
         Run the agent for *query* and stream results back via *send_chunk_fn*.
 
         The method blocks until the agent finishes. After it returns the SDK
-        will automatically send the final (streaming=false) message.
+        will automatically send the final (streaming=false) message. Returns
+        the provider usage summed over the run's model calls, or None.
 
         :param query: user query text
         :param session_id: session identifier for agent isolation
@@ -58,6 +61,10 @@ class ChatService:
             is authoritative and reconciled onto the session, like a team channel
         :param transcript: attributed messages to run against instead of the
             restored history (conversation kept elsewhere)
+        :param persist: store the turn in the conversation history; off for a
+            one-off request whose caller keeps the conversation itself
+        :param model_override: ``(provider, model)`` to answer this turn on,
+            instead of the conversation's or the Agent's own model
         """
         # The conversation belongs to ``resolved_agent_id`` (its owner); only the
         # voice answering this turn may differ. Same model as agent_reply.
@@ -115,6 +122,10 @@ class ChatService:
         if transcript is not None:
             with agent.messages_lock:
                 agent.messages = list(transcript)
+        # Lasts until the next fetch of this runtime re-applies the
+        # conversation's own settings.
+        if model_override and hasattr(getattr(agent, "model", None), "set_session_override"):
+            agent.model.set_session_override(*model_override)
 
         # Pass context metadata to model for downstream API requests
         if hasattr(agent, 'model'):
@@ -136,6 +147,8 @@ class ChatService:
         # The store is the owner's: a guest speaker writes into the shared
         # transcript, stamped as author.
         def write_run_messages(messages: list):
+            if not persist:
+                return
             workspace_root = agent.workspace_dir
             if is_team:
                 messages = self.agent_bridge._attribute_to_speaker(messages, speaker_id)
@@ -512,12 +525,15 @@ class ChatService:
         # Record this user turn for the self-evolution idle trigger. This
         # streaming path bypasses agent_bridge.agent_reply, so the activity must
         # be noted here, otherwise idle scans never see any signal to evolve.
-        self._note_evolution_turn(agent, context)
+        if persist:
+            self._note_evolution_turn(agent, context)
 
         logger.info(
             f"[ChatService] Agent run completed: agent={resolved_agent_id}, "
             f"session={session_id}"
         )
+        run_usage = getattr(executor, "run_usage", None)
+        return dict(run_usage) if run_usage else None
 
 
 

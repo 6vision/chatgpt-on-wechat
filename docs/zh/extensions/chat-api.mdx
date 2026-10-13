@@ -1,0 +1,305 @@
+---
+title: 对话 API
+description: 通过 OpenAI 兼容的 /v1/chat/completions 接口调用 CowAgent
+---
+
+> CowAgent 提供与 OpenAI Chat Completions 协议兼容的对话接口，复用 Web 控制台的端口。任何支持 OpenAI 协议的应用、SDK 或工作流都可以直接接入。
+
+和直接调用模型不同，接口背后是完整的 Agent：它会使用工具、技能、记忆和知识库完成任务，并把思考过程、工具调用和 Token 用量一并返回。
+
+## 开启接口
+
+接口默认关闭，开启后需在请求中携带 API Key。
+
+### 在控制台开启
+
+进入「配置 → 基础配置 → 对话 API」，打开开关并确认后会自动生成 API Key，并给出接口地址和调用示例（cURL / Python / Node.js），可直接复制使用。
+
+{/* TODO: 截图 - 配置页「对话 API」卡片 */}
+
+- **重新生成**：生成新的 API Key，旧 Key 立即失效
+- **关闭开关**：接口停止服务，API Key 会保留，再次开启后可继续使用
+
+### 在配置文件开启
+
+在 `config.json` 中配置以下两项，修改后需重启服务生效：
+
+```json
+{
+  "external_api_enabled": true,
+  "external_api_token": "sk-your-random-key"
+}
+```
+
+| 配置项 | 说明 |
+| --- | --- |
+| `external_api_enabled` | 是否开启接口，默认 `false` |
+| `external_api_token` | API Key，建议使用足够长的随机字符串。关闭接口时会保留 |
+
+<Note>
+  接口与 Web 控制台使用同一地址和端口。默认只监听 `127.0.0.1`，仅本机可以访问；如需其他机器调用，请参考 [Web 控制台](/zh/channels/web) 将 `web_host` 设为 `0.0.0.0`，并放行端口。API Key 与控制台访问密码 `web_password` 相互独立。
+</Note>
+
+## 快速开始
+
+以下示例假设服务运行在本机 `9899` 端口，不指定模型和智能体，由默认智能体使用它的默认模型回答。
+
+<Tabs>
+  <Tab title="cURL">
+    ```bash
+    curl http://localhost:9899/v1/chat/completions \
+      -H "Authorization: Bearer $API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{"messages": [{"role": "user", "content": "总结一下工作空间里有哪些文件"}]}'
+    ```
+  </Tab>
+  <Tab title="Python">
+    ```python
+    import requests
+
+    resp = requests.post(
+        "http://localhost:9899/v1/chat/completions",
+        headers={"Authorization": "Bearer your-api-key"},
+        json={"messages": [{"role": "user", "content": "总结一下工作空间里有哪些文件"}]},
+    )
+    print(resp.json()["choices"][0]["message"]["content"])
+    ```
+  </Tab>
+  <Tab title="Node.js">
+    ```javascript
+    const resp = await fetch("http://localhost:9899/v1/chat/completions", {
+      method: "POST",
+      headers: { "Authorization": "Bearer your-api-key", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: "总结一下工作空间里有哪些文件" }],
+      }),
+    });
+    const data = await resp.json();
+    console.log(data.choices[0].message.content);
+    ```
+  </Tab>
+</Tabs>
+
+## 接口说明
+
+### 认证
+
+所有请求都需要在请求头中携带 API Key：
+
+```
+Authorization: Bearer <API Key>
+```
+
+### 对话
+
+`POST /v1/chat/completions`
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `messages` | array | 是 | 对话消息，支持 `system`、`developer`、`user`、`assistant` 角色；`content` 可以是字符串，或 `type` 为 `text` 的内容数组 |
+| `model` | string | 否 | 本次回答使用的模型，不传时使用智能体的默认模型。可用值见 [模型列表](#模型列表) |
+| `agent_id` | string | 否 | CowAgent 扩展参数，指定由哪个智能体回答，不传时使用默认智能体，见 [指定智能体](#指定智能体) |
+| `stream` | boolean | 否 | 是否流式输出，默认 `false` |
+| `stream_options` | object | 否 | 设置 `{"include_usage": true}` 后，流式输出会在最后返回 Token 用量 |
+| `conversation_id` | string | 否 | CowAgent 扩展参数，指定后由服务端保存会话历史，见 [会话管理](#会话管理) |
+
+Agent 使用自己的工具和系统提示词，因此 `temperature`、`max_tokens`、`tools` 等参数会被忽略。
+
+### 指定智能体
+
+配置了 [多智能体](/zh/multi-agent/team) 时，可以通过 `agent_id` 指定由哪个智能体回答。智能体 ID 显示在「智能体」页面的名称下方，点击旁边的图标即可复制。`default` 始终表示默认智能体，指定的智能体不存在或已归档时返回 404。
+
+```bash
+curl http://localhost:9899/v1/chat/completions \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "research",
+    "model": "deepseek-chat",
+    "messages": [{"role": "user", "content": "调研一下最近的开源 Agent 框架"}]
+  }'
+```
+
+`model` 只对本次请求生效，不会修改智能体或会话的模型设置。
+
+### 模型列表
+
+`GET /v1/models`
+
+返回可用的模型，即「配置 → 模型配置」中已配置的厂商下的对话模型，`owned_by` 为所属厂商。请求中的 `model` 不在列表中时返回 404。
+
+```json
+{
+  "object": "list",
+  "data": [
+    { "id": "deepseek-chat", "object": "model", "created": 0, "owned_by": "deepseek" },
+    { "id": "qwen-max", "object": "model", "created": 0, "owned_by": "dashscope" }
+  ]
+}
+```
+
+## 会话管理
+
+接口支持两种会话方式：
+
+- **无状态（默认）**：不传 `conversation_id`，与调用普通模型一样，每次请求带上完整的 `messages`。最后一条 `user` 消息作为本轮输入，之前的 `user` / `assistant` 消息作为上下文。本次对话不会写入 CowAgent 的会话记录。
+- **有状态**：传入 `conversation_id`，会话历史由 CowAgent 保存，之后每次只需发送新消息，`messages` 中更早的消息会被忽略。同一会话的请求按顺序依次处理。
+
+```json
+{
+  "conversation_id": "order-bot-user-42",
+  "messages": [{ "role": "user", "content": "继续上次的话题" }]
+}
+```
+
+<Note>
+  请求中的 `system` 消息会被忽略，Agent 始终使用自己的人设、技能和记忆。无论哪种会话方式，Agent 都可以通过工具读写工作空间和记忆文件。
+</Note>
+
+## 响应格式
+
+### 非流式
+
+在标准的 OpenAI 响应之外，`message` 中会附带思考过程和工具调用记录：
+
+```json
+{
+  "id": "chatcmpl-82c19c44...",
+  "object": "chat.completion",
+  "created": 1791861130,
+  "model": "deepseek-chat",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "工作空间里有 4 个核心文件和 7 个目录……",
+        "reasoning_content": "用户想了解工作空间的内容，先列出目录……",
+        "tool_trace": [
+          {
+            "type": "tool_result",
+            "id": "call_00_wYInMZ...",
+            "name": "ls",
+            "arguments": { "path": "." },
+            "result": "AGENT.md\nMEMORY.md\n...",
+            "status": "success",
+            "elapsed": "0.01s"
+          }
+        ]
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 18151,
+    "completion_tokens": 180,
+    "total_tokens": 18331,
+    "prompt_tokens_details": { "cached_tokens": 11392 }
+  }
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `model` | 本次回答使用的模型 |
+| `message.content` | 最终回复 |
+| `message.reasoning_content` | 思考过程，开启深度思考且模型支持时返回 |
+| `message.tool_trace` | CowAgent 扩展字段，工具调用记录，每次调用包含参数、结果、状态和耗时；委派给其他智能体、生成文件等过程也会记录在这里，格式同下方的 [过程事件](#过程事件) |
+| `usage` | Token 用量。Agent 完成一轮任务可能多次调用模型，这里是所有调用的总和；`prompt_tokens_details.cached_tokens` 为命中缓存的输入 Token。模型未返回用量时不包含此字段 |
+
+### 流式
+
+设置 `"stream": true` 后以 SSE 返回标准的 `chat.completion.chunk`：
+
+- 回复内容在 `choices[0].delta.content`
+- 思考过程在 `choices[0].delta.reasoning_content`
+- 工具调用等过程事件在顶层的 `cow_event` 字段，此时 `delta` 为空
+- 最后一个数据块的 `finish_reason` 为 `stop`；如设置了 `stream_options.include_usage`，随后会再发送一个 `choices` 为空、带 `usage` 的数据块
+- 以 `data: [DONE]` 结束
+
+```
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":null}],"cow_event":{"type":"tool_start","id":"call_1","name":"ls","arguments":{"path":"."}}}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"工作空间里有"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":18151,"completion_tokens":180,"total_tokens":18331,"prompt_tokens_details":{"cached_tokens":11392}}}
+
+data: [DONE]
+```
+
+读取流式输出的示例：
+
+```python
+import json
+import requests
+
+resp = requests.post(
+    "http://localhost:9899/v1/chat/completions",
+    headers={"Authorization": "Bearer your-api-key"},
+    json={"messages": [{"role": "user", "content": "总结一下工作空间里有哪些文件"}], "stream": True},
+    stream=True,
+)
+for line in resp.iter_lines(decode_unicode=True):
+    if not line.startswith("data: ") or line == "data: [DONE]":
+        continue
+    chunk = json.loads(line[len("data: "):])
+    event = chunk.get("cow_event")
+    if event and event["type"] == "tool_start":
+        print(f"\n[调用工具] {event['name']} {event['arguments']}")
+    for choice in chunk["choices"]:
+        print(choice["delta"].get("content") or "", end="", flush=True)
+```
+
+### 过程事件
+
+`cow_event.type` 的取值如下：
+
+| 类型 | 说明 | 主要字段 |
+| --- | --- | --- |
+| `tool_start` | 开始调用工具 | `id`、`name`、`arguments` |
+| `tool_result` | 工具调用完成 | `id`、`name`、`arguments`、`result`、`status`、`elapsed` |
+| `subagent_step` | 子 Agent 执行的步骤 | `card_id`、`step_id`、`phase`、`tool`、`status` |
+| `peer_start` | 任务委派给其他智能体，之后的回复内容来自该智能体 | `card_id`、`agent_id`、`agent_name` |
+| `peer_end` | 被委派的智能体处理结束 | `card_id`、`agent_id`、`status` |
+| `artifact` | Agent 生成的文件 | `artifact` |
+| `reasoning` | 思考过程，与 `delta.reasoning_content` 内容相同 | `delta` |
+| `error` | 执行出错 | `message` |
+
+## 错误处理
+
+错误响应遵循 OpenAI 格式：
+
+```json
+{ "error": { "message": "Invalid authentication credentials.", "type": "api_error", "code": "invalid_api_key" } }
+```
+
+| 状态码 | `code` | 说明 |
+| --- | --- | --- |
+| 400 | `invalid_request` / `invalid_json` | 请求格式错误 |
+| 401 | `invalid_api_key` | API Key 错误 |
+| 404 | `model_not_found` | `model` 不在 [模型列表](#模型列表) 中 |
+| 404 | `agent_not_found` | `agent_id` 指定的智能体不存在或已归档 |
+| 503 | `api_disabled` | 接口未开启 |
+| 500 | `internal_error` / `timeout` | Agent 执行失败或超时 |
+
+流式请求会等待 Agent 产生第一个事件，最长 30 秒：在此之前出错或超时，返回上表中的 JSON 错误，超时时会取消该请求。流式输出开始后 HTTP 状态码无法再修改，之后的错误会以 `cow_event.type=error` 的数据块返回，随后是 `finish_reason=error` 的结束块和 `data: [DONE]`。
+
+## 接入第三方应用
+
+支持自定义 OpenAI 接口的客户端和平台都可以直接接入，选择「OpenAI」或「OpenAI 兼容」类型，然后填写：
+
+- **API 地址**：`http://<服务器地址>:9899/v1`（部分应用只需填到端口，会自动补全 `/v1`）
+- **API Key**：控制台生成的 Key
+- **模型**：从 [模型列表](#模型列表) 中选择
+
+通过第三方应用接入时由默认智能体回答。
+
+接口支持跨域访问（CORS），也可以在浏览器端的应用中直接调用。
+
+<Note>
+  目前仅支持文本输入，暂不支持图片等多模态内容；也不支持由调用方传入 `tools` 进行函数调用，Agent 会使用自己的工具完成任务。
+</Note>

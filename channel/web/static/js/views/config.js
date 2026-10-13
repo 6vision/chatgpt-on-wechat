@@ -649,6 +649,134 @@ function loadConfigView() {
         appConfig = data;
         initConfigView(data);
     }).catch(() => {});
+    loadExternalApi();
+}
+
+// ---- Chat API card: the OpenAI-compatible /v1 endpoint ----------------------
+
+let externalApiState = { enabled: false, api_key: '' };
+let externalApiLang = 'curl';
+
+function _externalApiRevealed() {
+    return !document.getElementById('cfg-api-token').classList.contains('cfg-key-masked');
+}
+
+function externalApiExample(lang, reveal) {
+    const base = `${window.location.origin}/v1`;
+    const raw = externalApiState.api_key || '';
+    const key = reveal ? raw : raw.slice(0, 7) + '********' + raw.slice(-4);
+    if (lang === 'python') {
+        return [
+            'import requests',
+            '',
+            'resp = requests.post(',
+            `    "${base}/chat/completions",`,
+            `    headers={"Authorization": "Bearer ${key}"},`,
+            '    json={"messages": [{"role": "user", "content": "Hello"}]},',
+            ')',
+            'print(resp.json()["choices"][0]["message"]["content"])',
+        ].join('\n');
+    }
+    if (lang === 'node') {
+        return [
+            `const resp = await fetch("${base}/chat/completions", {`,
+            '  method: "POST",',
+            `  headers: { "Authorization": "Bearer ${key}", "Content-Type": "application/json" },`,
+            '  body: JSON.stringify({ messages: [{ role: "user", content: "Hello" }] }),',
+            '});',
+            'const data = await resp.json();',
+            'console.log(data.choices[0].message.content);',
+        ].join('\n');
+    }
+    return [
+        `curl ${base}/chat/completions \\`,
+        `  -H "Authorization: Bearer ${key}" \\`,
+        '  -H "Content-Type: application/json" \\',
+        `  -d '{"messages": [{"role": "user", "content": "Hello"}]}'`,
+    ].join('\n');
+}
+
+function renderExternalApi() {
+    const s = externalApiState;
+    const docs = document.getElementById('cfg-api-docs');
+    if (docs) docs.href = (currentLang === 'zh' ? 'https://docs.cowagent.ai/zh' : 'https://docs.cowagent.ai') + '/extensions/chat-api';
+    document.getElementById('cfg-api-enabled').checked = !!s.enabled;
+    document.getElementById('cfg-api-detail').classList.toggle('hidden', !s.enabled);
+    if (!s.enabled) return;
+    document.getElementById('cfg-api-base-url').value = `${window.location.origin}/v1`;
+    document.getElementById('cfg-api-token').value = s.api_key || '';
+    document.querySelectorAll('.cfg-api-lang').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.lang === externalApiLang);
+    });
+    document.getElementById('cfg-api-example').textContent = externalApiExample(externalApiLang, _externalApiRevealed());
+}
+
+function loadExternalApi() {
+    fetch('/api/external_api').then(r => r.json()).then(data => {
+        if (data.status !== 'success') return;
+        externalApiState = data;
+        renderExternalApi();
+    }).catch(() => {});
+}
+
+function _postExternalApi(action) {
+    return fetch('/api/external_api', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'success') externalApiState = data;
+    })
+    .catch(() => {})
+    .finally(renderExternalApi);
+}
+
+function onExternalApiToggle(input) {
+    // The switch keeps its state until the user confirms either way.
+    const enable = input.checked;
+    input.checked = !enable;
+    showConfirmDialog({
+        title: t(enable ? 'config_api_enable' : 'config_api_disable'),
+        message: t(enable ? 'config_api_enable_confirm' : 'config_api_disable_confirm'),
+        okText: t(enable ? 'config_api_enable_ok' : 'config_api_disable_ok'),
+        tone: enable ? 'primary' : 'danger',
+        onConfirm: () => _postExternalApi(enable ? 'enable' : 'disable'),
+    });
+}
+
+function regenerateExternalApiKey() {
+    showConfirmDialog({
+        title: t('config_api_regenerate'),
+        message: t('config_api_regenerate_confirm'),
+        okText: t('config_api_regenerate'),
+        onConfirm: () => _postExternalApi('regenerate'),
+    });
+}
+
+function switchExternalApiExample(lang) {
+    externalApiLang = lang;
+    renderExternalApi();
+}
+
+function toggleExternalApiKey() {
+    const input = document.getElementById('cfg-api-token');
+    const masked = input.classList.toggle('cfg-key-masked');
+    document.querySelector('#cfg-api-token-toggle i').className = masked ? 'fas fa-eye text-xs' : 'fas fa-eye-slash text-xs';
+    renderExternalApi();
+}
+
+function copyExternalApiField(id, btn) {
+    const text = id === 'cfg-api-example'
+        ? externalApiExample(externalApiLang, true)
+        : document.getElementById(id).value;
+    copyToClipboard(text).then(() => {
+        const icon = btn.querySelector('i');
+        const original = icon.className;
+        icon.className = original.replace(/far fa-copy/, 'fas fa-check');
+        setTimeout(() => { icon.className = original; }, 1200);
+    }).catch(() => {});
 }
 
 function switchConfigTab(tab) {

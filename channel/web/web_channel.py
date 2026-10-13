@@ -27,7 +27,7 @@ from channel.web.api.channels import (  # noqa: F401
 from channel.web.api.chat import (  # noqa: F401
     CancelHandler, MessageHandler, PollHandler, StreamHandler,
 )
-from channel.web.api.config import ConfigHandler  # noqa: F401
+from channel.web.api.config import ConfigHandler, ExternalApiHandler  # noqa: F401
 from channel.web.api.files import (  # noqa: F401
     FileRevealHandler, FileServeHandler, PreviewHandler, UploadHandler, UploadsHandler,
     VoiceAsrHandler, VoiceTtsHandler,
@@ -43,7 +43,7 @@ from channel.web.api.memory import (  # noqa: F401
 from channel.web.api.menu import MenuHandler  # noqa: F401
 from channel.web.api.models import ModelsHandler  # noqa: F401
 from channel.web.api.openai_compat import (  # noqa: F401
-    OpenAIChatCompletionsHandler,
+    OpenAIChatCompletionsHandler, OpenAIModelsHandler,
 )
 from channel.web.api.pages import (  # noqa: F401
     AssetsHandler, ChatHandler, HealthHandler, RootHandler,
@@ -121,7 +121,9 @@ URLS = (
     '/stream', 'StreamHandler',
     '/cancel', 'CancelHandler',
     '/v1/chat/completions', 'OpenAIChatCompletionsHandler',
+    '/v1/models', 'OpenAIModelsHandler',
     '/config', 'ConfigHandler',
+    '/api/external_api', 'ExternalApiHandler',
     '/api/models', 'ModelsHandler',
     '/api/channels', 'ChannelsHandler',
     '/api/weixin/qrlogin', 'WeixinQrHandler',

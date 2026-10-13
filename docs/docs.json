@@ -271,6 +271,18 @@
             "tab": "Extensions",
             "groups": [
               {
+                "group": "API",
+                "pages": [
+                  "extensions/chat-api"
+                ]
+              },
+              {
+                "group": "Customization",
+                "pages": [
+                  "extensions/custom-menu"
+                ]
+              },
+              {
                 "group": "Third-party Integrations",
                 "pages": [
                   "extensions/agent-mail"
@@ -532,6 +544,18 @@
             "tab": "扩展",
             "groups": [
               {
+                "group": "开放接口",
+                "pages": [
+                  "zh/extensions/chat-api"
+                ]
+              },
+              {
+                "group": "界面定制",
+                "pages": [
+                  "zh/extensions/custom-menu"
+                ]
+              },
+              {
                 "group": "三方集成",
                 "pages": [
                   "zh/extensions/agent-mail"
@@ -791,6 +815,18 @@
           {
             "tab": "拡張",
             "groups": [
+              {
+                "group": "API",
+                "pages": [
+                  "ja/extensions/chat-api"
+                ]
+              },
+              {
+                "group": "UI カスタマイズ",
+                "pages": [
+                  "ja/extensions/custom-menu"
+                ]
+              },
               {
                 "group": "サードパーティ連携",
                 "pages": [
