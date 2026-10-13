@@ -5,9 +5,13 @@ description: Reorder and group the sidebar menu, and put the artifacts and web p
 
 The sidebar menu can be arranged the way you work: reorder and group it, hide the pages you rarely use, and add web pages and documents the Agent created, or any URL, so they open in one click like a built-in page. The Web Console and the desktop client share one menu.
 
-{/* TODO: screenshot - a customized sidebar */}
+<Frame caption="An ops dashboard maintained by the Agent, pinned to a Workbench group and opened right inside the console">
+  <img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/web-console-custom-menu.png" alt="Custom menu" width="800" />
+</Frame>
 
-## Open the menu editor
+## Edit the menu
+
+### Open the editor
 
 There are three ways in:
 
@@ -15,17 +19,19 @@ There are three ways in:
 - Click the version number at the bottom left of the sidebar (Web Console) or the "More" button (desktop client), then choose "Customize menu"
 - While previewing a web page or Markdown document on the Artifacts page, click "Add to menu"
 
-{/* TODO: screenshot - the menu editor */}
+<Frame caption="The menu editor: drag to reorder and regroup, and add artifacts and web links">
+  <img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/web-console-custom-menu-config.png" alt="Menu editor" width="800" />
+</Frame>
 
 Changes take effect once you click Save in the editor.
 
-## Order and groups
+### Order and groups
 
 - Hold the drag handle on the left of an entry to move it, within its group or into another one
 - Click "Add group" to create a group; its title can be edited in place
 - Before removing a group, move the built-in pages it holds to another group
 
-## Built-in pages
+### Built-in pages
 
 Built-in pages such as Chat, Agents, Config and Capabilities can be:
 
@@ -35,13 +41,21 @@ Built-in pages such as Chat, Agents, Config and Capabilities can be:
 
 The Artifacts page starts hidden; show it in the editor when you need it.
 
-## Add an artifact
+### Restore default
+
+Click "Restore default" in the editor to go back to the built-in menu. The artifacts and links you added are removed.
+
+## Add menu entries
+
+Besides built-in pages, the menu can hold artifacts and web links, each with its own name and icon.
+
+### Artifacts
 
 Use "Add → Artifact (HTML / Markdown)" to search the web pages and Markdown documents the Agent created and put one in the menu. Clicking the entry opens it right inside the console, always at its latest version, which suits reports, dashboards and notes the Agent keeps up to date.
 
 If the file is deleted, the entry says so, and you can remove it in the editor.
 
-## Add a web link
+### Web links
 
 Use "Add → Web link", enter a name and a URL starting with `http://` or `https://`, and choose how it opens:
 
@@ -52,13 +66,13 @@ Use "Add → Web link", enter a name and a URL starting with `http://` or `https
   Some sites refuse to be embedded in other pages and show up blank. Switch the entry to "New tab" instead. An embedded page also has an "Open in new tab" button at its top right.
 </Tip>
 
-## Restore default
-
-Click "Restore default" in the editor to go back to the built-in menu. The artifacts and links you added are removed.
-
 ## Menu file
 
+### Location
+
 The menu is saved in `system/menu.json` under the default Agent's workspace (`~/cow/system/menu.json` for a source deployment), and both the Web Console and the desktop client read it. A page one client does not have is skipped there and kept in the menu for the other.
+
+### Format
 
 The file can also be edited by hand in the format below. A file that cannot be parsed is ignored and the built-in menu is used.
 
