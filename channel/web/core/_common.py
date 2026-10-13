@@ -829,7 +829,7 @@ def _addressed_agent_id(text: str, roster: List[dict]) -> str:
             if label:
                 candidates.append((label, item["id"]))
     for label, agent_id in sorted(candidates, key=lambda pair: -len(pair[0])):
-        pattern = r"^@" + re.escape(label) + r"(?=[\s，,：:、]|$)"
+        pattern = r"^@" + re.escape(label) + r"(?=[\s，,：:、。！？；）!?;)]|$)"
         if re.match(pattern, stripped, re.IGNORECASE):
             return agent_id
     return ""

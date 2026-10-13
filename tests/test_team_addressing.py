@@ -56,6 +56,22 @@ def test_boundary_requires_separator_or_end():
     assert addressed_agent_id("@ops", ROSTER) == "ops"
 
 
+def test_sentence_ending_punctuation_is_a_boundary():
+    # A name followed by a CJK full stop / exclamation / question / semicolon
+    # or a closing parenthesis still addresses the teammate. Chinese users write
+    # ``@运维。`` constantly; without these the mention silently fails.
+    assert addressed_agent_id("@运维。帮我查", ROSTER) == "ops"
+    assert addressed_agent_id("@运维！停下", ROSTER) == "ops"
+    assert addressed_agent_id("@运维？在吗", ROSTER) == "ops"
+    assert addressed_agent_id("@运维；继续", ROSTER) == "ops"
+    assert addressed_agent_id("@运维）收到", ROSTER) == "ops"
+
+
+def test_dot_is_not_a_boundary_to_keep_domain_names():
+    # "@ops.com" must not resolve to the "ops" teammate; "." stays excluded.
+    assert addressed_agent_id("@ops.com 你好", ROSTER) == ""
+
+
 @pytest.fixture
 def registry(tmp_path):
     """A team whose default agent was given an id at provisioning time.
