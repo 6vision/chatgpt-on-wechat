@@ -3,6 +3,7 @@ Skill manager for managing skill lifecycle and operations.
 """
 
 import os
+import re
 import json
 import threading
 from typing import Dict, Iterable, List, Optional
@@ -21,6 +22,48 @@ SKILLS_CONFIG_TMP_PREFIX = f".{SKILLS_CONFIG_FILE}."
 #   icon         - image URL shown beside it
 #   version      - version of the package the skill was installed from
 SKILL_DISPLAY_FIELDS = ("display_name", "icon", "version")
+
+_ICON_URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
+
+
+def _display_text(value, max_len: int) -> str:
+    """A single-line presentation field, or ''."""
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())[:max_len]
+
+
+def _display_url(value) -> str:
+    """An http(s) image URL, or ''."""
+    url = value.strip() if isinstance(value, str) else ""
+    if len(url) > 2048 or not _ICON_URL_RE.match(url):
+        return ""
+    return url
+
+
+def apply_install_fields(entry: dict, fields: dict) -> bool:
+    """Copy what an installer says about a skill onto its skills_config entry.
+
+    ``fields`` may carry ``category`` and the SKILL_DISPLAY_FIELDS; values that
+    are missing or malformed are skipped. ``icon`` and ``version`` describe the
+    package just installed, so a reinstall without them drops the old ones;
+    ``display_name`` is not tied to a package and is kept. Returns whether the
+    entry changed.
+    """
+    before = dict(entry)
+    category = _display_text(fields.get("category"), 64)
+    if category:
+        entry["category"] = category
+    display_name = _display_text(fields.get("display_name"), 128)
+    if display_name:
+        entry["display_name"] = display_name
+    for key, value in (("icon", _display_url(fields.get("icon"))),
+                       ("version", _display_text(fields.get("version"), 64))):
+        if value:
+            entry[key] = value
+        else:
+            entry.pop(key, None)
+    return entry != before
 
 
 def build_skill_manager(

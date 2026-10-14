@@ -22,7 +22,8 @@ from cli.utils import (
     get_skills_dir,
     get_builtin_skills_dir,
     load_skills_config,
-    SKILL_HUB_API,
+    custom_skill_hub,
+    skill_hub,
 )
 
 
@@ -704,6 +705,38 @@ def _check_checksum(content: bytes, expected: str):
         )
 
 
+def _hub_error_message(error: requests.HTTPError) -> str:
+    """The reason a hub gave for refusing a request, falling back to the HTTP error."""
+    try:
+        message = error.response.json().get("message")
+    except Exception:
+        message = None
+    return message if isinstance(message, str) and message.strip() else str(error)
+
+
+def _record_hub_fields(names: List[str], data: dict, agent_id: str = None) -> None:
+    """Keep what a configured registry says about a single installed skill:
+    category, title, icon, version."""
+    if len(names) != 1 or not isinstance(data, dict):
+        return
+    _ensure_project_on_path()
+    from agent.skills.manager import apply_install_fields
+
+    skills_dir = _target_skills_dir(agent_id)
+    config_path = os.path.join(skills_dir, "skills_config.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+    except Exception:
+        return
+    entry = config.get(names[0])
+    if isinstance(entry, dict) and apply_install_fields(entry, data):
+        try:
+            _write_skills_config(config, skills_dir)
+        except Exception:
+            pass
+
+
 @click.group()
 def skill():
     """Manage CowAgent skills."""
@@ -810,10 +843,12 @@ _REMOTE_PAGE_SIZE = 10
 
 def _list_remote(page: int = 1):
     """List skills from remote Skill Hub with server-side pagination."""
+    hub_api, hub_headers = skill_hub()
     try:
         resp = requests.get(
-            f"{SKILL_HUB_API}/skills",
+            f"{hub_api}/skills",
             params={"page": page, "limit": _REMOTE_PAGE_SIZE},
+            headers=hub_headers,
             timeout=10,
         )
         resp.raise_for_status()
@@ -857,7 +892,9 @@ def _list_remote(page: int = 1):
     if nav_parts:
         click.echo(f"  Navigate: {' | '.join(nav_parts)}")
     click.echo("  Install:  cow skill install <name>")
-    click.echo("  Browse:   https://skills.cowagent.ai\n")
+    if not custom_skill_hub():
+        click.echo("  Browse:   https://skills.cowagent.ai")
+    click.echo()
 
 
 # ------------------------------------------------------------------
@@ -867,8 +904,9 @@ def _list_remote(page: int = 1):
 @click.argument("query")
 def search(query):
     """Search skills on Skill Hub."""
+    hub_api, hub_headers = skill_hub()
     try:
-        resp = requests.get(f"{SKILL_HUB_API}/skills/search", params={"q": query}, timeout=10)
+        resp = requests.get(f"{hub_api}/skills/search", params={"q": query}, headers=hub_headers, timeout=10)
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
@@ -1232,6 +1270,7 @@ def _install_hub(name, result: InstallResult, provider=None, agent_id: str = Non
     os.makedirs(skills_dir, exist_ok=True)
 
     result.messages.append(f"Fetching skill info for '{name}'...")
+    hub_api, hub_headers = skill_hub(provider)
 
     try:
         body = {}
@@ -1240,15 +1279,16 @@ def _install_hub(name, result: InstallResult, provider=None, agent_id: str = Non
         if owner:
             body["owner"] = owner
         resp = requests.post(
-            f"{SKILL_HUB_API}/skills/{name}/download",
+            f"{hub_api}/skills/{name}/download",
             json=body,
+            headers=hub_headers,
             timeout=15,
         )
         resp.raise_for_status()
     except requests.HTTPError as e:
         if e.response is not None and e.response.status_code == 404:
             raise SkillInstallError(f"Skill '{name}' not found on Skill Hub.")
-        raise SkillInstallError(f"Failed to fetch skill: {e}")
+        raise SkillInstallError(f"Failed to fetch skill: {_hub_error_message(e)}")
     except SkillInstallError:
         raise
     except Exception as e:
@@ -1288,8 +1328,9 @@ def _install_hub(name, result: InstallResult, provider=None, agent_id: str = Non
             result.messages.append(f"GitHub download failed ({gh_err}), trying mirror...")
             try:
                 mirror_resp = requests.post(
-                    f"{SKILL_HUB_API}/skills/{name}/download",
+                    f"{hub_api}/skills/{name}/download",
                     json={"mirror": True},
+                    headers=hub_headers,
                     timeout=30,
                 )
                 mirror_resp.raise_for_status()
@@ -1363,14 +1404,17 @@ def _install_hub(name, result: InstallResult, provider=None, agent_id: str = Non
                         _register_installed_skill(name, source=src_provider, display_name=hub_display_name, agent_id=agent_id)
                         result.installed.append(name)
                         result.messages.append(f"Installed '{name}' from {src_provider}.")
+                    if not provider and custom_skill_hub():
+                        _record_hub_fields(result.installed[installed_before:], data, agent_id=agent_id)
                     return
 
                 # Fallback: download mirror from Skill Hub
                 result.messages.append(f"Direct download failed ({dl_err}), trying mirror...")
                 try:
                     mirror_resp = requests.post(
-                        f"{SKILL_HUB_API}/skills/{name}/download",
+                        f"{hub_api}/skills/{name}/download",
                         json={"mirror": True},
+                        headers=hub_headers,
                         timeout=30,
                     )
                     mirror_resp.raise_for_status()

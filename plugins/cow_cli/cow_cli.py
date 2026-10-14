@@ -1149,12 +1149,14 @@ class CowCliPlugin(Plugin):
 
     def _skill_list_remote(self, page: int = 1) -> str:
         import requests
-        from cli.utils import SKILL_HUB_API, load_skills_config
+        from cli.utils import custom_skill_hub, load_skills_config, skill_hub
         page_size = self._REMOTE_PAGE_SIZE
+        hub_api, hub_headers = skill_hub()
         try:
             resp = requests.get(
-                f"{SKILL_HUB_API}/skills",
+                f"{hub_api}/skills",
                 params={"page": page, "limit": page_size},
+                headers=hub_headers,
                 timeout=10,
             )
             resp.raise_for_status()
@@ -1193,8 +1195,9 @@ class CowCliPlugin(Plugin):
             lines.append(_t(f"💡 /skill list --remote --page {page - 1}: 上一页", f"💡 /skill list --remote --page {page - 1}: Previous page"))
         lines.append(_t("💡 /skill install <名称>: 安装技能", "💡 /skill install <name>: Install a skill"))
         lines.append(_t("💡 /skill search <关键词>: 搜索技能", "💡 /skill search <keyword>: Search skills"))
-        # The hub site is the default product's; a renamed build leaves it out.
-        if not os.environ.get("COW_APP_NAME"):
+        # The hub site is the default product's; a renamed build or another
+        # registry leaves it out.
+        if not os.environ.get("COW_APP_NAME") and not custom_skill_hub():
             lines.append(_t("🌐 https://skills.cowagent.ai  在线浏览全部技能", "🌐 https://skills.cowagent.ai  Browse all skills online"))
         return "\n".join(lines)
 
@@ -1203,9 +1206,10 @@ class CowCliPlugin(Plugin):
             return _t("请指定搜索关键词: /skill search <关键词>", "Please specify a search keyword: /skill search <keyword>")
 
         import requests
-        from cli.utils import SKILL_HUB_API, load_skills_config
+        from cli.utils import load_skills_config, skill_hub
+        hub_api, hub_headers = skill_hub()
         try:
-            resp = requests.get(f"{SKILL_HUB_API}/skills/search", params={"q": query}, timeout=10)
+            resp = requests.get(f"{hub_api}/skills/search", params={"q": query}, headers=hub_headers, timeout=10)
             resp.raise_for_status()
             skills = resp.json().get("skills", [])
         except Exception as e:

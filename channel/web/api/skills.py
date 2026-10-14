@@ -385,6 +385,11 @@ class SkillsHandler:
                 if result.error:
                     return json.dumps({"status": "error", "message": result.error})
                 service.manager.refresh_skills()
+                # What the caller knows about a single skill it installed: category,
+                # display_name, icon, version. A package of several has no one owner.
+                meta = body.get("meta")
+                if isinstance(meta, dict) and len(result.installed) == 1:
+                    service.record_install(result.installed[0], meta)
                 return json.dumps({
                     "status": "success",
                     "installed": result.installed,

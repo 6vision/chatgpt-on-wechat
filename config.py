@@ -354,6 +354,11 @@ available_setting = {
     # Deep Dream: nightly memory distillation into MEMORY.md + dream diary.
     "deep_dream_enabled": True,             # scheduled deep dream switch; manual /memory dream is unaffected
     "skill": {},  # Per-skill runtime config; nested keys flatten to SKILL_<NAME>_<KEY> env vars at startup
+    # Registry that installs by bare name, skill search and skill list --remote
+    # use; empty means the default Skill Hub. It must speak the same API. The key,
+    # if set, is sent as a bearer token to this registry only.
+    "skill_hub_url": "",
+    "skill_hub_api_key": "",
     "mcp_servers": [],  # MCP server list; each entry supports type "stdio" (local process) or "sse" (remote URL)
     # On-demand MCP tool retrieval: when many MCP tools are connected, inject
     # only the most query-relevant ones instead of all of them. Built-in tools

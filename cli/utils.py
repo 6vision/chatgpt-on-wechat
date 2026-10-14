@@ -113,3 +113,50 @@ def ensure_sys_path():
 
 
 SKILL_HUB_API = "https://skills.cowagent.ai/api"
+
+
+def _skill_hub_setting(key: str) -> str:
+    # In process the loaded config (env overrides included) is the truth; the
+    # out-of-process CLI has not loaded it and reads config.json instead.
+    value = ""
+    try:
+        ensure_sys_path()
+        from config import conf
+
+        value = conf().get(key) or ""
+    except Exception:
+        pass
+    if not value:
+        value = load_config_json().get(key) or ""
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _usable_hub_url(url: str) -> bool:
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
+def custom_skill_hub() -> bool:
+    """Whether ``skill_hub_url`` points requests at a registry other than the default."""
+    url = _skill_hub_setting("skill_hub_url")
+    return bool(url) and _usable_hub_url(url)
+
+
+def skill_hub(provider: str = None) -> tuple:
+    """Base URL and request headers for a Skill Hub request.
+
+    ``skill_hub_url`` replaces the default hub for requests that name no
+    provider: installs by bare name, search and the remote listing. Requests
+    for a provider (github:, clawhub:, ...) are what the default hub proxies,
+    so they keep going there. ``skill_hub_api_key`` only ever goes to the
+    configured registry.
+    """
+    if provider or not custom_skill_hub():
+        return SKILL_HUB_API, {}
+    headers = {}
+    key = _skill_hub_setting("skill_hub_api_key")
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    return _skill_hub_setting("skill_hub_url").rstrip("/"), headers

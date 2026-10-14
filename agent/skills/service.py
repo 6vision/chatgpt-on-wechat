@@ -14,7 +14,7 @@ import tempfile
 from typing import List, Optional
 from common.log import logger
 from agent.skills.archive import extract_archive
-from agent.skills.manager import SkillManager
+from agent.skills.manager import SkillManager, apply_install_fields
 from common.media_download import MAX_FILE_BYTES, download_to_file
 
 try:
@@ -91,21 +91,6 @@ def render_skill_md(name: str, description: str, body: str = "") -> str:
         # triggers it, and the console's editor is where the body gets written.
         return front
     return f"{front}\n{body}\n"
-
-
-def _display_text(value, max_len: int) -> str:
-    """A single-line presentation field from an install payload, or ''."""
-    if not isinstance(value, str):
-        return ""
-    return " ".join(value.split())[:max_len]
-
-
-def _display_url(value) -> str:
-    """An http(s) image URL from an install payload, or ''."""
-    url = value.strip() if isinstance(value, str) else ""
-    if len(url) > 2048 or not re.match(r"^https?://\S+$", url, re.IGNORECASE):
-        return ""
-    return url
 
 
 def _upload_rel_path(path: Optional[str]) -> str:
@@ -483,7 +468,7 @@ class SkillService:
             self._add_url(name, payload)
 
         self.manager.refresh_skills()
-        self._record_install(name, payload)
+        self.record_install(name, payload)
 
     def _installed_name(self, name: str) -> Optional[str]:
         """
@@ -502,31 +487,12 @@ class SkillService:
                 return loaded
         return None
 
-    def _record_install(self, name: str, payload: dict) -> None:
-        """Keep the category and presentation fields the install payload carries."""
+    def record_install(self, name: str, payload: dict) -> None:
+        """Keep the category and presentation fields an installer gives for a skill
+        just installed under ``name`` (see ``apply_install_fields``)."""
         installed = self._installed_name(name)
         entry = self.manager.skills_config.get(installed) if installed else None
-        if entry is None:
-            return
-        changed = False
-        category = payload.get("category")
-        if category:
-            entry["category"] = category
-            changed = True
-        display_name = _display_text(payload.get("display_name"), 128)
-        if display_name:
-            entry["display_name"] = display_name
-            changed = True
-        # Both describe the package just installed, so a reinstall without
-        # them must not leave the previous package's values behind.
-        for key, value in (("icon", _display_url(payload.get("icon"))),
-                           ("version", _display_text(payload.get("version"), 64))):
-            if value:
-                entry[key] = value
-                changed = True
-            elif entry.pop(key, None) is not None:
-                changed = True
-        if changed:
+        if entry is not None and apply_install_fields(entry, payload):
             self.manager._save_skills_config()
 
     def _add_url(self, name: str, payload: dict) -> None:
