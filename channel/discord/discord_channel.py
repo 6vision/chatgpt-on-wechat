@@ -27,6 +27,7 @@ from channel.chat_channel import ChatChannel, check_prefix
 from channel.discord.discord_message import DiscordMessage
 from common.expired_dict import ExpiredDict
 from common.log import logger
+from common.media_download import MAX_FILE_BYTES, MAX_IMAGE_BYTES
 from common.singleton import singleton
 from config import conf
 
@@ -323,6 +324,15 @@ class DiscordChannel(ChatChannel):
     async def _download_attachment(self, attachment, name: str):
         """Download a discord attachment into the local tmp dir; return path or None."""
         try:
+            # attachment.save() buffers the whole body, and Discord reports the size up front:
+            # refuse an oversized upload instead of pulling it into memory (same caps as the
+            # other channels' inbound media).
+            is_image = (getattr(attachment, "content_type", None) or "").lower().startswith("image/")
+            limit = MAX_IMAGE_BYTES if is_image else MAX_FILE_BYTES
+            size = getattr(attachment, "size", None)
+            if isinstance(size, int) and size > limit:
+                logger.warning(f"[Discord] attachment {name} is {size} bytes, over the {limit} limit; skipped")
+                return None
             tmp_dir = DiscordMessage.get_tmp_dir()
             safe_name = re.sub(r"[^\w.\-]", "_", name)
             # Prefix with attachment id to avoid name collisions
