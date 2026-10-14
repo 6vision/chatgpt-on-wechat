@@ -451,8 +451,8 @@ class SkillService:
             }
 
         Either type may also carry how the skill presents itself, all optional:
-        ``display_name``, ``icon`` (image URL) and ``version``. The skill's own
-        description always comes from its SKILL.md.
+        ``display_name``, ``display_description``, ``icon`` (image URL) and
+        ``version``. The description the agent reads always comes from SKILL.md.
 
         :param payload: skill add payload from server
         """

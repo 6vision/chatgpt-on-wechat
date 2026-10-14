@@ -1091,7 +1091,7 @@ class CowCliPlugin(Plugin):
             source = entry.get("source", "")
             icon = "✅" if enabled else "⏸️"
             display = entry.get("display_name", "") or name
-            desc = entry.get("description", "")
+            desc = entry.get("display_description", "") or entry.get("description", "")
             if len(desc) > 50:
                 desc = desc[:47] + "…"
             line = f"{icon} {display}"

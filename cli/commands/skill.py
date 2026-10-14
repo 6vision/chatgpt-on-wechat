@@ -8,6 +8,7 @@ import hashlib
 import shutil
 import zipfile
 import tempfile
+import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Optional, List
@@ -24,6 +25,7 @@ from cli.utils import (
     load_skills_config,
     custom_skill_hub,
     skill_hub,
+    SKILL_HUB_API,
 )
 
 
@@ -421,6 +423,7 @@ def _register_installed_skill(name: str, source: str = "cowhub", display_name: s
         "source": source,
         "enabled": True,
         "category": "skill",
+        "installed_at": int(time.time()),
     }
     if display_name:
         entry["display_name"] = display_name
@@ -716,7 +719,7 @@ def _hub_error_message(error: requests.HTTPError) -> str:
 
 def _record_hub_fields(names: List[str], data: dict, agent_id: str = None) -> None:
     """Keep what a configured registry says about a single installed skill:
-    category, title, icon, version."""
+    category, title, description, icon, version."""
     if len(names) != 1 or not isinstance(data, dict):
         return
     _ensure_project_on_path()
@@ -797,6 +800,7 @@ def _merge_builtin_into_config(config: dict, builtin_dir: str, skills_dir: str):
                 "source": source,
                 "enabled": True,
                 "category": "skill",
+                "installed_at": int(time.time()),
             }
             dirty = True
     if dirty:
@@ -1271,28 +1275,36 @@ def _install_hub(name, result: InstallResult, provider=None, agent_id: str = Non
 
     result.messages.append(f"Fetching skill info for '{name}'...")
     hub_api, hub_headers = skill_hub(provider)
+    custom_hub = not provider and custom_skill_hub()
 
-    try:
-        body = {}
-        if provider:
-            body["provider"] = provider
-        if owner:
-            body["owner"] = owner
-        resp = requests.post(
-            f"{hub_api}/skills/{name}/download",
-            json=body,
-            headers=hub_headers,
-            timeout=15,
-        )
-        resp.raise_for_status()
-    except requests.HTTPError as e:
-        if e.response is not None and e.response.status_code == 404:
-            raise SkillInstallError(f"Skill '{name}' not found on Skill Hub.")
-        raise SkillInstallError(f"Failed to fetch skill: {_hub_error_message(e)}")
-    except SkillInstallError:
-        raise
-    except Exception as e:
-        raise SkillInstallError(f"Failed to connect to Skill Hub: {e}")
+    body = {}
+    if provider:
+        body["provider"] = provider
+    if owner:
+        body["owner"] = owner
+    while True:
+        try:
+            resp = requests.post(
+                f"{hub_api}/skills/{name}/download",
+                json=body,
+                headers=hub_headers,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            break
+        except requests.HTTPError as e:
+            not_found = e.response is not None and e.response.status_code == 404
+            if not_found and custom_hub:
+                # Unknown to the configured registry: the default hub may
+                # still have it, and it never receives the registry's key.
+                result.messages.append(f"'{name}' not found on the configured registry, trying Skill Hub...")
+                hub_api, hub_headers, custom_hub = SKILL_HUB_API, {}, False
+                continue
+            if not_found:
+                raise SkillInstallError(f"Skill '{name}' not found on Skill Hub.")
+            raise SkillInstallError(f"Failed to fetch skill: {_hub_error_message(e)}")
+        except Exception as e:
+            raise SkillInstallError(f"Failed to connect to Skill Hub: {e}")
 
     content_type = resp.headers.get("Content-Type", "")
     hub_display_name = ""
@@ -1404,7 +1416,7 @@ def _install_hub(name, result: InstallResult, provider=None, agent_id: str = Non
                         _register_installed_skill(name, source=src_provider, display_name=hub_display_name, agent_id=agent_id)
                         result.installed.append(name)
                         result.messages.append(f"Installed '{name}' from {src_provider}.")
-                    if not provider and custom_skill_hub():
+                    if custom_hub:
                         _record_hub_fields(result.installed[installed_before:], data, agent_id=agent_id)
                     return
 

@@ -127,6 +127,50 @@ def test_registry_refusal_reports_its_message(data_dir):
     assert result.error == "Failed to fetch skill: API key is invalid"
 
 
+def test_unknown_to_registry_falls_back_to_the_default_hub(data_dir):
+    data_dir(skill_hub_url=REGISTRY, skill_hub_api_key="secret")
+    package = _package()
+    calls = []
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        calls.append((url, headers))
+        if url.startswith(REGISTRY):
+            return _Response(status=404, body={"message": "Skill not found"})
+        return _Response(body={
+            "source_type": "registry", "source_provider": "cowhub", "download_url": DOWNLOAD,
+            "display_name": "Weekly Report", "category": "productivity", "version": "9.9.9",
+        })
+
+    with patch.object(requests, "post", fake_post), \
+            patch.object(requests, "get", lambda url, **kw: _Response(content=package, content_type="application/zip")):
+        result = skill_cli.install_skill("weekly-report")
+
+    assert result.error is None, result.error
+    assert calls == [
+        (f"{REGISTRY}/skills/weekly-report/download", {"Authorization": "Bearer secret"}),
+        (f"{SKILL_HUB_API}/skills/weekly-report/download", {}),
+    ]
+    entry = json.loads((Path(get_skills_dir()) / "skills_config.json").read_text(encoding="utf-8"))["weekly-report"]
+    assert entry["source"] == "cowhub"
+    assert entry["category"] == "skill"
+    assert "version" not in entry
+
+
+def test_registry_refusal_does_not_fall_back(data_dir):
+    data_dir(skill_hub_url=REGISTRY, skill_hub_api_key="secret")
+    urls = []
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        urls.append(url)
+        return _Response(status=403, body={"message": "No permission"})
+
+    with patch.object(requests, "post", fake_post):
+        result = skill_cli.install_skill("weekly-report")
+
+    assert result.error == "Failed to fetch skill: No permission"
+    assert urls == [f"{REGISTRY}/skills/weekly-report/download"]
+
+
 def test_default_hub_install_keeps_its_category(data_dir):
     package = _package()
 

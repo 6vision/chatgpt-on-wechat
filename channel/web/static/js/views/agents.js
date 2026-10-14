@@ -518,7 +518,7 @@ function renderAgentSkillsPane() {
                     <input type="checkbox" class="agent-skill-item" value="${escapeHtml(name)}" ${checked ? 'checked' : ''} ${all ? 'disabled' : ''}>
                     <div>
                         <div class="text-sm text-slate-700 dark:text-slate-200">${escapeHtml(skill.display_name || name)}</div>
-                        <div class="text-xs text-slate-400">${escapeHtml(skill.description || '')}</div>
+                        <div class="text-xs text-slate-400">${escapeHtml(skill.display_description || skill.description || '')}</div>
                     </div>
                 </label>`;
             }).join('')}`;

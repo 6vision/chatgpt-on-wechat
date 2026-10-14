@@ -1,8 +1,9 @@
 """Presentation fields an install leaves in skills_config.json.
 
 An install payload may say how a skill presents itself - ``display_name``,
-``icon``, ``version`` - next to its ``category``. They are not in SKILL.md, so
-every rescan has to keep them, and an entry without them has to read as before.
+``display_description``, ``icon``, ``version`` - next to its ``category``. They
+are not in SKILL.md, so every rescan has to keep them, and an entry without them
+has to read as before.
 """
 import io
 import json
@@ -97,6 +98,22 @@ def test_reinstall_without_package_fields_drops_stale_ones(tmp_path, monkeypatch
     assert entry["display_name"] == "Weekly"
 
 
+def test_display_description_is_shown_but_the_agent_reads_skill_md(tmp_path, monkeypatch):
+    svc, custom = _service(tmp_path)
+    archive = _zip("weekly-report", _skill_md("weekly-report", "Draft weekly reports"))
+    _install(svc, monkeypatch, {"name": "weekly-report", "display_description": "整理  本周工作"}, archive)
+
+    entry = _config(custom)["weekly-report"]
+    assert entry["display_description"] == "整理 本周工作"
+    assert entry["description"] == "Draft weekly reports"
+    assert svc.manager.get_skill("weekly-report").skill.description == "Draft weekly reports"
+
+    # Like the title, it outlives a rescan and a reinstall that does not carry it
+    _install(svc, monkeypatch, {"name": "weekly-report"}, archive)
+    SkillManager(builtin_dir=str(tmp_path / "builtin"), custom_dir=str(custom)).refresh_skills()
+    assert _config(custom)["weekly-report"]["display_description"] == "整理 本周工作"
+
+
 def test_unusable_fields_are_ignored(tmp_path, monkeypatch):
     svc, custom = _service(tmp_path)
     _install(svc, monkeypatch, {
@@ -167,6 +184,18 @@ def test_console_install_of_several_skills_ignores_meta(tmp_path):
     config = _config(custom)
     assert config["alpha"]["category"] == "skill" and "version" not in config["alpha"]
     assert config["beta"]["category"] == "skill" and "version" not in config["beta"]
+
+
+def test_new_skill_is_stamped_with_install_time_and_keeps_it(tmp_path):
+    custom = tmp_path / "custom"
+    (custom / "alpha").mkdir(parents=True)
+    (custom / "alpha" / "SKILL.md").write_text(_skill_md("alpha"), encoding="utf-8")
+    manager = SkillManager(builtin_dir=str(tmp_path / "none"), custom_dir=str(custom))
+    stamped = _config(custom)["alpha"]["installed_at"]
+    assert isinstance(stamped, int) and stamped > 0
+
+    manager.refresh_skills()
+    assert _config(custom)["alpha"]["installed_at"] == stamped
 
 
 def test_existing_config_without_new_fields_reads_unchanged(tmp_path):

@@ -307,7 +307,7 @@ class SkillsHandler:
                 for skill in skills:
                     if isinstance(skill, dict):
                         for k, v in list(skill.items()):
-                            if k in ("name", "description", "display_name") and isinstance(v, str):
+                            if k in ("name", "description", "display_name", "display_description") and isinstance(v, str):
                                 skill[k] = i18n.to_traditional(v)
             return json.dumps({"status": "success", "skills": skills}, ensure_ascii=False)
         except Exception as e:
@@ -386,7 +386,8 @@ class SkillsHandler:
                     return json.dumps({"status": "error", "message": result.error})
                 service.manager.refresh_skills()
                 # What the caller knows about a single skill it installed: category,
-                # display_name, icon, version. A package of several has no one owner.
+                # display_name, display_description, icon, version. A package of
+                # several has no one owner.
                 meta = body.get("meta")
                 if isinstance(meta, dict) and len(result.installed) == 1:
                     service.record_install(result.installed[0], meta)
