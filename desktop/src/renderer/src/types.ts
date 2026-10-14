@@ -965,6 +965,8 @@ export interface SkillInfo {
   source?: string
   enabled: boolean
   category?: string
+  icon?: string
+  version?: string
   ships_with_install?: boolean
   deletable?: boolean
 }

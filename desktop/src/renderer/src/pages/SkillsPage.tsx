@@ -311,6 +311,28 @@ function mcpStatusClass(status?: string): string {
   return 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
 }
 
+const SkillIcon: React.FC<{ skill: SkillInfo }> = ({ skill }) => {
+  const [broken, setBroken] = useState(false)
+  useEffect(() => setBroken(false), [skill.icon])
+  if (skill.icon && !broken) {
+    return (
+      <img
+        src={skill.icon}
+        alt=""
+        draggable={false}
+        referrerPolicy="no-referrer"
+        onError={() => setBroken(true)}
+        className={`w-9 h-9 rounded-lg object-cover flex-shrink-0 ${skill.enabled ? '' : 'opacity-50 grayscale'}`}
+      />
+    )
+  }
+  return (
+    <div className="w-9 h-9 rounded-lg bg-accent-soft flex items-center justify-center flex-shrink-0">
+      <Zap size={15} className={skill.enabled ? 'text-accent' : 'text-content-tertiary'} />
+    </div>
+  )
+}
+
 const cardClass = 'rounded-card border border-default bg-surface p-4 flex items-start gap-3'
 const iconBtnClass = 'flex-shrink-0 p-1 -my-1 rounded text-content-tertiary transition-colors cursor-pointer'
 
@@ -778,9 +800,7 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
                             : 'hover:border-strong'
                         }`}
                       >
-                        <div className="w-9 h-9 rounded-lg bg-accent-soft flex items-center justify-center flex-shrink-0">
-                          <Zap size={15} className={skill.enabled ? 'text-accent' : 'text-content-tertiary'} />
-                        </div>
+                        <SkillIcon skill={skill} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
                             <span className="text-sm font-medium text-content truncate flex-1">
