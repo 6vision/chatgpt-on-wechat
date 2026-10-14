@@ -93,6 +93,21 @@ def render_skill_md(name: str, description: str, body: str = "") -> str:
     return f"{front}\n{body}\n"
 
 
+def _display_text(value, max_len: int) -> str:
+    """A single-line presentation field from an install payload, or ''."""
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())[:max_len]
+
+
+def _display_url(value) -> str:
+    """An http(s) image URL from an install payload, or ''."""
+    url = value.strip() if isinstance(value, str) else ""
+    if len(url) > 2048 or not re.match(r"^https?://\S+$", url, re.IGNORECASE):
+        return ""
+    return url
+
+
 def _upload_rel_path(path: Optional[str]) -> str:
     """The path an uploaded file keeps inside the skill directory.
 
@@ -450,6 +465,10 @@ class SkillService:
                 "files": [{"url": "https://cdn.example.com/skills/custom-tool.zip"}]
             }
 
+        Either type may also carry how the skill presents itself, all optional:
+        ``display_name``, ``icon`` (image URL) and ``version``. The skill's own
+        description always comes from its SKILL.md.
+
         :param payload: skill add payload from server
         """
         name = payload.get("name")
@@ -464,10 +483,50 @@ class SkillService:
             self._add_url(name, payload)
 
         self.manager.refresh_skills()
+        self._record_install(name, payload)
 
+    def _installed_name(self, name: str) -> Optional[str]:
+        """
+        The name the loader gave the skill just installed under ``name``.
+
+        The directory is named after the payload, but a skill is known by its
+        SKILL.md ``name``; when the two differ the entry lives under the latter.
+        """
+        if name in self.manager.skills_config:
+            return name
+        skill_dir = os.path.realpath(self._safe_skill_dir(name))
+        for loaded, entry in self.manager.skills.items():
+            if os.path.realpath(entry.skill.base_dir) == skill_dir:
+                logger.warning(f"[SkillService] add: skill installed as '{name}' is named "
+                               f"'{loaded}' in its SKILL.md")
+                return loaded
+        return None
+
+    def _record_install(self, name: str, payload: dict) -> None:
+        """Keep the category and presentation fields the install payload carries."""
+        installed = self._installed_name(name)
+        entry = self.manager.skills_config.get(installed) if installed else None
+        if entry is None:
+            return
+        changed = False
         category = payload.get("category")
-        if category and name in self.manager.skills_config:
-            self.manager.skills_config[name]["category"] = category
+        if category:
+            entry["category"] = category
+            changed = True
+        display_name = _display_text(payload.get("display_name"), 128)
+        if display_name:
+            entry["display_name"] = display_name
+            changed = True
+        # Both describe the package just installed, so a reinstall without
+        # them must not leave the previous package's values behind.
+        for key, value in (("icon", _display_url(payload.get("icon"))),
+                           ("version", _display_text(payload.get("version"), 64))):
+            if value:
+                entry[key] = value
+                changed = True
+            elif entry.pop(key, None) is not None:
+                changed = True
+        if changed:
             self.manager._save_skills_config()
 
     def _add_url(self, name: str, payload: dict) -> None:

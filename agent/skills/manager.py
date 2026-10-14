@@ -14,6 +14,14 @@ from agent.skills.formatter import format_skill_entries_for_prompt
 SKILLS_CONFIG_FILE = "skills_config.json"
 SKILLS_CONFIG_TMP_PREFIX = f".{SKILLS_CONFIG_FILE}."
 
+# Optional presentation fields an entry may carry, set by whoever installed or
+# created the skill rather than read from SKILL.md, so a rescan keeps them.
+# All optional: entries without them read exactly as before.
+#   display_name - title shown in place of the name
+#   icon         - image URL shown beside it
+#   version      - version of the package the skill was installed from
+SKILL_DISPLAY_FIELDS = ("display_name", "icon", "version")
+
 
 def build_skill_manager(
     agent_id: Optional[str] = None,
@@ -157,7 +165,8 @@ class SkillManager:
         - New skills: use metadata.default_enabled as initial enabled state.
         - Existing skills: preserve their persisted enabled state.
         - Skills that no longer exist on disk are removed.
-        - name/description/source are always refreshed from the latest scan.
+        - name/description are always refreshed from the latest scan.
+        - source, category and SKILL_DISPLAY_FIELDS are kept from the file.
         """
         loaded = self._load_skills_config()
         saved = loaded if loaded is not None else self.skills_config
@@ -180,9 +189,10 @@ class SkillManager:
                 "enabled": enabled,
                 "category": category,
             }
-            display_name = prev.get("display_name")
-            if display_name:
-                entry_dict["display_name"] = display_name
+            for key in SKILL_DISPLAY_FIELDS:
+                value = prev.get(key)
+                if value:
+                    entry_dict[key] = value
             merged[name] = entry_dict
 
         self.skills_config = merged
