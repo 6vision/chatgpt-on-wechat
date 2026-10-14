@@ -27,6 +27,9 @@ import {
   Clock,
   Brain,
   Wrench,
+  Wand2,
+  BookOpen,
+  Image as ImageIcon,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { t } from '../i18n'
@@ -42,6 +45,7 @@ import McpEditorModal from './skills/McpEditorModal'
 import SkillAddModal from './skills/SkillAddModal'
 import { formatSkillFileSize } from './skills/SkillCreateForm'
 import { parseSkillFrontmatter } from './skills/frontmatter'
+import { skillLabel } from './skills/skillLabel'
 import { MCP_TRANSPORT_LABELS, mcpTransport } from './skills/mcpConfig'
 import { product } from '@product'
 
@@ -51,7 +55,6 @@ interface SkillsPageProps {
 
 const SKILL_HUB_URL = 'https://skills.cowagent.ai/'
 const TOOLS_COLLAPSED_COUNT = 4
-const SKILLS_COLLAPSED_COUNT = 6
 const MCP_POLL_INTERVAL_MS = 1500
 const MCP_POLL_MAX_MS = 120000
 
@@ -312,6 +315,30 @@ function mcpStatusClass(status?: string): string {
   return 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
 }
 
+// Built-in skills, in the order they lead the list, with an icon for what each does.
+const BUILTIN_SKILLS: { name: string; icon: LucideIcon; tone: string }[] = [
+  { name: 'skill-creator', icon: Wand2, tone: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
+  { name: 'knowledge-wiki', icon: BookOpen, tone: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
+  { name: 'image-generation', icon: ImageIcon, tone: 'bg-sky-500/10 text-sky-600 dark:text-sky-400' },
+]
+
+function builtinRank(skill: SkillInfo): number {
+  if (!skill.ships_with_install) return -1
+  const i = BUILTIN_SKILLS.findIndex((b) => b.name === skill.name)
+  return i < 0 ? BUILTIN_SKILLS.length : i
+}
+
+function compareInstalled(a: SkillInfo, b: SkillInfo): number {
+  const ra = builtinRank(a)
+  const rb = builtinRank(b)
+  if (ra >= 0 || rb >= 0) {
+    if (ra < 0) return 1
+    if (rb < 0) return -1
+    return ra - rb
+  }
+  return (b.installed_at || 0) - (a.installed_at || 0)
+}
+
 const SkillIcon: React.FC<{ skill: SkillInfo }> = ({ skill }) => {
   const [broken, setBroken] = useState(false)
   useEffect(() => setBroken(false), [skill.icon])
@@ -325,6 +352,19 @@ const SkillIcon: React.FC<{ skill: SkillInfo }> = ({ skill }) => {
         onError={() => setBroken(true)}
         className={`w-9 h-9 rounded-lg object-cover flex-shrink-0 ${skill.enabled ? '' : 'opacity-50 grayscale'}`}
       />
+    )
+  }
+  const builtin = skill.ships_with_install ? BUILTIN_SKILLS.find((b) => b.name === skill.name) : undefined
+  if (builtin) {
+    const Icon = builtin.icon
+    return (
+      <div
+        className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
+          skill.enabled ? builtin.tone : 'bg-inset-2 text-content-tertiary'
+        }`}
+      >
+        <Icon size={16} />
+      </div>
     )
   }
   return (
@@ -343,7 +383,6 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
   const [servers, setServers] = useState<McpServerConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [toolsExpanded, setToolsExpanded] = useState(false)
-  const [skillsExpanded, setSkillsExpanded] = useState(false)
   const [tab, setTab] = useState<'skills' | 'tools'>('skills')
   // undefined: closed; null: adding; a config: editing that server.
   const [editing, setEditing] = useState<McpServerConfig | null | undefined>(undefined)
@@ -467,7 +506,7 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
   const openSkillForEdit = async (skill: SkillInfo) => {
     await skillEditor
       .getState()
-      .open({ name: skill.name, label: skill.display_name || skill.name })
+      .open({ name: skill.name, label: skillLabel(skill).name })
     await skillEditor.getState().startEdit()
   }
 
@@ -551,12 +590,10 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
   const skillsFirst = !!product.skills?.skillsFirst
   const showTools = !skillsFirst || tab === 'tools'
   const showSkills = !skillsFirst || tab === 'skills'
-  // With a catalogue underneath, a long installed list would push it off screen.
-  const foldSkills = !!Market && skills.length > SKILLS_COLLAPSED_COUNT
-  const visibleSkills =
-    foldSkills && !skillsExpanded
-      ? skills.filter((s, i) => i < SKILLS_COLLAPSED_COUNT || freshSkills.has(s.name))
-      : skills
+  // With a catalogue to install from: built-in skills first in a fixed order,
+  // then the rest newest first, so an install lands at the top of them.
+  const visibleSkills = Market ? [...skills].sort(compareInstalled) : skills
+  const openSkillVersion = doc ? skills.find((s) => s.name === doc.name)?.version : undefined
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -566,14 +603,14 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
           <p className="text-xs text-content-tertiary mt-1">{t('skills_desc')}</p>
         </div>
         {skillsFirst && !doc && (
-          <div className="flex items-center gap-0.5 p-0.5 rounded-btn bg-inset">
+          <div className="flex items-center gap-0.5 p-0.5 rounded-btn border border-default">
             {(['skills', 'tools'] as const).map((key) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => setTab(key)}
                 className={`px-3 py-1 rounded-btn text-xs font-medium transition-colors cursor-pointer ${
-                  tab === key ? 'bg-surface text-content shadow-sm' : 'text-content-tertiary hover:text-content-secondary'
+                  tab === key ? 'bg-accent-soft text-accent' : 'text-content-secondary hover:bg-surface-2'
                 }`}
               >
                 {t(key === 'skills' ? 'skills_section_title' : 'skills_tab_tools')}
@@ -595,7 +632,7 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
               <ArrowLeft size={14} />
               {t('skill_back')}
             </button>
-            <h3 className="flex-1 text-sm font-semibold text-content truncate">
+            <h3 className="min-w-0 text-sm font-semibold text-content truncate">
               {doc.path ? `${doc.label}/${doc.path}` : doc.label}
               {edit?.dirty && (
                 <span className="text-accent" title={t('ws_edit_unsaved')}>
@@ -604,6 +641,13 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
                 </span>
               )}
             </h3>
+            <span className="flex-1 min-w-0 flex items-center">
+              {openSkillVersion && (
+                <span className="px-1.5 py-0.5 rounded text-[11px] font-medium text-content-tertiary bg-inset">
+                  v{openSkillVersion}
+                </span>
+              )}
+            </span>
             {readonly && !docLoading && (
               <span
                 title={readonly}
@@ -808,15 +852,9 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
                             <ExternalLink size={10} className="opacity-60" />
                           </a>
                         )}
-                        {foldSkills && (
-                          <LinkBtn onClick={() => setSkillsExpanded((v) => !v)}>
-                            {t(skillsExpanded ? 'tools_collapse' : 'tools_show_all')}
-                            <ChevronDown size={12} className={`transition-transform ${skillsExpanded ? 'rotate-180' : ''}`} />
-                          </LinkBtn>
-                        )}
                         <ActionBtn onClick={() => setAddingSkill(true)}>
                           <Plus size={12} />
-                          {t('skill_add')}
+                          {t(Market ? 'skill_install_btn' : 'skill_add')}
                         </ActionBtn>
                       </>
                     }
@@ -832,7 +870,7 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
                             onClick={() =>
                               void skillEditor
                                 .getState()
-                                .open({ name: skill.name, label: skill.display_name || skill.name })
+                                .open({ name: skill.name, label: skillLabel(skill).name })
                             }
                             title={t('skill_open_hint')}
                             className={`${cardClass} cursor-pointer transition-all ${
@@ -845,7 +883,7 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1">
                                 <span className="text-sm font-medium text-content truncate flex-1">
-                                  {skill.display_name || skill.name}
+                                  {skillLabel(skill).name}
                                 </span>
                                 <button
                                   type="button"
@@ -875,14 +913,13 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
                                   <Toggle checked={skill.enabled} onChange={(v) => toggle(skill, v)} />
                                 </span>
                               </div>
-                              <p className="text-xs text-content-tertiary leading-relaxed line-clamp-2">{skill.description || '--'}</p>
+                              <p className="text-xs text-content-tertiary leading-relaxed line-clamp-2">{skillLabel(skill).description || '--'}</p>
                             </div>
                           </div>
                         ))}
                       </div>
                     )}
                   </Section>
-                  {Market && <Market installed={skills} onInstalled={onSkillsInstalled} />}
                 </>
               )}
             </div>
@@ -899,6 +936,7 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
       />
       <SkillAddModal
         open={addingSkill}
+        installed={skills}
         onClose={() => setAddingSkill(false)}
         onInstalled={onSkillsInstalled}
         onCreated={(name) => {

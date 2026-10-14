@@ -12,6 +12,7 @@ import AgentAvatar from '../components/AgentAvatar'
 import Tooltip from '../components/Tooltip'
 import Markdown from '../components/Markdown'
 import { Btn, TextInput, Modal, Toggle, Dropdown, Field, FieldTip, type DropdownOption } from './settings/primitives'
+import { skillLabel } from './skills/skillLabel'
 
 interface AgentsPageProps {
   baseUrl: string
@@ -799,6 +800,7 @@ const AgentSkills: React.FC<{ agent: AgentProfile; onMutate: Mutate }> = ({ agen
         <div className="space-y-1.5">
           {library.map((skill) => {
             const on = useAll || picked.has(skill.name)
+            const label = skillLabel(skill)
             return (
               <button
                 key={skill.name}
@@ -817,9 +819,9 @@ const AgentSkills: React.FC<{ agent: AgentProfile; onMutate: Mutate }> = ({ agen
                   {on && <Check size={11} strokeWidth={3} />}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm text-content truncate">{skill.display_name || skill.name}</div>
-                  {skill.description && (
-                    <div className="text-xs text-content-tertiary truncate">{skill.description}</div>
+                  <div className="text-sm text-content truncate">{label.name}</div>
+                  {label.description && (
+                    <div className="text-xs text-content-tertiary truncate">{label.description}</div>
                   )}
                 </div>
               </button>

@@ -964,11 +964,15 @@ export interface SkillInfo {
   name: string
   display_name?: string
   description: string
+  /** Shown in place of `description`, which stays what the agent reads */
+  display_description?: string
   source?: string
   enabled: boolean
   category?: string
   icon?: string
   version?: string
+  /** Epoch seconds the skill first showed up in the library */
+  installed_at?: number
   ships_with_install?: boolean
   deletable?: boolean
 }
@@ -977,6 +981,7 @@ export interface SkillInfo {
 export interface SkillInstallMeta {
   category?: string
   display_name?: string
+  display_description?: string
   icon?: string
   version?: string
 }
