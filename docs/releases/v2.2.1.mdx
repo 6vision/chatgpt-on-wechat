@@ -22,7 +22,6 @@ Related docs: [Web Console - Artifacts](https://docs.cowagent.ai/channels/web#ar
 ## 🧭 Custom Menu & Console Improvements
 
 - **Custom menu**: customize the groups, order, names, icons, and visibility of menu entries in the Web console and desktop client, with one shared configuration; artifacts and web links can be added as menu entries. See [Custom Menu](https://docs.cowagent.ai/extensions/custom-menu).
-- **Token usage**: each reply shows the tokens actually used in that turn, including cache hits. Thanks @Harbor404 (#3440)
 - **Mermaid diagrams**: Mermaid code blocks can switch to a rendered diagram, with zoom and full screen. Thanks @akushonkamen (#3620)
 - **Faster long sessions**: long sessions with many tool calls open faster.
 - **Fixes**: new session titles are no longer lost, and session actions on the default Agent no longer fail (Thanks @6vision #3625, #3617); settings saved together now all take effect, and workspace files are saved under the Agent they belong to (Thanks @aniruddhaadak80 #3454, #3488).
@@ -53,6 +52,7 @@ Related docs: [Chat API](https://docs.cowagent.ai/extensions/chat-api)
 - **Headroom after trimming**: trimming the context now leaves headroom, so the prefix stays unchanged for the next several turns and long sessions keep hitting the cache.
 - **Budget changes apply immediately**: changes to the context budget and maximum steps apply to running Agents right away, without clearing the session.
 - **Tool records kept in compaction**: compacted turns keep a summary of their tool calls, so the model does not make up results (Thanks @tsumon #3634).
+- **Token usage**: each reply shows the tokens actually used in that turn, including cache hits. Thanks @Harbor404 (#3440)
 - **Fixes**: messages arriving during compaction are no longer lost, and orphaned tool results are cleaned up more accurately (Thanks @c020627 #3518, @rudycelekli #3652, #3653).
 
 ## 🤖 Model Capabilities
