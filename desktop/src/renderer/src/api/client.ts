@@ -3,6 +3,7 @@ import type {
   ChannelInfo,
   ChannelAction,
   SkillInfo,
+  SkillInstallMeta,
   SkillContent,
   SkillFileEntry,
   SkillCreateResult,
@@ -993,10 +994,11 @@ class ApiClient {
   }
 
   /** Install straight from a remote spec (e.g. an https archive URL), without staging. */
-  async installSkill(spec: string): Promise<ApiResult & { installed?: string[] }> {
+  /** `meta` is recorded on the skill when the spec installs exactly one. */
+  async installSkill(spec: string, meta?: SkillInstallMeta): Promise<ApiResult & { installed?: string[] }> {
     return this.request('/api/skills', {
       method: 'POST',
-      body: JSON.stringify({ action: 'install', spec }),
+      body: JSON.stringify({ action: 'install', spec, ...(meta ? { meta } : {}) }),
     })
   }
 

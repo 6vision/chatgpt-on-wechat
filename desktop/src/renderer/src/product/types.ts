@@ -9,6 +9,7 @@
 // must degrade gracefully when a field is missing.
 // ============================================================
 import type React from 'react'
+import type { SkillInfo } from '../types'
 
 // Optional gate rendered before the main UI. When present, the core shows
 // <Gate/> until the extension reports the session no longer needs it.
@@ -99,10 +100,23 @@ export interface ProductLinks {
   hideReleaseNotes?: boolean
 }
 
+export interface ProductSkillMarketProps {
+  // What is installed now, so the catalogue can mark installed and outdated entries.
+  installed: SkillInfo[]
+  // Report skills just installed: the list above refreshes and highlights them.
+  onInstalled: (names: string[]) => void
+}
+
 export interface ProductSkills {
   // Set true to only offer local upload when adding a skill, hiding the
   // online sources and the skill hub link. Defaults to all sources.
   uploadOnly?: boolean
+  // A catalogue to browse and install from, rendered under the installed
+  // skills. When set, a long installed list is folded so it stays in view.
+  Market?: React.FC<ProductSkillMarketProps>
+  // Set true to open the page on skills, with built-in tools and MCP servers
+  // moved to a second tab. Defaults to one page with every section.
+  skillsFirst?: boolean
 }
 
 export interface ProductSuggestion {

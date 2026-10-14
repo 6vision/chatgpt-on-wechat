@@ -51,6 +51,7 @@ interface SkillsPageProps {
 
 const SKILL_HUB_URL = 'https://skills.cowagent.ai/'
 const TOOLS_COLLAPSED_COUNT = 4
+const SKILLS_COLLAPSED_COUNT = 6
 const MCP_POLL_INTERVAL_MS = 1500
 const MCP_POLL_MAX_MS = 120000
 
@@ -342,6 +343,8 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
   const [servers, setServers] = useState<McpServerConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [toolsExpanded, setToolsExpanded] = useState(false)
+  const [skillsExpanded, setSkillsExpanded] = useState(false)
+  const [tab, setTab] = useState<'skills' | 'tools'>('skills')
   // undefined: closed; null: adding; a config: editing that server.
   const [editing, setEditing] = useState<McpServerConfig | null | undefined>(undefined)
   const [addingSkill, setAddingSkill] = useState(false)
@@ -544,6 +547,16 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
   }
 
   const visibleTools = toolsExpanded ? tools : tools.slice(0, TOOLS_COLLAPSED_COUNT)
+  const Market = product.skills?.Market
+  const skillsFirst = !!product.skills?.skillsFirst
+  const showTools = !skillsFirst || tab === 'tools'
+  const showSkills = !skillsFirst || tab === 'skills'
+  // With a catalogue underneath, a long installed list would push it off screen.
+  const foldSkills = !!Market && skills.length > SKILLS_COLLAPSED_COUNT
+  const visibleSkills =
+    foldSkills && !skillsExpanded
+      ? skills.filter((s, i) => i < SKILLS_COLLAPSED_COUNT || freshSkills.has(s.name))
+      : skills
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -552,6 +565,22 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
           <h2 className="text-xl font-bold text-content">{t('skills_title')}</h2>
           <p className="text-xs text-content-tertiary mt-1">{t('skills_desc')}</p>
         </div>
+        {skillsFirst && !doc && (
+          <div className="flex items-center gap-0.5 p-0.5 rounded-btn bg-inset">
+            {(['skills', 'tools'] as const).map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setTab(key)}
+                className={`px-3 py-1 rounded-btn text-xs font-medium transition-colors cursor-pointer ${
+                  tab === key ? 'bg-surface text-content shadow-sm' : 'text-content-tertiary hover:text-content-secondary'
+                }`}
+              >
+                {t(key === 'skills' ? 'skills_section_title' : 'skills_tab_tools')}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <DocNotice store={skillEditor} />
@@ -646,201 +675,216 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
             </div>
           ) : (
             <div className="space-y-10">
-              <Section
-                title={t('tools_section_title')}
-                count={tools.length}
-                action={
-                  tools.length > TOOLS_COLLAPSED_COUNT && (
-                    <LinkBtn onClick={() => setToolsExpanded((v) => !v)}>
-                      {t(toolsExpanded ? 'tools_collapse' : 'tools_show_all')}
-                      <ChevronDown size={12} className={`transition-transform ${toolsExpanded ? 'rotate-180' : ''}`} />
-                    </LinkBtn>
-                  )
-                }
-              >
-                {tools.length === 0 ? (
-                  <p className="text-sm text-content-tertiary py-2">{t('tools_empty')}</p>
-                ) : (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {visibleTools.map((tool) => {
-                      const Icon = TOOL_ICONS[tool.name] || Wrench
-                      return (
-                        <div key={tool.name} className={cardClass}>
-                          <div className="w-9 h-9 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-                            <Icon size={15} className="text-blue-500" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <span className="block text-sm font-medium text-content font-mono truncate">{tool.name}</span>
-                            <p className="text-xs text-content-tertiary leading-relaxed mt-1 line-clamp-2">{tool.description || '--'}</p>
-                          </div>
-                        </div>
+              {showTools && (
+                <>
+                  <Section
+                    title={t('tools_section_title')}
+                    count={tools.length}
+                    action={
+                      tools.length > TOOLS_COLLAPSED_COUNT && (
+                        <LinkBtn onClick={() => setToolsExpanded((v) => !v)}>
+                          {t(toolsExpanded ? 'tools_collapse' : 'tools_show_all')}
+                          <ChevronDown size={12} className={`transition-transform ${toolsExpanded ? 'rotate-180' : ''}`} />
+                        </LinkBtn>
                       )
-                    })}
-                  </div>
-                )}
-              </Section>
-
-              <Section
-                title={t('mcp_section_title')}
-                count={servers.length}
-                action={
-                  <ActionBtn onClick={() => setEditing(null)}>
-                    <Plus size={12} />
-                    {t('mcp_add')}
-                  </ActionBtn>
-                }
-              >
-                {mcpError && <p className="mb-3 text-sm text-danger">{mcpError}</p>}
-                {servers.length === 0 ? (
-                  !mcpError && (
-                    <EmptyState icon={Plug} title={t('mcp_empty')} hint={t('mcp_empty_hint')} tone="amber" />
-                  )
-                ) : (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {servers.map((server) => {
-                      const type = mcpTransport(server)
-                      const summary =
-                        type === 'stdio'
-                          ? [server.command, ...(server.args || [])].filter(Boolean).join(' ')
-                          : server.url || ''
-                      return (
-                        <div
-                          key={server.name}
-                          onClick={() => setEditing(server)}
-                          className={`${cardClass} cursor-pointer hover:border-strong transition-colors`}
-                        >
-                          <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
-                            <Plug size={15} className={server.status === 'disabled' ? 'text-content-tertiary' : 'text-amber-500'} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="text-sm font-medium text-content font-mono truncate">{server.name}</span>
-                              <span className="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-inset-2 text-content-tertiary">
-                                {MCP_TRANSPORT_LABELS[type] || type}
-                              </span>
-                              <span className={`flex-shrink-0 px-1.5 py-0.5 rounded-full text-[10px] ${mcpStatusClass(server.status)}`}>
-                                {mcpStatusLabel(server.status)}
-                              </span>
-                              <span className="flex-1" />
-                              <button
-                                type="button"
-                                title={t('mcp_edit')}
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setEditing(server)
-                                }}
-                                className={`${iconBtnClass} hover:text-content-secondary`}
-                              >
-                                <Pencil size={11} />
-                              </button>
-                              <button
-                                type="button"
-                                title={t('mcp_delete')}
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  void removeServer(server.name)
-                                }}
-                                className={`${iconBtnClass} hover:text-red-500`}
-                              >
-                                <Trash2 size={11} />
-                              </button>
+                    }
+                  >
+                    {tools.length === 0 ? (
+                      <p className="text-sm text-content-tertiary py-2">{t('tools_empty')}</p>
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {visibleTools.map((tool) => {
+                          const Icon = TOOL_ICONS[tool.name] || Wrench
+                          return (
+                            <div key={tool.name} className={cardClass}>
+                              <div className="w-9 h-9 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                                <Icon size={15} className="text-blue-500" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <span className="block text-sm font-medium text-content font-mono truncate">{tool.name}</span>
+                                <p className="text-xs text-content-tertiary leading-relaxed mt-1 line-clamp-2">{tool.description || '--'}</p>
+                              </div>
                             </div>
-                            <p className="text-xs text-content-tertiary font-mono truncate" title={summary}>
-                              {summary || '--'}
-                            </p>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </Section>
-
-              <Section
-                title={t('skills_section_title')}
-                count={skills.length}
-                action={
-                  <>
-                    {!product.skills?.uploadOnly && (
-                      <a
-                        href={SKILL_HUB_URL}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-btn text-xs text-content-tertiary hover:text-content-secondary hover:bg-surface-2 transition-colors"
-                      >
-                        <Compass size={12} />
-                        {t('skills_hub_btn')}
-                        <ExternalLink size={10} className="opacity-60" />
-                      </a>
-                    )}
-                    <ActionBtn onClick={() => setAddingSkill(true)}>
-                      <Plus size={12} />
-                      {t('skill_add')}
-                    </ActionBtn>
-                  </>
-                }
-              >
-                {skillError && <p className="mb-3 text-sm text-danger">{skillError}</p>}
-                {skills.length === 0 ? (
-                  <EmptyState icon={Zap} title={t('skills_empty')} hint={t(product.skills?.uploadOnly ? 'skills_empty_hint_upload' : 'skills_empty_hint')} tone="accent" />
-                ) : (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {skills.map((skill) => (
-                      <div
-                        key={skill.name}
-                        onClick={() =>
-                          void skillEditor
-                            .getState()
-                            .open({ name: skill.name, label: skill.display_name || skill.name })
-                        }
-                        title={t('skill_open_hint')}
-                        className={`${cardClass} cursor-pointer transition-all ${
-                          freshSkills.has(skill.name)
-                            ? 'border-accent shadow-[0_0_0_3px_var(--accent-soft)]'
-                            : 'hover:border-strong'
-                        }`}
-                      >
-                        <SkillIcon skill={skill} />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-sm font-medium text-content truncate flex-1">
-                              {skill.display_name || skill.name}
-                            </span>
-                            <button
-                              type="button"
-                              title={t('skill_edit_hint')}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                void openSkillForEdit(skill)
-                              }}
-                              className={`${iconBtnClass} hover:text-content-secondary`}
-                            >
-                              <Pencil size={11} />
-                            </button>
-                            {skill.deletable && (
-                              <button
-                                type="button"
-                                title={t('skill_delete')}
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  void uninstall(skill.name)
-                                }}
-                                className={`${iconBtnClass} hover:text-red-500`}
-                              >
-                                <Trash2 size={11} />
-                              </button>
-                            )}
-                            <span onClick={(e) => e.stopPropagation()}>
-                              <Toggle checked={skill.enabled} onChange={(v) => toggle(skill, v)} />
-                            </span>
-                          </div>
-                          <p className="text-xs text-content-tertiary leading-relaxed line-clamp-2">{skill.description || '--'}</p>
-                        </div>
+                          )
+                        })}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </Section>
+                    )}
+                  </Section>
+
+                  <Section
+                    title={t('mcp_section_title')}
+                    count={servers.length}
+                    action={
+                      <ActionBtn onClick={() => setEditing(null)}>
+                        <Plus size={12} />
+                        {t('mcp_add')}
+                      </ActionBtn>
+                    }
+                  >
+                    {mcpError && <p className="mb-3 text-sm text-danger">{mcpError}</p>}
+                    {servers.length === 0 ? (
+                      !mcpError && (
+                        <EmptyState icon={Plug} title={t('mcp_empty')} hint={t('mcp_empty_hint')} tone="amber" />
+                      )
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {servers.map((server) => {
+                          const type = mcpTransport(server)
+                          const summary =
+                            type === 'stdio'
+                              ? [server.command, ...(server.args || [])].filter(Boolean).join(' ')
+                              : server.url || ''
+                          return (
+                            <div
+                              key={server.name}
+                              onClick={() => setEditing(server)}
+                              className={`${cardClass} cursor-pointer hover:border-strong transition-colors`}
+                            >
+                              <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+                                <Plug size={15} className={server.status === 'disabled' ? 'text-content-tertiary' : 'text-amber-500'} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-sm font-medium text-content font-mono truncate">{server.name}</span>
+                                  <span className="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-inset-2 text-content-tertiary">
+                                    {MCP_TRANSPORT_LABELS[type] || type}
+                                  </span>
+                                  <span className={`flex-shrink-0 px-1.5 py-0.5 rounded-full text-[10px] ${mcpStatusClass(server.status)}`}>
+                                    {mcpStatusLabel(server.status)}
+                                  </span>
+                                  <span className="flex-1" />
+                                  <button
+                                    type="button"
+                                    title={t('mcp_edit')}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setEditing(server)
+                                    }}
+                                    className={`${iconBtnClass} hover:text-content-secondary`}
+                                  >
+                                    <Pencil size={11} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title={t('mcp_delete')}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      void removeServer(server.name)
+                                    }}
+                                    className={`${iconBtnClass} hover:text-red-500`}
+                                  >
+                                    <Trash2 size={11} />
+                                  </button>
+                                </div>
+                                <p className="text-xs text-content-tertiary font-mono truncate" title={summary}>
+                                  {summary || '--'}
+                                </p>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </Section>
+                </>
+              )}
+
+              {showSkills && (
+                <>
+                  <Section
+                    title={t(Market ? 'skills_installed_title' : 'skills_section_title')}
+                    count={skills.length}
+                    action={
+                      <>
+                        {!product.skills?.uploadOnly && (
+                          <a
+                            href={SKILL_HUB_URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-btn text-xs text-content-tertiary hover:text-content-secondary hover:bg-surface-2 transition-colors"
+                          >
+                            <Compass size={12} />
+                            {t('skills_hub_btn')}
+                            <ExternalLink size={10} className="opacity-60" />
+                          </a>
+                        )}
+                        {foldSkills && (
+                          <LinkBtn onClick={() => setSkillsExpanded((v) => !v)}>
+                            {t(skillsExpanded ? 'tools_collapse' : 'tools_show_all')}
+                            <ChevronDown size={12} className={`transition-transform ${skillsExpanded ? 'rotate-180' : ''}`} />
+                          </LinkBtn>
+                        )}
+                        <ActionBtn onClick={() => setAddingSkill(true)}>
+                          <Plus size={12} />
+                          {t('skill_add')}
+                        </ActionBtn>
+                      </>
+                    }
+                  >
+                    {skillError && <p className="mb-3 text-sm text-danger">{skillError}</p>}
+                    {skills.length === 0 ? (
+                      <EmptyState icon={Zap} title={t('skills_empty')} hint={t(product.skills?.uploadOnly ? 'skills_empty_hint_upload' : 'skills_empty_hint')} tone="accent" />
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {visibleSkills.map((skill) => (
+                          <div
+                            key={skill.name}
+                            onClick={() =>
+                              void skillEditor
+                                .getState()
+                                .open({ name: skill.name, label: skill.display_name || skill.name })
+                            }
+                            title={t('skill_open_hint')}
+                            className={`${cardClass} cursor-pointer transition-all ${
+                              freshSkills.has(skill.name)
+                                ? 'border-accent shadow-[0_0_0_3px_var(--accent-soft)]'
+                                : 'hover:border-strong'
+                            }`}
+                          >
+                            <SkillIcon skill={skill} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-sm font-medium text-content truncate flex-1">
+                                  {skill.display_name || skill.name}
+                                </span>
+                                <button
+                                  type="button"
+                                  title={t('skill_edit_hint')}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    void openSkillForEdit(skill)
+                                  }}
+                                  className={`${iconBtnClass} hover:text-content-secondary`}
+                                >
+                                  <Pencil size={11} />
+                                </button>
+                                {skill.deletable && (
+                                  <button
+                                    type="button"
+                                    title={t('skill_delete')}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      void uninstall(skill.name)
+                                    }}
+                                    className={`${iconBtnClass} hover:text-red-500`}
+                                  >
+                                    <Trash2 size={11} />
+                                  </button>
+                                )}
+                                <span onClick={(e) => e.stopPropagation()}>
+                                  <Toggle checked={skill.enabled} onChange={(v) => toggle(skill, v)} />
+                                </span>
+                              </div>
+                              <p className="text-xs text-content-tertiary leading-relaxed line-clamp-2">{skill.description || '--'}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Section>
+                  {Market && <Market installed={skills} onInstalled={onSkillsInstalled} />}
+                </>
+              )}
             </div>
           )}
         </div>
