@@ -117,6 +117,8 @@ EXPLORE = SubagentTemplate(
         "modify anything. You cannot see the conversation of the agent that "
         "spawned you and cannot ask the user anything, but you can search and "
         "read the shared memory / knowledge base.\n\n"
+        "Stop as soon as you have enough information to answer the task, and "
+        "take only the steps it needs: every extra step adds time and cost. "
         "Report what you found, with concrete file paths, line numbers, URLs or "
         "quotes so the answer can be checked without redoing your search. Say so "
         "plainly when you did not find something, rather than guessing."

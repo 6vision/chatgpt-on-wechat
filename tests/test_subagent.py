@@ -90,7 +90,7 @@ def _capture_children(monkeypatch, reply="done"):
             self.extra_system_suffix = None
             built.append(self)
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             self.goal = goal
             self.clear_history = clear_history
             self.depth_seen = current_depth()
@@ -198,8 +198,8 @@ def test_the_repo_ships_a_guide_that_documents_the_real_format():
     [
         # Wording the tool listing does not also carry, or this would still
         # pass with the rule itself deleted.
-        ("en", "needs research, search or information gathering"),
-        ("zh", "信息采集的独立任务"),
+        ("en", "needs deep research or broad information gathering"),
+        ("zh", "大范围信息采集的独立任务"),
     ],
 )
 def test_the_prompt_tells_the_agent_when_to_delegate(language, marker):
@@ -457,7 +457,7 @@ def test_a_task_that_overruns_its_budget_is_reported_not_dropped(parent, workspa
         def __init__(self, **kwargs):
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             started.set()
             # Honour the cancel the runner sets on timeout, as a real run would.
             cancel_event.wait(timeout=5)
@@ -471,6 +471,30 @@ def test_a_task_that_overruns_its_budget_is_reported_not_dropped(parent, workspa
     assert len(results) == 1
     assert results[0]["status"] == "timeout"
     assert "timeout_seconds" in results[0]["error"]
+
+
+def test_a_task_near_its_budget_is_asked_to_wrap_up(parent, workspace, monkeypatch):
+    """Work done before the deadline should come back as a report, not be
+    discarded with the timeout."""
+    settings = SubagentSettings(enabled=True, max_depth=1, max_concurrent=2, timeout_seconds=2.0)
+
+    class _Researching:
+        def __init__(self, **kwargs):
+            self.extra_system_suffix = None
+
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
+            while not cancel_event.is_set():
+                if steer_inbox.drain():
+                    return "partial findings"
+                time.sleep(0.01)
+            return ""
+
+    monkeypatch.setattr("agent.protocol.agent.Agent", _Researching)
+
+    results = run_tasks(parent, [SubagentTask(goal="research")], load_templates(str(workspace)), settings)
+
+    assert results[0]["status"] == "completed"
+    assert results[0]["summary"] == "partial findings"
 
 
 def test_a_timed_out_call_returns_without_waiting_for_the_worker(parent, workspace, monkeypatch):
@@ -488,7 +512,7 @@ def test_a_timed_out_call_returns_without_waiting_for_the_worker(parent, workspa
         def __init__(self, **kwargs):
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             release.wait(timeout=10)  # ignores the cancel, as a wedged run would
             return ""
 
@@ -522,7 +546,7 @@ def test_siblings_do_not_share_tool_instances(parent, workspace, enabled, monkey
             self.tools = kwargs["tools"]
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             # Keep the objects alive, not their ids: a freed copy's address can
             # be handed straight back to the next allocation.
             seen.append({t.name: t for t in self.tools})
@@ -554,7 +578,7 @@ def test_a_sub_agent_gets_half_the_parents_step_budget(parent, workspace, enable
             seen.append(kwargs["max_steps"])
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             return "ok"
 
     monkeypatch.setattr("agent.protocol.agent.Agent", _Recording)
@@ -574,7 +598,7 @@ def test_a_failing_task_is_reported_as_failed(parent, workspace, enabled, monkey
         def __init__(self, **kwargs):
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             raise RuntimeError("model unavailable")
 
     monkeypatch.setattr("agent.protocol.agent.Agent", _Exploding)
@@ -592,7 +616,7 @@ def test_all_tasks_failing_surfaces_as_a_tool_error(spawn_tool, enabled, monkeyp
         def __init__(self, **kwargs):
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             raise RuntimeError("nope")
 
     monkeypatch.setattr("agent.protocol.agent.Agent", _Exploding)
@@ -685,7 +709,7 @@ def test_a_failed_sub_agent_closes_with_its_error(spawn_tool, enabled, monkeypat
         def __init__(self, **kwargs):
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             raise RuntimeError("model unavailable")
 
     monkeypatch.setattr("agent.protocol.agent.Agent", _Exploding)
@@ -708,7 +732,7 @@ def test_a_sub_agent_that_overruns_its_budget_is_still_closed(spawn_tool, worksp
         def __init__(self, **kwargs):
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             cancel_event.wait(timeout=5)
             return ""
 
@@ -738,7 +762,7 @@ def _child_emitting(monkeypatch, events_by_goal, reply="done"):
         def __init__(self, **kwargs):
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             for event in events_by_goal.get(goal, []):
                 if on_event:
                     on_event(event)
@@ -914,7 +938,7 @@ def test_a_conclusion_that_never_arrived_says_so(spawn_tool, enabled, monkeypatc
         def __init__(self, **kwargs):
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             raise RuntimeError("model unavailable")
 
     monkeypatch.setattr("agent.protocol.agent.Agent", _Exploding)
