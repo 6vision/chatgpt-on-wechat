@@ -206,6 +206,33 @@ def _skill_service(agent_id: str = ''):
     return SkillService(SkillManager(custom_dir=custom_dir))
 
 
+def _record_staged_fields(staging_dir: str, installed: list, service) -> None:
+    """Carry the registry's presentation fields from staging into the live config.
+
+    ``commit_staged`` forwards only ``source`` and ``display_name``; what a
+    configured Skill Hub registry said about a single skill (category,
+    display_description, icon, version) lives in the staged
+    ``skills_config.json`` and would be dropped together with the staging
+    directory. The plain install action records the caller's ``meta`` through
+    ``record_install``; do the same here, from the staged entry, before the
+    staging is gone. A package of several has no one owner, so it is skipped.
+    """
+    if len(installed) != 1:
+        return
+    try:
+        with open(os.path.join(staging_dir, "skills_config.json"), "r", encoding="utf-8") as f:
+            config = json.load(f)
+    except (OSError, ValueError):
+        return
+    entry = config.get(installed[0]) if isinstance(config, dict) else None
+    if not isinstance(entry, dict):
+        return
+    try:
+        service.record_install(installed[0], entry)
+    except Exception as e:
+        logger.warning(f"[WebChannel] record staged skill fields failed: {e}")
+
+
 class McpServersHandler:
     """List and persist MCP servers from the Agent's mcp.json."""
 
@@ -368,9 +395,11 @@ class SkillsHandler:
                     return json.dumps({"status": "error", "message": "names must be a list"})
                 try:
                     installed = commit_staged(staged["dir"], names, agent_id=staged["agent_id"])
+                    service = _skill_service(staged["agent_id"])
+                    service.manager.refresh_skills()
+                    _record_staged_fields(staged["dir"], installed, service)
                 finally:
                     _staging.discard(body.get("token"))
-                _skill_service(staged["agent_id"]).manager.refresh_skills()
                 logger.info(f"[WebChannel] Skills installed: {installed}")
                 return json.dumps({"status": "success", "installed": installed}, ensure_ascii=False)
             elif action == "discard":
