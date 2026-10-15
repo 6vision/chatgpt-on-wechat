@@ -1837,6 +1837,11 @@ class AgentBridge:
                 if pre_persisted and new_messages and new_messages[0].get("role") == "user":
                     new_messages = new_messages[1:]
                 writer.finish(new_messages)
+
+            # Same reason the messages are stored here: the context-usage
+            # popover is drawn from the live Agent, so what this run ended on
+            # has to outlive the process or the chart comes back empty.
+            self.remember_context_usage(agent, session_id, resolved_agent_id)
             
             # Record this user turn for the self-evolution idle trigger. Skip
             # scheduler-injected / scheduled-task sessions so internal runs do
@@ -2187,6 +2192,26 @@ class AgentBridge:
             logger.warning(
                 f"[AgentBridge] Failed to persist messages for session={session_id}: {e}"
             )
+
+    def remember_context_usage(
+        self, agent, session_id: str, agent_id: str = None
+    ) -> None:
+        """Keep a session's context-usage numbers for the popover to fall back on.
+
+        The chart is measured off the live Agent, which only exists while the
+        process does: after a restart nothing can be asked about the session
+        until the next turn, so the popover used to come back empty. Storing
+        what a run ended on gives the endpoint something true to show in that
+        window. Best-effort — a turn that just succeeded must not fail over a
+        chart, and a session with no row stores nothing.
+        """
+        if not session_id:
+            return
+        try:
+            store = self.get_conversation_store(agent_id)
+            store.set_context_usage(session_id, agent.get_context_usage())
+        except Exception as e:
+            logger.debug(f"[AgentBridge] Context usage snapshot skipped: {e}")
 
     # Marker used to identify scheduler-injected user messages so we can apply
     # a sliding window without touching real user turns. The legacy prefix

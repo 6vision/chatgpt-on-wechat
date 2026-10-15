@@ -887,6 +887,23 @@ class SessionClearContextHandler:
             return json.dumps({"status": "error", "message": str(e)})
 
 
+def _stored_context_usage(session_id: str, agent_id: Optional[str]) -> Optional[dict]:
+    """The context usage a session's last run ended on, if one was stored.
+
+    Only read when the session has no live Agent to measure, so the caller can
+    tell the frontend the numbers are the last known ones rather than the
+    current state.
+    """
+    try:
+        from agent.memory import get_conversation_store
+
+        store = get_conversation_store(_get_workspace_root(agent_id=agent_id))
+        return store.get_context_usage(session_id)
+    except Exception as e:
+        logger.debug(f"[WebChannel] Stored context usage unavailable: {e}")
+        return None
+
+
 class SessionContextUsageHandler:
     def GET(self, session_id: str):
         _require_auth()
@@ -910,7 +927,15 @@ class SessionContextUsageHandler:
             agent = ab.peek_agent(session_id, agent_id=agent_id)
             if agent is None:
                 # No live context yet — a fresh session, or one just cleared
-                # (clear_context drops the instance).
+                # (clear_context drops the instance). The second case is also
+                # what a restart looks like, and there the last run's numbers
+                # are still the best answer: the history they describe is
+                # still loaded into the next request.
+                stored = _stored_context_usage(session_id, agent_id)
+                if stored:
+                    stored["status"] = "success"
+                    stored["restored"] = True
+                    return json.dumps(stored)
                 return json.dumps({"status": "success", "available": False})
 
             usage = agent.get_context_usage()
@@ -961,6 +986,17 @@ class SessionCompactContextHandler:
                 usage = agent.get_context_usage()
             except Exception:
                 pass
+            # Compaction rewrote the context the stored snapshot described, so
+            # replace it — or drop it, when the refreshed numbers could not be
+            # taken — rather than let the pre-compaction pie reappear.
+            try:
+                from agent.memory import get_conversation_store
+
+                get_conversation_store(
+                    _get_workspace_root(agent_id=agent_id)
+                ).set_context_usage(session_id, usage)
+            except Exception as e:
+                logger.debug(f"[WebChannel] Context usage snapshot skipped: {e}")
 
             return json.dumps({
                 "status": "success",

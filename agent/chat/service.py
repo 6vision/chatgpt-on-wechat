@@ -528,6 +528,11 @@ class ChatService:
         if persist:
             self._note_evolution_turn(agent, context)
 
+        # The context-usage popover has nothing to draw from once this Agent is
+        # gone, so keep the numbers the run ended on.
+        if persist and session_id:
+            self._remember_context_usage(agent, session_id, resolved_agent_id)
+
         logger.info(
             f"[ChatService] Agent run completed: agent={resolved_agent_id}, "
             f"session={session_id}"
@@ -794,6 +799,18 @@ class ChatService:
         except Exception as e:
             logger.debug(f"[ChatService] alias lookup failed: {e}")
         return agent_id
+
+    def _remember_context_usage(self, agent, session_id: str, owner_agent_id: str) -> None:
+        """Keep the context-usage chart's numbers for a session.
+
+        Delegated to the bridge so every channel stores the same thing the same
+        way (see AgentBridge.remember_context_usage). Best-effort by design: a
+        turn that answered must not fail over a chart.
+        """
+        try:
+            self.agent_bridge.remember_context_usage(agent, session_id, owner_agent_id)
+        except Exception as e:
+            logger.debug(f"[ChatService] Context usage snapshot skipped: {e}")
 
     def _owner_workspace(self, owner_agent_id: str, agent) -> str:
         """Workspace whose store holds the conversation: the owner's."""

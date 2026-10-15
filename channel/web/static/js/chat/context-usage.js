@@ -78,6 +78,7 @@ function _ctxRenderCard(usage) {
         '<div class="ctx-usage-head">' +
         '<span class="ctx-usage-title">' + t('ctx_usage_title') + '</span>' +
         (usage.estimated ? '<span class="ctx-usage-est">' + t('ctx_estimated') + '</span>' : '') +
+        (usage.restored ? '<span class="ctx-usage-est">' + t('ctx_restored') + '</span>' : '') +
         '</div>' +
         '<div class="ctx-usage-donut-wrap">' + _ctxDonutSvg(slices) +
         '<span class="ctx-usage-pct">' + percent + '%</span></div>' +
