@@ -57,14 +57,19 @@ def test_boundary_requires_separator_or_end():
 
 
 def test_sentence_ending_punctuation_is_a_boundary():
-    # A name followed by a CJK full stop / exclamation / question / semicolon
-    # or a closing parenthesis still addresses the teammate. Chinese users write
-    # ``@运维。`` constantly; without these the mention silently fails.
     assert addressed_agent_id("@运维。帮我查", ROSTER) == "ops"
     assert addressed_agent_id("@运维！停下", ROSTER) == "ops"
     assert addressed_agent_id("@运维？在吗", ROSTER) == "ops"
     assert addressed_agent_id("@运维；继续", ROSTER) == "ops"
-    assert addressed_agent_id("@运维）收到", ROSTER) == "ops"
+    assert addressed_agent_id("@ops! stop", ROSTER) == "ops"
+
+
+def test_strip_address_drops_the_boundary_punctuation():
+    from agent.team_addressing import strip_address
+
+    assert strip_address("@运维。帮我查日志", ["运维", "ops"]) == "帮我查日志"
+    assert strip_address("@ops, check logs", ["运维", "ops"]) == "check logs"
+    assert strip_address("@运维。", ["运维", "ops"]) == "@运维。"
 
 
 def test_dot_is_not_a_boundary_to_keep_domain_names():

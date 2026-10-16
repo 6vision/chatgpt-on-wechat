@@ -12,6 +12,8 @@ let defaultAgentId = localStorage.getItem('cow_default_agent') || 'default';
 let selectedAdminAgentId = '';
 let selectedCoreRevision = '';
 let installedSkills = [];
+// What may follow a leading "@name"; keep in sync with _SEPARATORS in agent/team_addressing.py.
+const MENTION_BOUNDARY = '(?=[\\s,，:：、。！？；!?;]|$)';
 
 function findAgent(agentId) {
     return agentCatalog.find(a => a.id === agentId) || null;
@@ -1091,7 +1093,7 @@ function highlightMentions(root) {
         .sort((a, b) => b.length - a.length)
         .map(label => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
         .join('|');
-    const re = new RegExp('@(' + alternation + ')(?=[\\s，,：:、]|$)', 'gi');
+    const re = new RegExp('@(' + alternation + ')' + MENTION_BOUNDARY, 'gi');
 
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
         acceptNode: node => node.parentElement
@@ -1294,7 +1296,7 @@ function addressedAgentId(text) {
     });
     labels.sort((a, b) => b[0].length - a[0].length);
     for (const [label, id] of labels) {
-        const re = new RegExp('^@' + label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=[\\s，,：:、]|$)', 'i');
+        const re = new RegExp('^@' + label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + MENTION_BOUNDARY, 'i');
         // The owner is addressable too; the server treats "@owner" as the owner
         // simply taking the turn, so no special-casing here.
         if (re.test(stripped)) return id;

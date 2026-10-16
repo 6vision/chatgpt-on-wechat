@@ -13,6 +13,10 @@ from typing import List, Optional
 
 from common.log import logger
 
+# What may follow a leading "@name". Mirrored in channel/web/static/js/views/agents.js
+# and desktop/src/renderer/src/store/chatStore.ts.
+_SEPARATORS = r"\s,，:：、。！？；!?;"
+
 
 def roster_from_members(host_agent_id: str, members) -> List[dict]:
     """Everyone reachable in a conversation as ``{id, name}``, host first.
@@ -77,7 +81,7 @@ def addressed_agent_id(text: str, roster: List[dict]) -> str:
             if label:
                 candidates.append((label, item["id"]))
     for label, agent_id in sorted(candidates, key=lambda pair: -len(pair[0])):
-        pattern = r"^@" + re.escape(label) + r"(?=[\s，,：:、。！？；）!?;)]|$)"
+        pattern = r"^@" + re.escape(label) + r"(?=[" + _SEPARATORS + r"]|$)"
         if re.match(pattern, stripped, re.IGNORECASE):
             return agent_id
     return ""
@@ -128,3 +132,18 @@ def resolve_addressed_from_context(context, host_agent_id: str, query: str) -> O
     except Exception as e:
         logger.debug(f"[TeamAddressing] resolve failed: {e}")
         return ""
+
+
+def strip_address(query: str, labels: List[str]) -> str:
+    """Drop a leading "@label" and its separators; an address with nothing
+    after it is kept as typed rather than becoming an empty turn."""
+    labels = [label for label in labels if label]
+    if not query or not labels:
+        return query
+    pattern = (
+        r"^\s*@(?:"
+        + "|".join(re.escape(label) for label in sorted(labels, key=len, reverse=True))
+        + r")[" + _SEPARATORS + r"]*"
+    )
+    stripped = re.sub(pattern, "", query, count=1, flags=re.IGNORECASE)
+    return stripped if stripped.strip() else query

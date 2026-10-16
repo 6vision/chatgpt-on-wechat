@@ -989,16 +989,9 @@ class AgentBridge:
     @staticmethod
     def _strip_peer_address(query: str, peer) -> str:
         """Drop the leading "@name" aimed at *peer*; see ``_strip_address``."""
-        if not query:
-            return query
-        labels = [label for label in (peer.name, peer.id) if label]
-        pattern = (
-            r"^\s*@(?:"
-            + "|".join(re.escape(label) for label in sorted(labels, key=len, reverse=True))
-            + r")[\s,，:：、]*"
-        )
-        stripped = re.sub(pattern, "", query, count=1, flags=re.IGNORECASE)
-        return stripped if stripped.strip() else query
+        from agent.team_addressing import strip_address
+
+        return strip_address(query, [peer.name, peer.id])
 
     @staticmethod
     def _delegation_timeout() -> float:
@@ -1048,17 +1041,9 @@ class AgentBridge:
             profile = self.agent_registry.get(speaker_agent_id, require_enabled=False)
         except Exception:
             return query
-        labels = [label for label in (profile.name, profile.id) if label]
-        pattern = (
-            r"^\s*@(?:"
-            + "|".join(re.escape(label) for label in sorted(labels, key=len, reverse=True))
-            + r")[\s,，:：、]*"
-        )
-        stripped = re.sub(pattern, "", query, count=1, flags=re.IGNORECASE)
-        # An address with nothing after it is still a question — "@Ops" alone
-        # means "you, speak" — so it keeps the mention rather than reaching the
-        # Agent as an empty turn.
-        return stripped if stripped.strip() else query
+        from agent.team_addressing import strip_address
+
+        return strip_address(query, [profile.name, profile.id])
 
     @staticmethod
     def _attribute_to_speaker(messages: list, speaker_agent_id: str) -> list:
