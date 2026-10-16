@@ -194,10 +194,7 @@ _MIGRATION_ADD_PINNED = """
 ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
 """
 
-# The context-usage chart's numbers, as of the session's last run. The live
-# Agent that computes them only exists while the process does, so the chart had
-# nothing to draw from after a restart; keeping the last snapshot here lets the
-# hover popover keep showing the numbers it showed before the restart.
+# Context-usage snapshot from the session's last run, shown when no live Agent exists.
 _MIGRATION_ADD_CONTEXT_USAGE = """
 ALTER TABLE sessions ADD COLUMN context_usage TEXT NOT NULL DEFAULT '';
 """
@@ -932,9 +929,6 @@ class ConversationStore:
                         (aid, session_id),
                     ).fetchone()
                     new_start = row[0] + 1
-                    # The stored context usage describes the context that was
-                    # just cleared, so it goes with it: keeping it would show
-                    # the chart full right after the user emptied it.
                     conn.execute(
                         "UPDATE sessions SET context_start_seq = ?, context_usage = '' "
                         "WHERE agent_id = ? AND session_id = ?",
@@ -2056,16 +2050,8 @@ class ConversationStore:
                 conn.close()
 
     def set_context_usage(self, session_id: str, usage: Optional[dict]) -> bool:
-        """Store the context-usage chart's numbers for a session.
-
-        Written at the end of a run, read back by the chart when the session has
-        no live Agent to measure (see :meth:`get_context_usage`). Passing None
-        clears the snapshot. Returns True if the session existed.
-
-        Best-effort like the rest of the session sidecars: a database written
-        before this column existed, or a payload that will not serialise, must
-        not take the turn down with it.
-        """
+        """Store a session's context-usage snapshot (None clears it). Best-effort;
+        returns True if the session existed."""
         try:
             payload = "" if usage is None else json.dumps(usage, ensure_ascii=False)
         except (TypeError, ValueError) as e:
@@ -2088,12 +2074,7 @@ class ConversationStore:
             return False
 
     def get_context_usage(self, session_id: str) -> Optional[dict]:
-        """The snapshot written by :meth:`set_context_usage`, else None.
-
-        Tolerates an empty column, a payload that no longer parses, and a
-        database that predates the column: "no snapshot" and "unreadable
-        snapshot" are the same answer to the caller — nothing to show.
-        """
+        """The snapshot written by :meth:`set_context_usage`; None if missing or unreadable."""
         try:
             with self._lock:
                 conn = self._connect()
