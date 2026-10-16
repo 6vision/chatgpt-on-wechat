@@ -306,12 +306,18 @@ class DiscordChannel(ChatChannel):
             att = attachments[0]
             content_type = (att.content_type or "").lower()
             name = att.filename or str(att.id)
-            path = await self._download_attachment(att, name)
-            if not path:
-                return (None, None, "")
             is_image = content_type.startswith("image/") or name.lower().endswith(
                 (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
             )
+            # attachment.save() buffers the whole body, so check the reported size first.
+            limit = MAX_IMAGE_BYTES if is_image else MAX_FILE_BYTES
+            size = getattr(att, "size", None)
+            if isinstance(size, int) and size > limit:
+                logger.warning(f"[Discord] attachment {name} is {size} bytes, over the {limit} limit; skipped")
+                return (None, None, "")
+            path = await self._download_attachment(att, name)
+            if not path:
+                return (None, None, "")
             if is_image:
                 return (ContextType.IMAGE, path, text)
             return (ContextType.FILE, path, text)
@@ -324,15 +330,6 @@ class DiscordChannel(ChatChannel):
     async def _download_attachment(self, attachment, name: str):
         """Download a discord attachment into the local tmp dir; return path or None."""
         try:
-            # attachment.save() buffers the whole body, and Discord reports the size up front:
-            # refuse an oversized upload instead of pulling it into memory (same caps as the
-            # other channels' inbound media).
-            is_image = (getattr(attachment, "content_type", None) or "").lower().startswith("image/")
-            limit = MAX_IMAGE_BYTES if is_image else MAX_FILE_BYTES
-            size = getattr(attachment, "size", None)
-            if isinstance(size, int) and size > limit:
-                logger.warning(f"[Discord] attachment {name} is {size} bytes, over the {limit} limit; skipped")
-                return None
             tmp_dir = DiscordMessage.get_tmp_dir()
             safe_name = re.sub(r"[^\w.\-]", "_", name)
             # Prefix with attachment id to avoid name collisions

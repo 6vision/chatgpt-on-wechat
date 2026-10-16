@@ -51,6 +51,13 @@ def test_oversized_image_uses_the_image_limit():
     assert att.saved == []
 
 
+def test_image_without_content_type_uses_the_image_limit():
+    att = _Attachment(MAX_IMAGE_BYTES + 1, content_type="", filename="big.png")
+
+    assert _parse(att) == (None, None, "")
+    assert att.saved == []
+
+
 def test_attachment_within_the_limit_is_still_downloaded():
     att = _Attachment(1024)
 
