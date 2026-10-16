@@ -1489,8 +1489,10 @@ class ModelsHandler:
         if not isinstance(ws_cfg, dict):
             ws_cfg = {}
 
-        anonymous_on = bool(ws_cfg.get("anysearch_anonymous"))
-        keenable_anonymous_on = bool(ws_cfg.get("keenable_anonymous"))
+        from agent.tools.web_search.web_search import anonymous_opt_in
+
+        anonymous_on = anonymous_opt_in(ws_cfg.get("anysearch_anonymous"))
+        keenable_anonymous_on = anonymous_opt_in(ws_cfg.get("keenable_anonymous"))
         searxng_url = (ws_cfg.get("searxng_url") or "").strip() if isinstance(ws_cfg, dict) else ""
         providers = []
         configured_ids = []
