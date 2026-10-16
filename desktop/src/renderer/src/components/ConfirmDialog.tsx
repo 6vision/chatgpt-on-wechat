@@ -38,7 +38,7 @@ const ConfirmDialog: React.FC = () => {
       <p className="text-sm text-content-secondary leading-relaxed">{message}</p>
       <div className="flex items-center justify-end gap-2 pt-1">
         <Btn onClick={() => answer(false)}>{t('config_cancel')}</Btn>
-        <Btn variant="danger" onClick={() => answer(true)} autoFocus>
+        <Btn variant={pending.tone ?? 'danger'} onClick={() => answer(true)} autoFocus>
           {t(pending.okKey)}
         </Btn>
       </div>

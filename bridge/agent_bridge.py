@@ -1751,13 +1751,15 @@ class AgentBridge:
                 messages = self._attribute_to_speaker(messages, speaker_agent_id)
                 messages = self._strip_speaker_prefix_from_messages(messages)
                 if messages:
-                    self._persist_messages(
+                    persisted = self._persist_messages(
                         session_id,
                         list(messages),
                         channel_type,
                         resolved_agent_id,
                         create_if_missing=not pre_persisted,
                     )
+                    if persisted is False:
+                        raise RuntimeError("conversation write failed; step remains pending")
 
             writer = StepWriter(write_reply, skip_query=pre_persisted) if session_id else None
 
@@ -2130,7 +2132,7 @@ class AgentBridge:
         channel_type: str = "",
         agent_id: str = None,
         create_if_missing: bool = True,
-    ) -> None:
+    ) -> bool:
         """
         Persist new messages to the conversation store after each agent run.
 
@@ -2142,11 +2144,11 @@ class AgentBridge:
         instead of resurrecting the session without its question.
         """
         if not new_messages:
-            return
+            return True
         try:
             from config import conf
             if not conf().get("conversation_persistence", True):
-                return
+                return True
             # When deep-thinking display is disabled, strip "thinking" content
             # blocks before persisting so they don't resurface on history reload.
             # The in-memory message list keeps them intact for this run's
@@ -2169,6 +2171,7 @@ class AgentBridge:
         if not thinking_enabled:
             messages_to_store = self._strip_thinking_blocks(new_messages)
 
+        stored = False
         try:
             store = self.get_conversation_store(agent_id)
             stored = store.append_messages(
@@ -2183,10 +2186,14 @@ class AgentBridge:
                     f"[AgentBridge] Session {session_id} was deleted mid-run, "
                     f"dropped {len(messages_to_store)} reply message(s)"
                 )
+            # A deleted session is an intentional discard, not a retryable failure.
+            return bool(stored) or not create_if_missing
         except Exception as e:
             logger.warning(
                 f"[AgentBridge] Failed to persist messages for session={session_id}: {e}"
             )
+            # Artifact indexing happens after the append committed; do not replay it.
+            return bool(stored)
 
     # Marker used to identify scheduler-injected user messages so we can apply
     # a sliding window without touching real user turns. The legacy prefix

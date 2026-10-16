@@ -1426,7 +1426,12 @@ class WebChannel(ChatChannel):
             cancelled = 0
 
             if request_id:
-                if registry.cancel_request(request_id):
+                scoped_request_id = agent_bridge._cancel_key(
+                    agent_id,
+                    request_id,
+                    agent_bridge.agent_registry.default_agent_id,
+                )
+                if registry.cancel_request(scoped_request_id):
                     cancelled = 1
 
             if cancelled == 0 and session_id:

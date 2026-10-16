@@ -67,6 +67,9 @@ export const CustomPageActions: React.FC = () => {
 const CustomPage: React.FC = () => {
   const { id = '' } = useParams()
   const navigate = useNavigate()
+  // Each visit, a click on the entry already open included, gets a new key, so
+  // the page reloads: the file or site behind it may have changed meanwhile.
+  const { key: visit } = useLocation()
   const loaded = useMenuStore((s) => s.loaded)
   const item = useCurrentItem(id)
 
@@ -94,7 +97,7 @@ const CustomPage: React.FC = () => {
   if (item.type === 'url') {
     return (
       <iframe
-        key={item.url}
+        key={`${visit}:${item.url}`}
         src={item.url}
         title={itemLabel(item)}
         className="flex-1 w-full h-full border-0 bg-white"
@@ -117,7 +120,7 @@ const CustomPage: React.FC = () => {
     )
   }
   return (
-    <div className="flex-1 min-h-0 overflow-auto">
+    <div key={visit} className="flex-1 min-h-0 overflow-auto">
       {entry.kind === 'html' ? (
         <FilePreview file={entry} />
       ) : (

@@ -15,6 +15,17 @@ from channel.web.api.openai_compat import (
 )
 
 
+_CATALOG = [
+    {"id": "deepseek", "label": "DeepSeek", "models": ["deepseek-chat", "deepseek-reasoner"]},
+    {"id": "custom:gw", "label": "Gateway", "models": ["deepseek-chat", "qwen-max"]},
+]
+
+
+@pytest.fixture(autouse=True)
+def catalog(monkeypatch):
+    monkeypatch.setattr(openai_compat, "_model_catalog", lambda: _CATALOG)
+
+
 def _runner(events, calls):
     def run(
         query,
@@ -23,6 +34,7 @@ def _runner(events, calls):
         channel_type="",
         agent_id=None,
         request_id=None,
+        **kwargs,
     ):
         calls.append(
             {
@@ -41,7 +53,9 @@ def _runner(events, calls):
 
 def _http_app(monkeypatch, run_chat, configured_token="secret"):
     monkeypatch.setattr(
-        openai_compat, "conf", lambda: {"external_api_token": configured_token}
+        openai_compat,
+        "conf",
+        lambda: {"external_api_enabled": True, "external_api_token": configured_token},
     )
     monkeypatch.setattr(openai_compat, "_run_chat_service", run_chat)
     return web.application(
@@ -77,7 +91,7 @@ def test_external_api_uses_independent_bearer_auth(
     with pytest.raises(OpenAIAPIError) as exc_info:
         handle_chat_completions(
             {
-                "model": "cowagent",
+                "model": "deepseek-chat",
                 "messages": [{"role": "user", "content": "hello"}],
             },
             authorization=authorization,
@@ -92,7 +106,7 @@ def test_external_api_uses_independent_bearer_auth(
 def test_bearer_scheme_is_case_insensitive(scheme):
     response = handle_chat_completions(
         {
-            "model": "cowagent",
+            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
         },
         authorization=f"{scheme} secret",
@@ -167,9 +181,8 @@ def test_non_streaming_completion_maps_content_reasoning_and_tools():
     calls = []
     response = handle_chat_completions(
         {
-            "model": "cowagent",
+            "model": "deepseek-chat",
             "conversation_id": "conversation-42",
-            "user": "user-7",
             "messages": [
                 {"role": "assistant", "content": "previous answer"},
                 {"role": "user", "content": "inspect the workspace"},
@@ -220,7 +233,7 @@ def test_non_streaming_completion_maps_content_reasoning_and_tools():
         "id": "chatcmpl-test",
         "object": "chat.completion",
         "created": 1700000000,
-        "model": "cowagent",
+        "model": "deepseek-chat",
         "choices": [
             {
                 "index": 0,
@@ -229,12 +242,6 @@ def test_non_streaming_completion_maps_content_reasoning_and_tools():
                     "content": "The workspace is ready.",
                     "reasoning_content": "Need a file. ",
                     "tool_trace": [
-                        {
-                            "type": "tool_start",
-                            "id": "call-1",
-                            "name": "read",
-                            "arguments": {"path": "README.md"},
-                        },
                         {
                             "type": "tool_result",
                             "id": "call-1",
@@ -256,7 +263,7 @@ def test_streaming_completion_uses_standard_deltas_and_additive_cow_events():
     calls = []
     stream = handle_chat_completions(
         {
-            "model": "cowagent",
+            "model": "deepseek-chat",
             "stream": True,
             "user": "user-7",
             "messages": [{"role": "user", "content": "hello"}],
@@ -304,7 +311,8 @@ def test_streaming_completion_uses_standard_deltas_and_additive_cow_events():
         payload["choices"][0]["delta"].get("content") for payload in payloads[3:5]
     ] == ["Hello", " world"]
     assert payloads[-1]["choices"][0]["finish_reason"] == "stop"
-    assert calls[0]["session_id"] == "openai:user:user-7"
+    # ``user`` only identifies the end user; it never keeps a conversation.
+    assert calls[0]["session_id"] == "openai:request:chatcmpl-stream"
 
 
 def test_streaming_agent_failure_before_first_event_returns_500():
@@ -314,7 +322,7 @@ def test_streaming_agent_failure_before_first_event_returns_500():
     with pytest.raises(OpenAIAPIError) as exc_info:
         handle_chat_completions(
             {
-                "model": "cowagent",
+                "model": "deepseek-chat",
                 "stream": True,
                 "messages": [{"role": "user", "content": "hello"}],
             },
@@ -336,13 +344,14 @@ def test_streaming_agent_failure_after_first_event_finishes_with_error():
         channel_type="",
         agent_id=None,
         request_id=None,
+        **kwargs,
     ):
         send_chunk_fn({"chunk_type": "content", "delta": "partial"})
         raise RuntimeError("provider unavailable")
 
     stream = handle_chat_completions(
         {
-            "model": "cowagent",
+            "model": "deepseek-chat",
             "stream": True,
             "messages": [{"role": "user", "content": "hello"}],
         },
@@ -378,6 +387,7 @@ def test_streaming_returns_after_first_event_without_waiting_for_completion():
         channel_type="",
         agent_id=None,
         request_id=None,
+        **kwargs,
     ):
         send_chunk_fn({"chunk_type": "content", "delta": "first"})
         release_runner.wait()
@@ -387,7 +397,7 @@ def test_streaming_returns_after_first_event_without_waiting_for_completion():
         prepared_stream.put(
             handle_chat_completions(
                 {
-                    "model": "cowagent",
+                    "model": "deepseek-chat",
                     "stream": True,
                     "messages": [{"role": "user", "content": "hello"}],
                 },
@@ -422,6 +432,7 @@ def test_streaming_generator_close_cancels_agent_request_once(monkeypatch):
         channel_type="",
         agent_id=None,
         request_id=None,
+        **kwargs,
     ):
         send_chunk_fn({"chunk_type": "content", "delta": "first"})
         runner_started.set()
@@ -435,7 +446,7 @@ def test_streaming_generator_close_cancels_agent_request_once(monkeypatch):
     )
     stream = handle_chat_completions(
         {
-            "model": "cowagent",
+            "model": "deepseek-chat",
             "stream": True,
             "conversation_id": "close-me",
             "messages": [{"role": "user", "content": "hello"}],
@@ -461,9 +472,7 @@ def test_streaming_timeout_while_waiting_for_session_lock_skips_run_chat(monkeyp
 
     registry = CancelTokenRegistry()
     session_id = "openai:conversation:queued-timeout"
-    session_lock = openai_compat._SESSION_LOCKS[
-        hash(session_id) % len(openai_compat._SESSION_LOCKS)
-    ]
+    session_lock = openai_compat._session_lock(session_id)
     run_calls = []
     session_writes = []
     existing_threads = set(threading.enumerate())
@@ -489,7 +498,7 @@ def test_streaming_timeout_while_waiting_for_session_lock_skips_run_chat(monkeyp
         with pytest.raises(OpenAIAPIError) as exc_info:
             handle_chat_completions(
                 {
-                    "model": "cowagent",
+                    "model": "deepseek-chat",
                     "stream": True,
                     "conversation_id": "queued-timeout",
                     "messages": [{"role": "user", "content": "hello"}],
@@ -574,7 +583,7 @@ def test_streaming_timeout_after_closed_check_reuses_pre_registered_cancel_event
         try:
             handle_chat_completions(
                 {
-                    "model": "cowagent",
+                    "model": "deepseek-chat",
                     "stream": True,
                     "conversation_id": "registration-race",
                     "messages": [{"role": "user", "content": "hello"}],
@@ -619,9 +628,7 @@ def test_streaming_generator_close_while_waiting_for_session_lock_skips_run_chat
 ):
     real_queue = queue.Queue
     session_id = "openai:conversation:queued-close"
-    session_lock = openai_compat._SESSION_LOCKS[
-        hash(session_id) % len(openai_compat._SESSION_LOCKS)
-    ]
+    session_lock = openai_compat._session_lock(session_id)
     run_calls = []
     session_writes = []
     existing_threads = set(threading.enumerate())
@@ -633,7 +640,7 @@ def test_streaming_generator_close_while_waiting_for_session_lock_skips_run_chat
                 "id": "chatcmpl-queued-close",
                 "object": "chat.completion.chunk",
                 "created": 1700000000,
-                "model": "cowagent",
+                "model": "deepseek-chat",
                 "choices": [
                     {
                         "index": 0,
@@ -664,7 +671,7 @@ def test_streaming_generator_close_while_waiting_for_session_lock_skips_run_chat
     try:
         stream = handle_chat_completions(
             {
-                "model": "cowagent",
+                "model": "deepseek-chat",
                 "stream": True,
                 "conversation_id": "queued-close",
                 "messages": [{"role": "user", "content": "hello"}],
@@ -703,7 +710,7 @@ def test_streaming_normal_completion_does_not_cancel_agent_request(monkeypatch):
     )
     stream = handle_chat_completions(
         {
-            "model": "cowagent",
+            "model": "deepseek-chat",
             "stream": True,
             "messages": [{"role": "user", "content": "hello"}],
         },
@@ -742,7 +749,7 @@ def test_invalid_messages_return_400():
     with pytest.raises(OpenAIAPIError) as exc_info:
         handle_chat_completions(
             {
-                "model": "cowagent",
+                "model": "deepseek-chat",
                 "messages": [{"role": "user", "content": [{"type": "text"}]}],
             },
             authorization="Bearer secret",
@@ -761,7 +768,7 @@ def test_non_streaming_agent_failure_returns_500():
     with pytest.raises(OpenAIAPIError) as exc_info:
         handle_chat_completions(
             {
-                "model": "cowagent",
+                "model": "deepseek-chat",
                 "messages": [{"role": "user", "content": "hello"}],
             },
             authorization="Bearer secret",
@@ -821,7 +828,7 @@ def test_http_post_returns_200_json(monkeypatch):
     response = _post(
         app,
         {
-            "model": "cowagent",
+            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
         },
     )
@@ -861,7 +868,7 @@ def test_http_post_returns_401_for_invalid_bearer_token(monkeypatch):
     response = _post(
         app,
         {
-            "model": "cowagent",
+            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
         },
         authorization="Bearer wrong",
@@ -877,7 +884,7 @@ def test_http_post_returns_503_when_external_api_is_disabled(monkeypatch):
     response = _post(
         app,
         {
-            "model": "cowagent",
+            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
         },
     )
@@ -894,7 +901,7 @@ def test_http_stream_returns_500_when_agent_fails_immediately(monkeypatch):
     response = _post(
         app,
         {
-            "model": "cowagent",
+            "model": "deepseek-chat",
             "stream": True,
             "messages": [{"role": "user", "content": "hello"}],
         },
@@ -931,7 +938,7 @@ def test_http_stream_first_event_timeout_returns_500_and_cancels(monkeypatch):
             _post(
                 app,
                 {
-                    "model": "cowagent",
+                    "model": "deepseek-chat",
                     "stream": True,
                     "conversation_id": "timeout",
                     "messages": [{"role": "user", "content": "hello"}],
@@ -968,7 +975,7 @@ def test_http_stream_returns_sse_body_and_done_marker(monkeypatch):
     response = _post(
         app,
         {
-            "model": "cowagent",
+            "model": "deepseek-chat",
             "stream": True,
             "messages": [{"role": "user", "content": "hello"}],
         },
@@ -986,7 +993,7 @@ def test_http_stream_returns_sse_body_and_done_marker(monkeypatch):
 def test_route_config_and_english_documentation_expose_the_public_api():
     root = Path(__file__).parents[1]
     config = json.loads((root / "config-template.json").read_text(encoding="utf-8"))
-    docs = (root / "docs/channels/web.mdx").read_text(encoding="utf-8")
+    docs = (root / "docs/extensions/chat-api.mdx").read_text(encoding="utf-8")
 
     assert config["external_api_token"] == ""
     assert "POST /v1/chat/completions" in docs
@@ -996,3 +1003,376 @@ def test_route_config_and_english_documentation_expose_the_public_api():
     assert "30 seconds" in docs
     assert "`cow_event.type=error`" in docs
     assert "`finish_reason=error`" in docs
+
+
+def _sse_payloads(frames):
+    assert frames[-1] == "data: [DONE]\n\n"
+    return [
+        json.loads(frame.removeprefix("data: ").removesuffix("\n\n"))
+        for frame in frames[:-1]
+    ]
+
+
+def _recording_runner(events, calls, usage=None):
+    def run(query, session_id, send_chunk_fn, **kwargs):
+        calls.append({"query": query, "session_id": session_id, **kwargs})
+        for event in events:
+            send_chunk_fn(event)
+        return usage
+
+    return run
+
+
+def _complete(payload, run_chat, **kwargs):
+    return handle_chat_completions(
+        payload,
+        authorization="Bearer secret",
+        external_api_token="secret",
+        run_chat=run_chat,
+        completion_id="chatcmpl-x",
+        created=1700000000,
+        **kwargs,
+    )
+
+
+def test_request_without_conversation_runs_once_on_the_history_it_carries():
+    calls = []
+    _complete(
+        {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": "be brief"},
+                {"role": "user", "content": [{"type": "text", "text": "my name is "}, {"type": "text", "text": "Ann"}]},
+                {"role": "assistant", "content": "Hi Ann"},
+                {"role": "user", "content": "what is my name?"},
+            ],
+        },
+        _recording_runner([{"chunk_type": "content", "delta": "Ann"}], calls),
+    )
+
+    assert calls[0]["query"] == "what is my name?"
+    assert calls[0]["session_id"] == "openai:request:chatcmpl-x"
+    assert calls[0]["ephemeral"] is True
+    assert calls[0]["transcript"] == [
+        {"role": "user", "content": [{"type": "text", "text": "my name is Ann"}]},
+        {"role": "assistant", "content": [{"type": "text", "text": "Hi Ann"}]},
+    ]
+
+
+def test_named_conversation_keeps_its_history_on_the_server():
+    calls = []
+    _complete(
+        {
+            "model": "deepseek-chat",
+            "conversation_id": "c1",
+            "messages": [
+                {"role": "user", "content": "earlier"},
+                {"role": "assistant", "content": "reply"},
+                {"role": "user", "content": "now"},
+            ],
+        },
+        _recording_runner([], calls),
+    )
+
+    assert calls[0]["session_id"] == "openai:conversation:c1"
+    assert "transcript" not in calls[0]
+    assert "ephemeral" not in calls[0]
+
+
+def test_image_content_parts_are_rejected():
+    with pytest.raises(OpenAIAPIError) as exc_info:
+        _complete(
+            {
+                "model": "deepseek-chat",
+                "messages": [
+                    {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "x"}}]}
+                ],
+            },
+            _recording_runner([], []),
+        )
+    assert exc_info.value.status_code == 400
+
+
+class _FakeAgentRegistry:
+    default_agent_id = "main"
+
+    def __init__(self):
+        from agent.registry import AgentProfile
+
+        self._profiles = {
+            "main": AgentProfile(id="main", name="Main", workspace="/tmp/main"),
+            "research": AgentProfile(
+                id="research", name="Research", workspace="/tmp/research",
+                description="Finds things out",
+            ),
+            "off": AgentProfile(id="off", name="Off", workspace="/tmp/off", enabled=False),
+        }
+
+    def get_addressed(self, agent_id, require_enabled=True):
+        requested = "" if agent_id == "default" else agent_id
+        profile = self._profiles[requested or self.default_agent_id]
+        if require_enabled and not profile.enabled:
+            raise ValueError("disabled")
+        return profile
+
+    def list(self, include_disabled=True):
+        return sorted(
+            (p for p in self._profiles.values() if include_disabled or p.enabled),
+            key=lambda p: p.id,
+        )
+
+
+@pytest.fixture
+def agents(monkeypatch):
+    monkeypatch.setattr(openai_compat, "_agent_registry", _FakeAgentRegistry)
+    monkeypatch.setattr(
+        openai_compat,
+        "_request_cancel_scope",
+        lambda request_id, session_id=None, agent_id=None: (request_id, session_id),
+    )
+
+
+@pytest.mark.parametrize(
+    ("extra", "agent_id"),
+    [({}, None), ({"agent_id": "default"}, "main"), ({"agent_id": "research"}, "research")],
+)
+def test_agent_id_selects_the_agent(agents, extra, agent_id):
+    calls = []
+    _complete(
+        {"model": "deepseek-chat", "conversation_id": "c",
+         "messages": [{"role": "user", "content": "hi"}], **extra},
+        _recording_runner([], calls),
+    )
+
+    assert calls[0]["agent_id"] == agent_id
+
+
+@pytest.mark.parametrize("extra", [{}, {"model": ""}])
+def test_without_a_model_the_agent_answers_on_its_own(catalog, monkeypatch, extra):
+    monkeypatch.setattr(openai_compat, "_agent_model_name", lambda agent_id: "deepseek-chat")
+    calls = []
+    response = _complete(
+        {"conversation_id": "c", "messages": [{"role": "user", "content": "hi"}], **extra},
+        _recording_runner([], calls),
+    )
+
+    assert "model_override" not in calls[0]
+    assert response["model"] == "deepseek-chat"
+
+
+@pytest.mark.parametrize(
+    ("model", "route"),
+    [("qwen-max", ("custom:gw", "qwen-max")), ("deepseek-chat", ("deepseek", "deepseek-chat"))],
+)
+def test_a_named_model_answers_this_turn(catalog, model, route):
+    calls = []
+    response = _complete(
+        {"model": model, "conversation_id": "c", "messages": [{"role": "user", "content": "hi"}]},
+        _recording_runner([], calls),
+    )
+
+    assert calls[0]["model_override"] == route
+    assert response["model"] == model
+
+
+def test_a_named_model_reaches_a_stream_too(catalog):
+    calls = []
+    frames = list(
+        handle_chat_completions(
+            {"model": "qwen-max", "stream": True, "messages": [{"role": "user", "content": "hi"}]},
+            authorization="Bearer secret",
+            external_api_token="secret",
+            run_chat=_recording_runner([{"chunk_type": "content", "delta": "x"}], calls),
+        )
+    )
+
+    assert calls[0]["model_override"] == ("custom:gw", "qwen-max")
+    assert '"model": "qwen-max"' in frames[0]
+
+
+def test_an_unavailable_model_returns_404(catalog):
+    with pytest.raises(OpenAIAPIError) as exc_info:
+        _complete(
+            {"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]},
+            _recording_runner([], []),
+        )
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.code == "model_not_found"
+
+
+def test_a_non_string_model_returns_400(catalog):
+    with pytest.raises(OpenAIAPIError) as exc_info:
+        _complete(
+            {"model": 4, "messages": [{"role": "user", "content": "hi"}]},
+            _recording_runner([], []),
+        )
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.parametrize("agent_id", ["ghost", "off"])
+def test_unknown_or_disabled_agent_returns_404(agents, agent_id):
+    with pytest.raises(OpenAIAPIError) as exc_info:
+        _complete(
+            {"model": "deepseek-chat", "agent_id": agent_id,
+             "messages": [{"role": "user", "content": "hi"}]},
+            _recording_runner([], []),
+        )
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.code == "agent_not_found"
+
+
+@pytest.mark.parametrize("agent_id", ["", "  ", 7])
+def test_blank_or_non_string_agent_id_returns_400(agents, agent_id):
+    with pytest.raises(OpenAIAPIError) as exc_info:
+        _complete(
+            {"model": "deepseek-chat", "agent_id": agent_id,
+             "messages": [{"role": "user", "content": "hi"}]},
+            _recording_runner([], []),
+        )
+    assert exc_info.value.status_code == 400
+
+
+def test_models_lists_every_configured_model(catalog):
+    result = openai_compat.handle_list_models("Bearer secret", "secret")
+
+    assert result["object"] == "list"
+    assert [(m["id"], m["owned_by"]) for m in result["data"]] == [
+        ("deepseek-chat", "deepseek"),
+        ("deepseek-reasoner", "deepseek"),
+        ("qwen-max", "custom:gw"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("cfg", "served"),
+    [
+        ({"external_api_enabled": True, "external_api_token": "k"}, "k"),
+        ({"external_api_enabled": False, "external_api_token": "k"}, ""),
+        ({"external_api_token": "k"}, ""),
+    ],
+)
+def test_the_key_is_only_served_while_the_api_is_on(monkeypatch, cfg, served):
+    monkeypatch.setattr(openai_compat, "conf", lambda: cfg)
+    assert openai_compat._served_token() == served
+
+
+def test_models_requires_the_api_key(agents):
+    with pytest.raises(OpenAIAPIError) as exc_info:
+        openai_compat.handle_list_models("Bearer wrong", "secret")
+    assert exc_info.value.status_code == 401
+
+
+_RUN_USAGE = {
+    "prompt_tokens": 1200,
+    "completion_tokens": 80,
+    "total_tokens": 1280,
+    "prompt_cache_hit_tokens": 1000,
+    "prompt_cache_miss_tokens": 200,
+    "calls": 2,
+}
+_OPENAI_USAGE = {
+    "prompt_tokens": 1200,
+    "completion_tokens": 80,
+    "total_tokens": 1280,
+    "prompt_tokens_details": {"cached_tokens": 1000},
+}
+
+
+def test_non_streaming_response_reports_usage():
+    response = _complete(
+        {"model": "deepseek-chat", "messages": [{"role": "user", "content": "hi"}]},
+        _recording_runner([{"chunk_type": "content", "delta": "ok"}], [], usage=_RUN_USAGE),
+    )
+    assert response["usage"] == _OPENAI_USAGE
+
+
+def test_non_streaming_response_omits_usage_the_provider_did_not_report():
+    response = _complete(
+        {"model": "deepseek-chat", "messages": [{"role": "user", "content": "hi"}]},
+        _recording_runner([{"chunk_type": "content", "delta": "ok"}], []),
+    )
+    assert "usage" not in response
+
+
+def test_stream_sends_usage_last_when_asked():
+    payloads = _sse_payloads(list(_complete(
+        {
+            "model": "deepseek-chat",
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        _recording_runner([{"chunk_type": "content", "delta": "ok"}], [], usage=_RUN_USAGE),
+    )))
+
+    assert payloads[-2]["choices"][0]["finish_reason"] == "stop"
+    assert payloads[-1]["choices"] == []
+    assert payloads[-1]["usage"] == _OPENAI_USAGE
+
+
+def test_stream_leaves_usage_out_unless_asked():
+    payloads = _sse_payloads(list(_complete(
+        {"model": "deepseek-chat", "stream": True, "messages": [{"role": "user", "content": "hi"}]},
+        _recording_runner([{"chunk_type": "content", "delta": "ok"}], [], usage=_RUN_USAGE),
+    )))
+
+    assert all("usage" not in payload for payload in payloads)
+
+
+def test_tool_result_is_streamed_when_the_call_finishes_and_not_repeated():
+    events = [
+        {"chunk_type": "tool_start", "tool": "read", "tool_id": "call-1", "arguments": {"path": "a"}},
+        {"chunk_type": "tool_end", "tool": "read", "tool_id": "call-1", "status": "success",
+         "result": "A", "elapsed": "0.10s"},
+        {"chunk_type": "tool_calls", "tool_calls": [
+            {"id": "call-1", "name": "read", "arguments": {"path": "a"}, "result": "A",
+             "status": "success", "elapsed": "0.10s"},
+        ]},
+        {"chunk_type": "peer_start", "card_id": "call-2", "agent_id": "dev", "agent_name": "Dev"},
+        {"chunk_type": "content", "delta": "done"},
+    ]
+    payloads = _sse_payloads(list(_complete(
+        {"model": "deepseek-chat", "stream": True, "messages": [{"role": "user", "content": "hi"}]},
+        _recording_runner(events, []),
+    )))
+
+    cow_events = [p["cow_event"] for p in payloads if "cow_event" in p]
+    assert cow_events == [
+        {"type": "tool_start", "id": "call-1", "name": "read", "arguments": {"path": "a"}},
+        {"type": "tool_result", "id": "call-1", "name": "read", "arguments": {"path": "a"},
+         "result": "A", "status": "success", "elapsed": "0.10s"},
+        {"type": "peer_start", "card_id": "call-2", "agent_id": "dev", "agent_name": "Dev"},
+    ]
+
+
+def test_http_models_route_and_cors_preflight(monkeypatch, agents, catalog):
+    monkeypatch.setattr(
+        openai_compat, "conf", lambda: {"external_api_enabled": True, "external_api_token": "secret"}
+    )
+    app = web.application(
+        ("/v1/models", "OpenAIModelsHandler", "/v1/chat/completions", "OpenAIChatCompletionsHandler"),
+        vars(web_channel),
+        autoreload=False,
+    )
+
+    listed = app.request("/v1/models", headers={"Authorization": "Bearer secret"})
+    assert listed.status == "200 OK"
+    assert listed.headers["Access-Control-Allow-Origin"] == "*"
+    assert json.loads(listed.data)["data"][0]["id"] == "deepseek-chat"
+
+    preflight = app.request("/v1/chat/completions", method="OPTIONS")
+    assert preflight.status == "204 No Content"
+    assert "Authorization" in preflight.headers["Access-Control-Allow-Headers"]
+
+    missing = app.request(
+        "/v1/chat/completions",
+        method="POST",
+        data=json.dumps({
+            "model": "deepseek-chat", "agent_id": "nope",
+            "messages": [{"role": "user", "content": "hi"}],
+        }),
+        headers={"Authorization": "Bearer secret"},
+    )
+    assert missing.status == "404 Not Found"
+    assert missing.headers["Access-Control-Allow-Origin"] == "*"
+    assert json.loads(missing.data)["error"]["code"] == "agent_not_found"

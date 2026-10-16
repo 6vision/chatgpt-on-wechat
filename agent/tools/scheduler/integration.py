@@ -84,8 +84,11 @@ def _migrate_legacy_task_stores(task_store) -> None:
         default_id = registry.default_agent_id
         global_path = os.path.realpath(str(scheduler_file_global()))
 
-        tasks = task_store.load_tasks()
+        # Do not import over a global store that could not be recovered.
+        tasks = task_store.load_tasks(strict=True)
         changed = False
+        retire = []
+        complete = True
 
         # Stamp missing owner on tasks already in the global file.
         for task in tasks.values():
@@ -101,8 +104,9 @@ def _migrate_legacy_task_stores(task_store) -> None:
                 continue
             try:
                 legacy_store = type(task_store)(legacy_path)
-                incoming = legacy_store.load_tasks()
+                incoming = legacy_store.load_tasks(strict=True)
             except Exception as e:
+                complete = False
                 logger.warning(
                     f"[Scheduler] Skip legacy store {legacy_path}: {e}"
                 )
@@ -119,10 +123,19 @@ def _migrate_legacy_task_stores(task_store) -> None:
                 tasks[task_id] = task
                 imported += 1
                 changed = True
+            retire.append((legacy_path, imported, skipped))
+
+        # The imported reminders must be durable before retiring any source.
+        # A failed save then leaves every original discoverable on next boot.
+        if changed:
+            task_store.save_tasks(tasks)
+
+        for legacy_path, imported, skipped in retire:
             migrated_path = legacy_path + ".migrated"
             try:
                 os.replace(legacy_path, migrated_path)
             except OSError as e:
+                complete = False
                 logger.warning(
                     f"[Scheduler] Imported {imported} task(s) from {legacy_path} "
                     f"but could not rename it aside: {e}"
@@ -134,9 +147,7 @@ def _migrate_legacy_task_stores(task_store) -> None:
                     + (f" (skipped {skipped} duplicate id(s))" if skipped else "")
                 )
 
-        if changed:
-            task_store.save_tasks(tasks)
-        _legacy_stores_migrated = True
+        _legacy_stores_migrated = complete
     except Exception as e:
         logger.warning(f"[Scheduler] Legacy task-store migration failed: {e}")
 

@@ -8,6 +8,8 @@ export interface PendingConfirm {
   vars?: Record<string, string>
   /** Label for the affirmative button; the other one is always a plain cancel. */
   okKey: string
+  /** Style of the affirmative button; defaults to danger. */
+  tone?: 'danger' | 'primary'
   resolve: (ok: boolean) => void
 }
 
