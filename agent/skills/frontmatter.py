@@ -121,7 +121,7 @@ def parse_metadata(frontmatter: Dict[str, Any]) -> Optional[SkillMetadata]:
                 module=spec_raw.get('module'),
                 url=spec_raw.get('url'),
                 archive=spec_raw.get('archive'),
-                extract=spec_raw.get('extract', False),
+                extract=parse_boolean_value(spec_raw.get('extract'), default=False),
                 strip_components=spec_raw.get('stripComponents'),
                 target_dir=spec_raw.get('targetDir'),
             )
@@ -135,8 +135,8 @@ def parse_metadata(frontmatter: Dict[str, Any]) -> Optional[SkillMetadata]:
             requires[key] = _normalize_string_list(value)
     
     return SkillMetadata(
-        always=meta_obj.get('always', False),
-        default_enabled=meta_obj.get('default_enabled', True),
+        always=parse_boolean_value(meta_obj.get('always'), default=False),
+        default_enabled=parse_boolean_value(meta_obj.get('default_enabled'), default=True),
         skill_key=meta_obj.get('skillKey'),
         primary_env=meta_obj.get('primaryEnv'),
         emoji=meta_obj.get('emoji'),
@@ -194,7 +194,10 @@ def parse_boolean_value(value: Optional[str], default: bool = False) -> bool:
     
     if isinstance(value, bool):
         return value
-    
+
+    if isinstance(value, (int, float)):
+        return bool(value)
+
     if isinstance(value, str):
         return value.lower() in ('true', '1', 'yes', 'on')
     
