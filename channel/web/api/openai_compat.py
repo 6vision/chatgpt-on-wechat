@@ -345,7 +345,8 @@ def _sse_frame(payload: dict) -> str:
 
 
 def _session_lock(session_id: str, agent_id: str | None = None) -> threading.Lock:
-    return _SESSION_LOCKS[hash((agent_id or "", session_id)) % len(_SESSION_LOCKS)]
+    owner = agent_id or _agent_registry().default_agent_id
+    return _SESSION_LOCKS[hash((owner, session_id)) % len(_SESSION_LOCKS)]
 
 
 def _request_cancel_scope(

@@ -93,9 +93,9 @@ def get_cli_language() -> str:
         return "en"
 
 
-def load_skills_config() -> dict:
-    """Load skills_config.json from the custom skills directory."""
-    path = os.path.join(get_skills_dir(), "skills_config.json")
+def load_skills_config(agent_id: str = None) -> dict:
+    """Load skills_config.json from an Agent's skills directory."""
+    path = os.path.join(get_skills_dir(agent_id), "skills_config.json")
     if not os.path.exists(path):
         return {}
     try:
