@@ -1839,6 +1839,8 @@ class AgentBridge:
                 if pre_persisted and new_messages and new_messages[0].get("role") == "user":
                     new_messages = new_messages[1:]
                 writer.finish(new_messages)
+
+            self.remember_context_usage(agent, session_id, resolved_agent_id)
             
             # Record this user turn for the self-evolution idle trigger. Skip
             # scheduler-injected / scheduled-task sessions so internal runs do
@@ -2194,6 +2196,19 @@ class AgentBridge:
             )
             # Artifact indexing happens after the append committed; do not replay it.
             return bool(stored)
+
+    def remember_context_usage(
+        self, agent, session_id: str, agent_id: str = None
+    ) -> None:
+        """Store the context usage a run ended on, so the chart survives a restart.
+        Best-effort: never fails the turn."""
+        if not session_id:
+            return
+        try:
+            store = self.get_conversation_store(agent_id)
+            store.set_context_usage(session_id, agent.get_context_usage())
+        except Exception as e:
+            logger.debug(f"[AgentBridge] Context usage snapshot skipped: {e}")
 
     # Marker used to identify scheduler-injected user messages so we can apply
     # a sliding window without touching real user turns. The legacy prefix

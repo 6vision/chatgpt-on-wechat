@@ -528,6 +528,9 @@ class ChatService:
         if persist:
             self._note_evolution_turn(agent, context)
 
+        if persist and session_id:
+            self._remember_context_usage(agent, session_id, resolved_agent_id)
+
         logger.info(
             f"[ChatService] Agent run completed: agent={resolved_agent_id}, "
             f"session={session_id}"
@@ -794,6 +797,13 @@ class ChatService:
         except Exception as e:
             logger.debug(f"[ChatService] alias lookup failed: {e}")
         return agent_id
+
+    def _remember_context_usage(self, agent, session_id: str, owner_agent_id: str) -> None:
+        """Best-effort: a turn that answered must not fail over the usage chart."""
+        try:
+            self.agent_bridge.remember_context_usage(agent, session_id, owner_agent_id)
+        except Exception as e:
+            logger.debug(f"[ChatService] Context usage snapshot skipped: {e}")
 
     def _owner_workspace(self, owner_agent_id: str, agent) -> str:
         """Workspace whose store holds the conversation: the owner's."""
