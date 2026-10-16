@@ -16,7 +16,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { t } from '../../i18n'
 import apiClient from '../../api/client'
-import type { SkillMarketSource, SkillPreviewItem, SkillPreviewResult } from '../../types'
+import type { SkillInfo, SkillMarketSource, SkillPreviewItem, SkillPreviewResult } from '../../types'
 import Markdown from '../../components/Markdown'
 import { Btn, Field, Modal, TextInput } from '../settings/primitives'
 import { SegTabs } from './SegTabs'
@@ -27,7 +27,11 @@ import { product } from '@product'
 type Tab = 'market' | 'upload' | 'create'
 
 const uploadOnly = product.skills?.uploadOnly === true
-const initialTab: Tab = uploadOnly ? 'upload' : 'market'
+// A product catalogue takes the market tab; without one, the online sources do
+// unless the product only allows uploads.
+const ProductMarket = product.skills?.Market
+const hasMarketTab = !!ProductMarket || !uploadOnly
+const initialTab: Tab = hasMarketTab ? 'market' : 'upload'
 type Step = 'input' | 'preview' | 'done'
 type UploadFile = { file: File; path: string }
 
@@ -130,12 +134,14 @@ async function collectDropped(dt: DataTransfer): Promise<UploadFile[]> {
 interface SkillAddModalProps {
   open: boolean
   onClose: () => void
+  /** What is installed now, handed to a product catalogue. */
+  installed: SkillInfo[]
   onInstalled: (names: string[]) => void
   /** A skill written from the create tab; the dialog is the caller's to close. */
   onCreated: (name: string) => void
 }
 
-const SkillAddModal: React.FC<SkillAddModalProps> = ({ open, onClose, onInstalled, onCreated }) => {
+const SkillAddModal: React.FC<SkillAddModalProps> = ({ open, onClose, installed: installedSkills, onInstalled, onCreated }) => {
   const [tab, setTab] = useState<Tab>(initialTab)
   const [source, setSource] = useState<SkillMarketSource>('hub')
   const [value, setValue] = useState('')
@@ -282,9 +288,9 @@ const SkillAddModal: React.FC<SkillAddModalProps> = ({ open, onClose, onInstalle
     footer = (
       <>
         <Btn onClick={close} disabled={busy && tab === 'create'}>
-          {t('mcp_cancel')}
+          {t(tab === 'market' && ProductMarket ? 'skill_done' : 'mcp_cancel')}
         </Btn>
-        {tab === 'market' && (
+        {tab === 'market' && !ProductMarket && (
           <Btn variant="primary" onClick={fetchPreview} disabled={busy || !value.trim()} className="inline-flex items-center gap-1.5">
             {busy && <Loader2 size={13} className="animate-spin" />}
             {t(busy ? 'skill_fetching' : 'skill_fetch')}
@@ -335,7 +341,7 @@ const SkillAddModal: React.FC<SkillAddModalProps> = ({ open, onClose, onInstalle
   }
 
   return (
-    <Modal open={open} size="lg" title={t('skill_add')} onClose={close} footer={footer}>
+    <Modal open={open} size={ProductMarket ? 'xl' : 'lg'} title={t(ProductMarket ? 'skill_install_btn' : 'skill_add')} onClose={close} footer={footer}>
       {step === 'input' && (
         <>
           <SegTabs<Tab>
@@ -346,7 +352,9 @@ const SkillAddModal: React.FC<SkillAddModalProps> = ({ open, onClose, onInstalle
               setError('')
             }}
             tabs={[
-              ...(uploadOnly ? [] : [{ value: 'market' as const, label: t('skill_add_tab_market'), icon: Store }]),
+              ...(hasMarketTab
+                ? [{ value: 'market' as const, label: product.skills?.marketLabel || t('skill_add_tab_market'), icon: Store }]
+                : []),
               { value: 'upload', label: t('skill_add_tab_upload'), icon: Upload },
               { value: 'create', label: t('skill_add_tab_create'), icon: SquarePen },
             ]}
@@ -356,7 +364,9 @@ const SkillAddModal: React.FC<SkillAddModalProps> = ({ open, onClose, onInstalle
           <div hidden={tab !== 'create'}>
             <SkillCreateForm active={tab === 'create'} busy={busy} onBusyChange={setBusy} onCreated={onCreated} />
           </div>
-          {tab === 'create' ? null : tab === 'market' ? (
+          {tab === 'create' ? null : tab === 'market' && ProductMarket ? (
+            <ProductMarket installed={installedSkills} onInstalled={onInstalled} />
+          ) : tab === 'market' ? (
             <>
               <Field label={t('skill_source')}>
                 <div className="grid grid-cols-3 gap-2">

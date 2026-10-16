@@ -680,6 +680,8 @@ export interface ConfigData {
   // Real password, only returned to the desktop app (trusted local machine) so
   // it can be edited in place. Undefined for browser access.
   web_password?: string
+  // Registry used for installs by name; empty means the default Skill Hub.
+  skill_hub_url?: string
 }
 
 // ============================================================
@@ -962,11 +964,26 @@ export interface SkillInfo {
   name: string
   display_name?: string
   description: string
+  /** Shown in place of `description`, which stays what the agent reads */
+  display_description?: string
   source?: string
   enabled: boolean
   category?: string
+  icon?: string
+  version?: string
+  /** Epoch seconds the skill first showed up in the library */
+  installed_at?: number
   ships_with_install?: boolean
   deletable?: boolean
+}
+
+/** What an installer records about a skill it installs; every field is optional. */
+export interface SkillInstallMeta {
+  category?: string
+  display_name?: string
+  display_description?: string
+  icon?: string
+  version?: string
 }
 
 export type McpTransport = 'stdio' | 'sse' | 'streamable-http'

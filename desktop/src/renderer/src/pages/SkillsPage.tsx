@@ -27,6 +27,9 @@ import {
   Clock,
   Brain,
   Wrench,
+  Wand2,
+  BookOpen,
+  Image as ImageIcon,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { t } from '../i18n'
@@ -42,6 +45,7 @@ import McpEditorModal from './skills/McpEditorModal'
 import SkillAddModal from './skills/SkillAddModal'
 import { formatSkillFileSize } from './skills/SkillCreateForm'
 import { parseSkillFrontmatter } from './skills/frontmatter'
+import { skillLabel } from './skills/skillLabel'
 import { MCP_TRANSPORT_LABELS, mcpTransport } from './skills/mcpConfig'
 import { product } from '@product'
 
@@ -311,6 +315,65 @@ function mcpStatusClass(status?: string): string {
   return 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
 }
 
+// Built-in skills, in the order they lead the list, with an icon for what each does.
+const BUILTIN_SKILLS: { name: string; icon: LucideIcon; tone: string }[] = [
+  { name: 'skill-creator', icon: Wand2, tone: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
+  { name: 'knowledge-wiki', icon: BookOpen, tone: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
+  { name: 'image-generation', icon: ImageIcon, tone: 'bg-sky-500/10 text-sky-600 dark:text-sky-400' },
+]
+
+function builtinRank(skill: SkillInfo): number {
+  if (!skill.ships_with_install) return -1
+  const i = BUILTIN_SKILLS.findIndex((b) => b.name === skill.name)
+  return i < 0 ? BUILTIN_SKILLS.length : i
+}
+
+function compareInstalled(a: SkillInfo, b: SkillInfo): number {
+  const ra = builtinRank(a)
+  const rb = builtinRank(b)
+  if (ra >= 0 || rb >= 0) {
+    if (ra < 0) return 1
+    if (rb < 0) return -1
+    return ra - rb
+  }
+  return (b.installed_at || 0) - (a.installed_at || 0)
+}
+
+const SkillIcon: React.FC<{ skill: SkillInfo }> = ({ skill }) => {
+  const [broken, setBroken] = useState(false)
+  useEffect(() => setBroken(false), [skill.icon])
+  if (skill.icon && !broken) {
+    return (
+      <img
+        src={skill.icon}
+        alt=""
+        draggable={false}
+        referrerPolicy="no-referrer"
+        onError={() => setBroken(true)}
+        className={`w-9 h-9 rounded-lg object-cover flex-shrink-0 ${skill.enabled ? '' : 'opacity-50 grayscale'}`}
+      />
+    )
+  }
+  const builtin = skill.ships_with_install ? BUILTIN_SKILLS.find((b) => b.name === skill.name) : undefined
+  if (builtin) {
+    const Icon = builtin.icon
+    return (
+      <div
+        className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
+          skill.enabled ? builtin.tone : 'bg-inset-2 text-content-tertiary'
+        }`}
+      >
+        <Icon size={16} />
+      </div>
+    )
+  }
+  return (
+    <div className="w-9 h-9 rounded-lg bg-accent-soft flex items-center justify-center flex-shrink-0">
+      <Zap size={15} className={skill.enabled ? 'text-accent' : 'text-content-tertiary'} />
+    </div>
+  )
+}
+
 const cardClass = 'rounded-card border border-default bg-surface p-4 flex items-start gap-3'
 const iconBtnClass = 'flex-shrink-0 p-1 -my-1 rounded text-content-tertiary transition-colors cursor-pointer'
 
@@ -320,6 +383,7 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
   const [servers, setServers] = useState<McpServerConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [toolsExpanded, setToolsExpanded] = useState(false)
+  const [tab, setTab] = useState<'skills' | 'tools'>('skills')
   // undefined: closed; null: adding; a config: editing that server.
   const [editing, setEditing] = useState<McpServerConfig | null | undefined>(undefined)
   const [addingSkill, setAddingSkill] = useState(false)
@@ -442,7 +506,7 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
   const openSkillForEdit = async (skill: SkillInfo) => {
     await skillEditor
       .getState()
-      .open({ name: skill.name, label: skill.display_name || skill.name })
+      .open({ name: skill.name, label: skillLabel(skill).name })
     await skillEditor.getState().startEdit()
   }
 
@@ -522,6 +586,14 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
   }
 
   const visibleTools = toolsExpanded ? tools : tools.slice(0, TOOLS_COLLAPSED_COUNT)
+  const Market = product.skills?.Market
+  const skillsFirst = !!product.skills?.skillsFirst
+  const showTools = !skillsFirst || tab === 'tools'
+  const showSkills = !skillsFirst || tab === 'skills'
+  // With a catalogue to install from: built-in skills first in a fixed order,
+  // then the rest newest first, so an install lands at the top of them.
+  const visibleSkills = Market ? [...skills].sort(compareInstalled) : skills
+  const openSkillVersion = doc ? skills.find((s) => s.name === doc.name)?.version : undefined
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -530,6 +602,22 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
           <h2 className="text-xl font-bold text-content">{t('skills_title')}</h2>
           <p className="text-xs text-content-tertiary mt-1">{t('skills_desc')}</p>
         </div>
+        {skillsFirst && !doc && (
+          <div className="flex items-center gap-0.5 p-0.5 rounded-btn border border-default">
+            {(['skills', 'tools'] as const).map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setTab(key)}
+                className={`px-3 py-1 rounded-btn text-xs font-medium transition-colors cursor-pointer ${
+                  tab === key ? 'bg-accent-soft text-accent' : 'text-content-secondary hover:bg-surface-2'
+                }`}
+              >
+                {t(key === 'skills' ? 'skills_section_title' : 'skills_tab_tools')}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <DocNotice store={skillEditor} />
@@ -544,7 +632,7 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
               <ArrowLeft size={14} />
               {t('skill_back')}
             </button>
-            <h3 className="flex-1 text-sm font-semibold text-content truncate">
+            <h3 className="min-w-0 text-sm font-semibold text-content truncate">
               {doc.path ? `${doc.label}/${doc.path}` : doc.label}
               {edit?.dirty && (
                 <span className="text-accent" title={t('ws_edit_unsaved')}>
@@ -553,6 +641,13 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
                 </span>
               )}
             </h3>
+            <span className="flex-1 min-w-0 flex items-center">
+              {openSkillVersion && (
+                <span className="px-1.5 py-0.5 rounded text-[11px] font-medium text-content-tertiary bg-inset">
+                  v{openSkillVersion}
+                </span>
+              )}
+            </span>
             {readonly && !docLoading && (
               <span
                 title={readonly}
@@ -624,203 +719,209 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
             </div>
           ) : (
             <div className="space-y-10">
-              <Section
-                title={t('tools_section_title')}
-                count={tools.length}
-                action={
-                  tools.length > TOOLS_COLLAPSED_COUNT && (
-                    <LinkBtn onClick={() => setToolsExpanded((v) => !v)}>
-                      {t(toolsExpanded ? 'tools_collapse' : 'tools_show_all')}
-                      <ChevronDown size={12} className={`transition-transform ${toolsExpanded ? 'rotate-180' : ''}`} />
-                    </LinkBtn>
-                  )
-                }
-              >
-                {tools.length === 0 ? (
-                  <p className="text-sm text-content-tertiary py-2">{t('tools_empty')}</p>
-                ) : (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {visibleTools.map((tool) => {
-                      const Icon = TOOL_ICONS[tool.name] || Wrench
-                      return (
-                        <div key={tool.name} className={cardClass}>
-                          <div className="w-9 h-9 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-                            <Icon size={15} className="text-blue-500" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <span className="block text-sm font-medium text-content font-mono truncate">{tool.name}</span>
-                            <p className="text-xs text-content-tertiary leading-relaxed mt-1 line-clamp-2">{tool.description || '--'}</p>
-                          </div>
-                        </div>
+              {showTools && (
+                <>
+                  <Section
+                    title={t('tools_section_title')}
+                    count={tools.length}
+                    action={
+                      tools.length > TOOLS_COLLAPSED_COUNT && (
+                        <LinkBtn onClick={() => setToolsExpanded((v) => !v)}>
+                          {t(toolsExpanded ? 'tools_collapse' : 'tools_show_all')}
+                          <ChevronDown size={12} className={`transition-transform ${toolsExpanded ? 'rotate-180' : ''}`} />
+                        </LinkBtn>
                       )
-                    })}
-                  </div>
-                )}
-              </Section>
-
-              <Section
-                title={t('mcp_section_title')}
-                count={servers.length}
-                action={
-                  <ActionBtn onClick={() => setEditing(null)}>
-                    <Plus size={12} />
-                    {t('mcp_add')}
-                  </ActionBtn>
-                }
-              >
-                {mcpError && <p className="mb-3 text-sm text-danger">{mcpError}</p>}
-                {servers.length === 0 ? (
-                  !mcpError && (
-                    <EmptyState icon={Plug} title={t('mcp_empty')} hint={t('mcp_empty_hint')} tone="amber" />
-                  )
-                ) : (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {servers.map((server) => {
-                      const type = mcpTransport(server)
-                      const summary =
-                        type === 'stdio'
-                          ? [server.command, ...(server.args || [])].filter(Boolean).join(' ')
-                          : server.url || ''
-                      return (
-                        <div
-                          key={server.name}
-                          onClick={() => setEditing(server)}
-                          className={`${cardClass} cursor-pointer hover:border-strong transition-colors`}
-                        >
-                          <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
-                            <Plug size={15} className={server.status === 'disabled' ? 'text-content-tertiary' : 'text-amber-500'} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="text-sm font-medium text-content font-mono truncate">{server.name}</span>
-                              <span className="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-inset-2 text-content-tertiary">
-                                {MCP_TRANSPORT_LABELS[type] || type}
-                              </span>
-                              <span className={`flex-shrink-0 px-1.5 py-0.5 rounded-full text-[10px] ${mcpStatusClass(server.status)}`}>
-                                {mcpStatusLabel(server.status)}
-                              </span>
-                              <span className="flex-1" />
-                              <button
-                                type="button"
-                                title={t('mcp_edit')}
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setEditing(server)
-                                }}
-                                className={`${iconBtnClass} hover:text-content-secondary`}
-                              >
-                                <Pencil size={11} />
-                              </button>
-                              <button
-                                type="button"
-                                title={t('mcp_delete')}
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  void removeServer(server.name)
-                                }}
-                                className={`${iconBtnClass} hover:text-red-500`}
-                              >
-                                <Trash2 size={11} />
-                              </button>
+                    }
+                  >
+                    {tools.length === 0 ? (
+                      <p className="text-sm text-content-tertiary py-2">{t('tools_empty')}</p>
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {visibleTools.map((tool) => {
+                          const Icon = TOOL_ICONS[tool.name] || Wrench
+                          return (
+                            <div key={tool.name} className={cardClass}>
+                              <div className="w-9 h-9 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                                <Icon size={15} className="text-blue-500" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <span className="block text-sm font-medium text-content font-mono truncate">{tool.name}</span>
+                                <p className="text-xs text-content-tertiary leading-relaxed mt-1 line-clamp-2">{tool.description || '--'}</p>
+                              </div>
                             </div>
-                            <p className="text-xs text-content-tertiary font-mono truncate" title={summary}>
-                              {summary || '--'}
-                            </p>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </Section>
-
-              <Section
-                title={t('skills_section_title')}
-                count={skills.length}
-                action={
-                  <>
-                    {!product.skills?.uploadOnly && (
-                      <a
-                        href={SKILL_HUB_URL}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-btn text-xs text-content-tertiary hover:text-content-secondary hover:bg-surface-2 transition-colors"
-                      >
-                        <Compass size={12} />
-                        {t('skills_hub_btn')}
-                        <ExternalLink size={10} className="opacity-60" />
-                      </a>
-                    )}
-                    <ActionBtn onClick={() => setAddingSkill(true)}>
-                      <Plus size={12} />
-                      {t('skill_add')}
-                    </ActionBtn>
-                  </>
-                }
-              >
-                {skillError && <p className="mb-3 text-sm text-danger">{skillError}</p>}
-                {skills.length === 0 ? (
-                  <EmptyState icon={Zap} title={t('skills_empty')} hint={t(product.skills?.uploadOnly ? 'skills_empty_hint_upload' : 'skills_empty_hint')} tone="accent" />
-                ) : (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {skills.map((skill) => (
-                      <div
-                        key={skill.name}
-                        onClick={() =>
-                          void skillEditor
-                            .getState()
-                            .open({ name: skill.name, label: skill.display_name || skill.name })
-                        }
-                        title={t('skill_open_hint')}
-                        className={`${cardClass} cursor-pointer transition-all ${
-                          freshSkills.has(skill.name)
-                            ? 'border-accent shadow-[0_0_0_3px_var(--accent-soft)]'
-                            : 'hover:border-strong'
-                        }`}
-                      >
-                        <div className="w-9 h-9 rounded-lg bg-accent-soft flex items-center justify-center flex-shrink-0">
-                          <Zap size={15} className={skill.enabled ? 'text-accent' : 'text-content-tertiary'} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-sm font-medium text-content truncate flex-1">
-                              {skill.display_name || skill.name}
-                            </span>
-                            <button
-                              type="button"
-                              title={t('skill_edit_hint')}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                void openSkillForEdit(skill)
-                              }}
-                              className={`${iconBtnClass} hover:text-content-secondary`}
-                            >
-                              <Pencil size={11} />
-                            </button>
-                            {skill.deletable && (
-                              <button
-                                type="button"
-                                title={t('skill_delete')}
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  void uninstall(skill.name)
-                                }}
-                                className={`${iconBtnClass} hover:text-red-500`}
-                              >
-                                <Trash2 size={11} />
-                              </button>
-                            )}
-                            <span onClick={(e) => e.stopPropagation()}>
-                              <Toggle checked={skill.enabled} onChange={(v) => toggle(skill, v)} />
-                            </span>
-                          </div>
-                          <p className="text-xs text-content-tertiary leading-relaxed line-clamp-2">{skill.description || '--'}</p>
-                        </div>
+                          )
+                        })}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </Section>
+                    )}
+                  </Section>
+
+                  <Section
+                    title={t('mcp_section_title')}
+                    count={servers.length}
+                    action={
+                      <ActionBtn onClick={() => setEditing(null)}>
+                        <Plus size={12} />
+                        {t('mcp_add')}
+                      </ActionBtn>
+                    }
+                  >
+                    {mcpError && <p className="mb-3 text-sm text-danger">{mcpError}</p>}
+                    {servers.length === 0 ? (
+                      !mcpError && (
+                        <EmptyState icon={Plug} title={t('mcp_empty')} hint={t('mcp_empty_hint')} tone="amber" />
+                      )
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {servers.map((server) => {
+                          const type = mcpTransport(server)
+                          const summary =
+                            type === 'stdio'
+                              ? [server.command, ...(server.args || [])].filter(Boolean).join(' ')
+                              : server.url || ''
+                          return (
+                            <div
+                              key={server.name}
+                              onClick={() => setEditing(server)}
+                              className={`${cardClass} cursor-pointer hover:border-strong transition-colors`}
+                            >
+                              <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+                                <Plug size={15} className={server.status === 'disabled' ? 'text-content-tertiary' : 'text-amber-500'} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-sm font-medium text-content font-mono truncate">{server.name}</span>
+                                  <span className="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-inset-2 text-content-tertiary">
+                                    {MCP_TRANSPORT_LABELS[type] || type}
+                                  </span>
+                                  <span className={`flex-shrink-0 px-1.5 py-0.5 rounded-full text-[10px] ${mcpStatusClass(server.status)}`}>
+                                    {mcpStatusLabel(server.status)}
+                                  </span>
+                                  <span className="flex-1" />
+                                  <button
+                                    type="button"
+                                    title={t('mcp_edit')}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setEditing(server)
+                                    }}
+                                    className={`${iconBtnClass} hover:text-content-secondary`}
+                                  >
+                                    <Pencil size={11} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title={t('mcp_delete')}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      void removeServer(server.name)
+                                    }}
+                                    className={`${iconBtnClass} hover:text-red-500`}
+                                  >
+                                    <Trash2 size={11} />
+                                  </button>
+                                </div>
+                                <p className="text-xs text-content-tertiary font-mono truncate" title={summary}>
+                                  {summary || '--'}
+                                </p>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </Section>
+                </>
+              )}
+
+              {showSkills && (
+                <>
+                  <Section
+                    title={t(Market ? 'skills_installed_title' : 'skills_section_title')}
+                    count={skills.length}
+                    action={
+                      <>
+                        {!product.skills?.uploadOnly && (
+                          <a
+                            href={SKILL_HUB_URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-btn text-xs text-content-tertiary hover:text-content-secondary hover:bg-surface-2 transition-colors"
+                          >
+                            <Compass size={12} />
+                            {t('skills_hub_btn')}
+                            <ExternalLink size={10} className="opacity-60" />
+                          </a>
+                        )}
+                        <ActionBtn onClick={() => setAddingSkill(true)}>
+                          <Plus size={12} />
+                          {t(Market ? 'skill_install_btn' : 'skill_add')}
+                        </ActionBtn>
+                      </>
+                    }
+                  >
+                    {skillError && <p className="mb-3 text-sm text-danger">{skillError}</p>}
+                    {skills.length === 0 ? (
+                      <EmptyState icon={Zap} title={t('skills_empty')} hint={t(product.skills?.uploadOnly ? 'skills_empty_hint_upload' : 'skills_empty_hint')} tone="accent" />
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {visibleSkills.map((skill) => (
+                          <div
+                            key={skill.name}
+                            onClick={() =>
+                              void skillEditor
+                                .getState()
+                                .open({ name: skill.name, label: skillLabel(skill).name })
+                            }
+                            title={t('skill_open_hint')}
+                            className={`${cardClass} cursor-pointer transition-all ${
+                              freshSkills.has(skill.name)
+                                ? 'border-accent shadow-[0_0_0_3px_var(--accent-soft)]'
+                                : 'hover:border-strong'
+                            }`}
+                          >
+                            <SkillIcon skill={skill} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-sm font-medium text-content truncate flex-1">
+                                  {skillLabel(skill).name}
+                                </span>
+                                <button
+                                  type="button"
+                                  title={t('skill_edit_hint')}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    void openSkillForEdit(skill)
+                                  }}
+                                  className={`${iconBtnClass} hover:text-content-secondary`}
+                                >
+                                  <Pencil size={11} />
+                                </button>
+                                {skill.deletable && (
+                                  <button
+                                    type="button"
+                                    title={t('skill_delete')}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      void uninstall(skill.name)
+                                    }}
+                                    className={`${iconBtnClass} hover:text-red-500`}
+                                  >
+                                    <Trash2 size={11} />
+                                  </button>
+                                )}
+                                <span onClick={(e) => e.stopPropagation()}>
+                                  <Toggle checked={skill.enabled} onChange={(v) => toggle(skill, v)} />
+                                </span>
+                              </div>
+                              <p className="text-xs text-content-tertiary leading-relaxed line-clamp-2">{skillLabel(skill).description || '--'}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Section>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -835,6 +936,7 @@ const SkillsPage: React.FC<SkillsPageProps> = ({ baseUrl }) => {
       />
       <SkillAddModal
         open={addingSkill}
+        installed={skills}
         onClose={() => setAddingSkill(false)}
         onInstalled={onSkillsInstalled}
         onCreated={(name) => {
