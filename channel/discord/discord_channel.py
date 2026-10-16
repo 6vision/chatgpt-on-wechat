@@ -27,6 +27,7 @@ from channel.chat_channel import ChatChannel, check_prefix
 from channel.discord.discord_message import DiscordMessage
 from common.expired_dict import ExpiredDict
 from common.log import logger
+from common.media_download import MAX_FILE_BYTES, MAX_IMAGE_BYTES
 from common.singleton import singleton
 from config import conf
 
@@ -305,12 +306,18 @@ class DiscordChannel(ChatChannel):
             att = attachments[0]
             content_type = (att.content_type or "").lower()
             name = att.filename or str(att.id)
-            path = await self._download_attachment(att, name)
-            if not path:
-                return (None, None, "")
             is_image = content_type.startswith("image/") or name.lower().endswith(
                 (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
             )
+            # attachment.save() buffers the whole body, so check the reported size first.
+            limit = MAX_IMAGE_BYTES if is_image else MAX_FILE_BYTES
+            size = getattr(att, "size", None)
+            if isinstance(size, int) and size > limit:
+                logger.warning(f"[Discord] attachment {name} is {size} bytes, over the {limit} limit; skipped")
+                return (None, None, "")
+            path = await self._download_attachment(att, name)
+            if not path:
+                return (None, None, "")
             if is_image:
                 return (ContextType.IMAGE, path, text)
             return (ContextType.FILE, path, text)
