@@ -369,9 +369,13 @@ class WorkspaceService:
         """
         full = self._resolve_file(rel_path)
         max_bytes = max(1, min(int(max_bytes or MAX_TEXT_BYTES), MAX_TEXT_BYTES))
-        size = os.path.getsize(full)
         with open(full, "rb") as f:
+            # An atomic writer can replace the path while this descriptor is
+            # open. The editor baseline must describe the bytes we read,
+            # rather than the replacement now reachable through the path.
+            snapshot = os.fstat(f.fileno())
             raw = f.read(max_bytes)
+        size = snapshot.st_size
         truncated = size > len(raw)
         content, lossy = _decode_utf8(raw)
         return {
@@ -380,7 +384,7 @@ class WorkspaceService:
             "truncated": truncated,
             "lossy": lossy,
             "size": size,
-            "mtime": os.path.getmtime(full),
+            "mtime": snapshot.st_mtime,
             # Neither a partial read nor a lossy decode may be edited: saving
             # would truncate the tail in the first case and write replacement
             # characters over every undecodable byte in the second.

@@ -779,7 +779,8 @@ class DingTalkChanel(ChatChannel, dingtalk_stream.ChatbotHandler):
         if conf().get("group_shared_session", True):
             session_id = cmsg.other_user_id  # conversation_id
         else:
-            session_id = cmsg.from_user_id + "_" + cmsg.other_user_id
+            # from_user_id is the conversation id for DingTalk groups; the sender is actual_user_id
+            session_id = f"{cmsg.actual_user_id}_{cmsg.other_user_id}"
         
         if cmsg.ctype is None:
             return

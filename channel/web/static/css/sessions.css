@@ -9,6 +9,14 @@
 }
 .sidebar-item.active .item-icon { color: #4ABE6E; }
 
+/* Nav scrollbar only shows on hover. Width stays fixed and only the thumb
+   color changes, so items don't shift when it appears. */
+#sidebar-nav { scrollbar-color: transparent transparent; }
+#sidebar-nav:hover { scrollbar-color: rgba(255, 255, 255, 0.18) transparent; }
+#sidebar-nav::-webkit-scrollbar-thumb { background: transparent; }
+#sidebar-nav:hover::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.18); }
+#sidebar-nav:hover::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
+
 /* Rail toggle in the sidebar footer */
 .sidebar-collapse-btn {
     flex-shrink: 0;
