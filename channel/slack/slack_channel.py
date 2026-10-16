@@ -31,6 +31,12 @@ from common.singleton import singleton
 from config import conf
 
 
+# `message` event subtypes that carry something a user typed or shared; every other subtype
+# (bot_message, message_changed/deleted, channel_join/leave/topic/purpose/name, pinned_item, ...)
+# is Slack bookkeeping and must not be answered as a prompt.
+_USER_MESSAGE_SUBTYPES = (None, "file_share", "thread_broadcast", "me_message")
+
+
 @singleton
 class SlackChannel(ChatChannel):
     NOT_SUPPORT_REPLYTYPE = []
@@ -166,8 +172,9 @@ class SlackChannel(ChatChannel):
                 f"subtype={event.get('subtype')}, user={event.get('user')}, "
                 f"ts={event.get('ts')}, thread_ts={event.get('thread_ts')}"
             )
-            # Ignore bot messages (including our own) and message edits/deletes
-            if event.get("bot_id") or event.get("subtype") in ("bot_message", "message_changed", "message_deleted"):
+            # Ignore bot messages (including our own), edits/deletes and workspace notices
+            # (channel_join, channel_topic, pinned_item, ...): only ordinary user messages count
+            if event.get("bot_id") or event.get("subtype") not in _USER_MESSAGE_SUBTYPES:
                 return
             if event.get("user") == self.bot_user_id:
                 return

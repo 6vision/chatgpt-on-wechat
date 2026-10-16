@@ -67,3 +67,44 @@ def test_whitelisted_group_message_still_marks_no_need_at(monkeypatch):
 
     assert produced == [context]
     assert context["no_need_at"] is True
+
+
+def _file_message(path, msg_id, sender, conversation="conv-1"):
+    return SimpleNamespace(
+        ctype=ContextType.FILE,
+        content=str(path),
+        file_path=str(path),
+        msg_id=msg_id,
+        create_time=str(int(time.time())),
+        my_msg=False,
+        is_group=True,
+        other_user_id=conversation,
+        from_user_id=conversation,  # DingTalkMessage sets the conversation id here for groups
+        actual_user_id=sender,
+    )
+
+
+def _text_message(msg_id, sender, conversation="conv-1"):
+    msg = _file_message("", msg_id, sender, conversation)
+    msg.ctype = ContextType.TEXT
+    msg.content = "question"
+    return msg
+
+
+def test_uploaded_file_is_not_attached_to_another_members_message(monkeypatch, tmp_path):
+    """With the default per-member sessions, a file belongs to the member who uploaded it."""
+    from channel.dingtalk import dingtalk_channel as mod
+
+    ch, _ = _group_channel(monkeypatch, None)
+    monkeypatch.setattr(mod, "conf", lambda: {"group_shared_session": False})
+    seen = []
+    ch._compose_context = lambda ctype, content, **kwargs: seen.append(content)
+    upload = tmp_path / "report.txt"
+    upload.write_text("private")
+
+    ch.handle_group(_file_message(upload, "m1", sender="alice"))
+    ch.handle_group(_text_message("m2", sender="bob"))
+    ch.handle_group(_text_message("m3", sender="alice"))
+
+    assert str(upload) not in seen[0]
+    assert str(upload) in seen[1]

@@ -533,6 +533,7 @@ class MinimaxBot(Bot):
         Args:
             request_body: API request parameters
         """
+        response = None
         try:
             headers = {
                 "Content-Type": "application/json",
@@ -709,3 +710,7 @@ class MinimaxBot(Bot):
             import traceback
             logger.error(traceback.format_exc())
             yield {"error": True, "message": str(e), "status_code": 500}
+
+        finally:
+            if response is not None:
+                response.close()

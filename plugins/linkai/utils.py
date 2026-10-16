@@ -16,10 +16,9 @@ class Util:
         context = e_context["context"]
         if context["isgroup"]:
             actual_user_id = context.kwargs.get("msg").actual_user_id
-            for admin_user in global_config["admin_users"]:
-                if actual_user_id and actual_user_id in admin_user:
-                    return True
-            return False
+            # exact membership: ``in`` on each configured id was a substring test, so a
+            # member whose id is a fragment of an admin's id (e.g. "wxid") passed
+            return bool(actual_user_id) and actual_user_id in global_config["admin_users"]
         else:
             return context["receiver"] in global_config["admin_users"]
 

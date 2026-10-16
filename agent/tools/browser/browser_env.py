@@ -22,9 +22,6 @@ import sys
 import shutil
 from typing import Optional, Dict, Any
 
-from common.log import logger
-
-
 # Playwright browser channels we accept for the "system-chrome" mode, in
 # preference order. "chrome" covers stable Google Chrome; "msedge" is the
 # Chromium-based Edge shipped on every Windows 10/11.
@@ -51,7 +48,18 @@ def browsers_download_dir() -> str:
     Playwright's default (~/.cache/ms-playwright or %USERPROFILE%). This keeps
     the frozen desktop build self-contained and makes the download survive app
     updates. Set as PLAYWRIGHT_BROWSERS_PATH for both install and runtime.
+
+    An explicit PLAYWRIGHT_BROWSERS_PATH wins over the ~/.cow default. The
+    Docker image presets it to /app/ms-playwright, where the build bakes
+    Chromium in; honouring it here keeps the installer, the capability probe
+    below and Playwright's own launcher pointing at one directory. Ignoring it
+    made has_downloaded_chromium() look under ~/.cow/ms-playwright while the
+    launcher used /app/ms-playwright, so the bundled Chromium was reported
+    missing even though it launched fine.
     """
+    env_dir = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if env_dir:
+        return os.path.expanduser(env_dir)
     return os.path.join(get_data_root(), "ms-playwright")
 
 
