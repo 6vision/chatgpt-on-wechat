@@ -857,6 +857,7 @@ class ChatService:
                 return True
         except Exception:
             pass
+        stored = False
         try:
             from agent.memory import get_conversation_store
             store = get_conversation_store(workspace_root)
@@ -875,7 +876,8 @@ class ChatService:
             logger.warning(
                 f"[ChatService] Failed to persist messages for session={session_id}: {e}"
             )
-            return False
+            # Artifact indexing happens after the append committed; do not replay it.
+            return bool(stored)
 
 
 class _StreamState:
