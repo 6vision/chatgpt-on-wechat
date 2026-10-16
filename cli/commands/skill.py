@@ -400,7 +400,7 @@ def _register_installed_skill(name: str, source: str = "cowhub", display_name: s
     config = {}
     if os.path.exists(config_path):
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, "r", encoding="utf-8-sig") as f:
                 config = json.load(f)
         except Exception:
             config = {}
@@ -1722,7 +1722,7 @@ def uninstall(name, yes):
     config_path = os.path.join(skills_dir, "skills_config.json")
     if os.path.exists(config_path):
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, "r", encoding="utf-8-sig") as f:
                 config = json.load(f)
             config.pop(name, None)
             _write_skills_config(config, skills_dir)
@@ -1766,7 +1766,7 @@ def _set_enabled(name, enabled):
         sys.exit(1)
 
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, "r", encoding="utf-8-sig") as f:
             config = json.load(f)
     except Exception as e:
         click.echo(f"Error: Failed to read skills config: {e}", err=True)
