@@ -22,3 +22,9 @@ def test_true_boolean_and_string_flags_remain_enabled():
     for value in [True, 'true', 'yes', 'on']:
         metadata = parse_metadata({'metadata': {'always': value}})
         assert metadata.always is True
+
+
+def test_numeric_flags_keep_their_truthiness():
+    metadata = parse_metadata({'metadata': {'always': 1, 'default_enabled': 0}})
+    assert metadata.always is True
+    assert metadata.default_enabled is False

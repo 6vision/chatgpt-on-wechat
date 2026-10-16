@@ -194,7 +194,10 @@ def parse_boolean_value(value: Optional[str], default: bool = False) -> bool:
     
     if isinstance(value, bool):
         return value
-    
+
+    if isinstance(value, (int, float)):
+        return bool(value)
+
     if isinstance(value, str):
         return value.lower() in ('true', '1', 'yes', 'on')
     
