@@ -57,7 +57,7 @@ class OpenaiVoice(Voice):
                 # reportable instead of letting the decode error mask the
                 # status code that explains what actually went wrong.
                 response_data = {"raw": response.text[:200]}
-            if response.status_code != 200 or "text" not in response_data:
+            if response.status_code != 200 or not isinstance(response_data, dict) or not isinstance(response_data.get("text"), str):
                 logger.error(
                     f"[Openai] voiceToText failed: status={response.status_code}, "
                     f"resp={response_data}"
