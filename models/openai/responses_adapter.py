@@ -271,17 +271,25 @@ def _cc_usage(usage: Any) -> Optional[Dict[str, Any]]:
 
 def _status_to_finish_reason(response: Dict[str, Any], has_tool_calls: bool) -> str:
     status = response.get("status")
-    if has_tool_calls:
-        return "tool_calls"
     if status == "incomplete":
         details = response.get("incomplete_details") or {}
         if details.get("reason") == "max_output_tokens":
             return "length"
+    if has_tool_calls:
+        return "tool_calls"
     return "stop"
 
 
 def responses_to_chat_completion(response: Dict[str, Any]) -> Dict[str, Any]:
     """Convert a non-streaming Responses object into a Chat-Completions dict."""
+    if response.get("status") == "failed":
+        error = response.get("error") or {}
+        message = error.get("message") if isinstance(error, dict) else str(error)
+        return {
+            "error": error or True,
+            "message": message or "Responses request failed",
+            "status_code": 500,
+        }
     text_parts: List[str] = []
     tool_calls: List[Dict[str, Any]] = []
     for item in response.get("output") or []:
@@ -290,8 +298,9 @@ def responses_to_chat_completion(response: Dict[str, Any]) -> Dict[str, Any]:
         itype = item.get("type")
         if itype == "message":
             for part in item.get("content") or []:
-                if isinstance(part, dict) and part.get("type") == "output_text":
-                    text_parts.append(str(part.get("text") or ""))
+                if isinstance(part, dict) and part.get("type") in ("output_text", "refusal"):
+                    field = "refusal" if part.get("type") == "refusal" else "text"
+                    text_parts.append(str(part.get(field) or ""))
         elif itype == "function_call":
             tool_calls.append({
                 "id": item.get("call_id") or item.get("id") or "",
@@ -368,7 +377,7 @@ def responses_stream_to_chat_chunks(
 
         etype = event.get("type")
 
-        if etype == "response.output_text.delta":
+        if etype in ("response.output_text.delta", "response.refusal.delta"):
             delta = event.get("delta")
             if delta:
                 yield _text_chunk(model, {"content": str(delta)})

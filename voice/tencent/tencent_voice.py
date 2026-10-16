@@ -2,6 +2,7 @@ import json
 import base64
 import os
 import time
+import uuid
 from voice.voice import Voice
 from common.log import logger
 from tencentcloud.common import credential
@@ -105,7 +106,7 @@ class TencentVoice(Voice):
             response = client.TextToVoice(req)
             
             if response.Audio:
-                fileName = TmpDir().path() + "reply-" + str(int(time.time())) + "-" + str(hash(text) & 0x7FFFFFFF) + ".mp3"
+                fileName = TmpDir().path() + "reply-" + uuid.uuid4().hex + ".mp3"
                 with open(fileName, "wb") as f:
                     f.write(base64.b64decode(response.Audio))
                 logger.info("[Tencent] textToVoice text={} voice file name={}".format(text, fileName))

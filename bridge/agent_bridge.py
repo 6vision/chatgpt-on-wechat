@@ -989,16 +989,9 @@ class AgentBridge:
     @staticmethod
     def _strip_peer_address(query: str, peer) -> str:
         """Drop the leading "@name" aimed at *peer*; see ``_strip_address``."""
-        if not query:
-            return query
-        labels = [label for label in (peer.name, peer.id) if label]
-        pattern = (
-            r"^\s*@(?:"
-            + "|".join(re.escape(label) for label in sorted(labels, key=len, reverse=True))
-            + r")[\s,，:：、]*"
-        )
-        stripped = re.sub(pattern, "", query, count=1, flags=re.IGNORECASE)
-        return stripped if stripped.strip() else query
+        from agent.team_addressing import strip_address
+
+        return strip_address(query, [peer.name, peer.id])
 
     @staticmethod
     def _delegation_timeout() -> float:
@@ -1048,17 +1041,9 @@ class AgentBridge:
             profile = self.agent_registry.get(speaker_agent_id, require_enabled=False)
         except Exception:
             return query
-        labels = [label for label in (profile.name, profile.id) if label]
-        pattern = (
-            r"^\s*@(?:"
-            + "|".join(re.escape(label) for label in sorted(labels, key=len, reverse=True))
-            + r")[\s,，:：、]*"
-        )
-        stripped = re.sub(pattern, "", query, count=1, flags=re.IGNORECASE)
-        # An address with nothing after it is still a question — "@Ops" alone
-        # means "you, speak" — so it keeps the mention rather than reaching the
-        # Agent as an empty turn.
-        return stripped if stripped.strip() else query
+        from agent.team_addressing import strip_address
+
+        return strip_address(query, [profile.name, profile.id])
 
     @staticmethod
     def _attribute_to_speaker(messages: list, speaker_agent_id: str) -> list:
@@ -1751,13 +1736,15 @@ class AgentBridge:
                 messages = self._attribute_to_speaker(messages, speaker_agent_id)
                 messages = self._strip_speaker_prefix_from_messages(messages)
                 if messages:
-                    self._persist_messages(
+                    persisted = self._persist_messages(
                         session_id,
                         list(messages),
                         channel_type,
                         resolved_agent_id,
                         create_if_missing=not pre_persisted,
                     )
+                    if persisted is False:
+                        raise RuntimeError("conversation write failed; step remains pending")
 
             writer = StepWriter(write_reply, skip_query=pre_persisted) if session_id else None
 
@@ -1837,6 +1824,8 @@ class AgentBridge:
                 if pre_persisted and new_messages and new_messages[0].get("role") == "user":
                     new_messages = new_messages[1:]
                 writer.finish(new_messages)
+
+            self.remember_context_usage(agent, session_id, resolved_agent_id)
             
             # Record this user turn for the self-evolution idle trigger. Skip
             # scheduler-injected / scheduled-task sessions so internal runs do
@@ -2130,7 +2119,7 @@ class AgentBridge:
         channel_type: str = "",
         agent_id: str = None,
         create_if_missing: bool = True,
-    ) -> None:
+    ) -> bool:
         """
         Persist new messages to the conversation store after each agent run.
 
@@ -2142,11 +2131,11 @@ class AgentBridge:
         instead of resurrecting the session without its question.
         """
         if not new_messages:
-            return
+            return True
         try:
             from config import conf
             if not conf().get("conversation_persistence", True):
-                return
+                return True
             # When deep-thinking display is disabled, strip "thinking" content
             # blocks before persisting so they don't resurface on history reload.
             # The in-memory message list keeps them intact for this run's
@@ -2169,6 +2158,7 @@ class AgentBridge:
         if not thinking_enabled:
             messages_to_store = self._strip_thinking_blocks(new_messages)
 
+        stored = False
         try:
             store = self.get_conversation_store(agent_id)
             stored = store.append_messages(
@@ -2183,10 +2173,27 @@ class AgentBridge:
                     f"[AgentBridge] Session {session_id} was deleted mid-run, "
                     f"dropped {len(messages_to_store)} reply message(s)"
                 )
+            # A deleted session is an intentional discard, not a retryable failure.
+            return bool(stored) or not create_if_missing
         except Exception as e:
             logger.warning(
                 f"[AgentBridge] Failed to persist messages for session={session_id}: {e}"
             )
+            # Artifact indexing happens after the append committed; do not replay it.
+            return bool(stored)
+
+    def remember_context_usage(
+        self, agent, session_id: str, agent_id: str = None
+    ) -> None:
+        """Store the context usage a run ended on, so the chart survives a restart.
+        Best-effort: never fails the turn."""
+        if not session_id:
+            return
+        try:
+            store = self.get_conversation_store(agent_id)
+            store.set_context_usage(session_id, agent.get_context_usage())
+        except Exception as e:
+            logger.debug(f"[AgentBridge] Context usage snapshot skipped: {e}")
 
     # Marker used to identify scheduler-injected user messages so we can apply
     # a sliding window without touching real user turns. The legacy prefix

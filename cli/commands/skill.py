@@ -73,6 +73,13 @@ def _target_skills_dir(agent_id: str = None) -> str:
     return _staging_dir.get() or get_skills_dir(agent_id)
 
 
+def _replace_skill_dir(source: str, target: str) -> None:
+    _ensure_project_on_path()
+    from common.directory_replace import replace_directory
+
+    replace_directory(source, target)
+
+
 def _parse_github_url(url: str):
     """Parse a full GitHub URL into (owner, repo, branch, subpath).
 
@@ -328,9 +335,7 @@ def _batch_install_skills(discovered, spec, skills_dir, source, result: InstallR
             continue
         target_dir = os.path.join(skills_dir, safe_name)
         _check_skill_copy_paths(sdir, target_dir)
-        if os.path.exists(target_dir):
-            shutil.rmtree(target_dir)
-        shutil.copytree(sdir, target_dir)
+        _replace_skill_dir(sdir, target_dir)
         _register_installed_skill(safe_name, source=source, display_name=display_name if single else "", agent_id=agent_id)
         result.installed.append(safe_name)
         result.messages.append(f"  + {safe_name}")
@@ -366,9 +371,7 @@ def _install_local(path: str, result: InstallResult, agent_id: str = None):
         _check_skill_name(skill_name)
         target_dir = os.path.join(skills_dir, skill_name)
         _check_skill_copy_paths(path, target_dir)
-        if os.path.exists(target_dir):
-            shutil.rmtree(target_dir)
-        shutil.copytree(path, target_dir)
+        _replace_skill_dir(path, target_dir)
         _register_installed_skill(skill_name, source="local", agent_id=agent_id)
         result.installed.append(skill_name)
         result.messages.append(f"Installed '{skill_name}' from local path.")
@@ -400,7 +403,7 @@ def _register_installed_skill(name: str, source: str = "cowhub", display_name: s
     config = {}
     if os.path.exists(config_path):
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, "r", encoding="utf-8-sig") as f:
                 config = json.load(f)
         except Exception:
             config = {}
@@ -555,18 +558,14 @@ def _install_targz_bytes(content: bytes, name: str, skills_dir: str, result: Ins
             if not _SAFE_NAME_RE.match(safe_name):
                 safe_name = name
             target = os.path.join(skills_dir, safe_name)
-            if os.path.exists(target):
-                shutil.rmtree(target)
-            shutil.copytree(sdir, target)
+            _replace_skill_dir(sdir, target)
             _register_installed_skill(safe_name, source=source_label, agent_id=agent_id)
             result.installed.append(safe_name)
             result.messages.append(f"Installed '{safe_name}' from URL.")
             return
 
         target = os.path.join(skills_dir, name)
-        if os.path.exists(target):
-            shutil.rmtree(target)
-        shutil.copytree(pkg_root, target)
+        _replace_skill_dir(pkg_root, target)
         _register_installed_skill(name, source=source_label, agent_id=agent_id)
         result.installed.append(name)
         result.messages.append(f"Installed '{name}' from URL.")
@@ -1212,9 +1211,7 @@ def commit_staged(staging_dir: str, names=None, agent_id: str = None) -> list:
         if not _SAFE_NAME_RE.match(entry):
             continue
         target = os.path.join(skills_dir, entry)
-        if os.path.exists(target):
-            shutil.rmtree(target)
-        shutil.copytree(src, target)
+        _replace_skill_dir(src, target)
         meta = config.get(entry) if isinstance(config.get(entry), dict) else {}
         _register_installed_skill(
             entry,
@@ -1536,9 +1533,7 @@ def _install_github(spec, result: InstallResult, subpath=None, skill_name=None, 
             api_dest = os.path.join(api_tmp, skill_name)
             os.makedirs(api_dest)
             _download_github_dir(owner, repo, branch, subpath.strip("/"), api_dest)
-            if os.path.exists(target_dir):
-                shutil.rmtree(target_dir)
-            shutil.copytree(api_dest, target_dir)
+            _replace_skill_dir(api_dest, target_dir)
         _register_installed_skill(skill_name, source=source, agent_id=agent_id)
         result.installed.append(skill_name)
         result.messages.append(f"Installed '{skill_name}' from GitHub.")
@@ -1562,9 +1557,7 @@ def _install_from_repo_root(repo_root, spec, subpath, skill_name, skills_dir, so
             _check_skill_name(skill_name)
 
             target_dir = os.path.join(skills_dir, skill_name)
-            if os.path.exists(target_dir):
-                shutil.rmtree(target_dir)
-            shutil.copytree(source_dir, target_dir)
+            _replace_skill_dir(source_dir, target_dir)
             _register_installed_skill(skill_name, source=source, agent_id=agent_id)
             result.installed.append(skill_name)
             result.messages.append(f"Installed '{skill_name}' from {source}.")
@@ -1586,9 +1579,7 @@ def _install_from_repo_root(repo_root, spec, subpath, skill_name, skills_dir, so
                 skill_name = spec.split("/")[-1]
                 _check_skill_name(skill_name)
             target_dir = os.path.join(skills_dir, skill_name)
-            if os.path.exists(target_dir):
-                shutil.rmtree(target_dir)
-            shutil.copytree(repo_root, target_dir)
+            _replace_skill_dir(repo_root, target_dir)
             _register_installed_skill(skill_name, source=source, agent_id=agent_id)
             result.installed.append(skill_name)
             result.messages.append(f"Installed '{skill_name}' from {source}.")
@@ -1681,9 +1672,7 @@ def _install_zip_bytes(content, name, skills_dir, result: InstallResult = None, 
             if not _SAFE_NAME_RE.match(safe_name):
                 safe_name = name
             target = os.path.join(skills_dir, safe_name)
-            if os.path.exists(target):
-                shutil.rmtree(target)
-            shutil.copytree(sdir, target)
+            _replace_skill_dir(sdir, target)
             _register_installed_skill(safe_name, source=source_label, display_name=display_name, agent_id=agent_id)
             if result is not None:
                 result.installed.append(safe_name)
@@ -1691,9 +1680,7 @@ def _install_zip_bytes(content, name, skills_dir, result: InstallResult = None, 
             return
 
         target = os.path.join(skills_dir, name)
-        if os.path.exists(target):
-            shutil.rmtree(target)
-        shutil.copytree(pkg_root, target)
+        _replace_skill_dir(pkg_root, target)
 
 
 
@@ -1722,7 +1709,7 @@ def uninstall(name, yes):
     config_path = os.path.join(skills_dir, "skills_config.json")
     if os.path.exists(config_path):
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, "r", encoding="utf-8-sig") as f:
                 config = json.load(f)
             config.pop(name, None)
             _write_skills_config(config, skills_dir)
@@ -1766,7 +1753,7 @@ def _set_enabled(name, enabled):
         sys.exit(1)
 
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, "r", encoding="utf-8-sig") as f:
             config = json.load(f)
     except Exception as e:
         click.echo(f"Error: Failed to read skills config: {e}", err=True)

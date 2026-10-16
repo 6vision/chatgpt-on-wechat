@@ -5,7 +5,6 @@ Translates agent events (message_update, message_end, tool_execution_end, etc.)
 into the CHAT socket protocol format (content chunks with segment_id, tool_calls chunks).
 """
 
-import re
 import uuid
 from typing import Callable, Optional
 
@@ -528,6 +527,9 @@ class ChatService:
         if persist:
             self._note_evolution_turn(agent, context)
 
+        if persist and session_id:
+            self._remember_context_usage(agent, session_id, resolved_agent_id)
+
         logger.info(
             f"[ChatService] Agent run completed: agent={resolved_agent_id}, "
             f"session={session_id}"
@@ -709,16 +711,9 @@ class ChatService:
     @staticmethod
     def _strip_peer_address(query: str, peer) -> str:
         """Drop the leading "@name" aimed at ``peer``; see AgentBridge._strip_address."""
-        if not query:
-            return query
-        labels = [label for label in (peer.name, peer.id) if label]
-        pattern = (
-            r"^\s*@(?:"
-            + "|".join(re.escape(label) for label in sorted(labels, key=len, reverse=True))
-            + r")[\s,，:：、]*"
-        )
-        stripped = re.sub(pattern, "", query, count=1, flags=re.IGNORECASE)
-        return stripped if stripped.strip() else query
+        from agent.team_addressing import strip_address
+
+        return strip_address(query, [peer.name, peer.id])
 
     @staticmethod
     def _restore_verbatim_query(messages: list, model_query: str, query: str) -> list:
@@ -794,6 +789,13 @@ class ChatService:
         except Exception as e:
             logger.debug(f"[ChatService] alias lookup failed: {e}")
         return agent_id
+
+    def _remember_context_usage(self, agent, session_id: str, owner_agent_id: str) -> None:
+        """Best-effort: a turn that answered must not fail over the usage chart."""
+        try:
+            self.agent_bridge.remember_context_usage(agent, session_id, owner_agent_id)
+        except Exception as e:
+            logger.debug(f"[ChatService] Context usage snapshot skipped: {e}")
 
     def _owner_workspace(self, owner_agent_id: str, agent) -> str:
         """Workspace whose store holds the conversation: the owner's."""

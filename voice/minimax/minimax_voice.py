@@ -27,6 +27,7 @@ class MinimaxVoice(Voice):
         raise NotImplementedError("MiniMax voice-to-text is not supported")
 
     def textToVoice(self, text):
+        response = None
         try:
             model = conf().get("text_to_voice_model") or "speech-2.8-hd"
             voice_id = conf().get("tts_voice_id") or "English_Graceful_Lady"
@@ -57,10 +58,9 @@ class MinimaxVoice(Voice):
             response = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
             response.raise_for_status()
 
-            # MiniMax returns HTTP 200 even on errors; capture base_resp for diagnostics.
+            # MiniMax returns HTTP 200 even on errors; the error is in an event's base_resp.
             audio_chunks = []
             audio_size = 0
-            last_base_resp = None
             event_count = 0
             for raw in response.iter_lines():
                 if not raw:
@@ -77,8 +77,12 @@ class MinimaxVoice(Voice):
                 except Exception:
                     continue
                 base_resp = event_data.get("base_resp") or {}
-                if base_resp:
-                    last_base_resp = base_resp
+                if base_resp.get("status_code") not in (None, 0):
+                    logger.error(
+                        f"[MINIMAX] TTS failed: status_code={base_resp.get('status_code')}, "
+                        f"status_msg={base_resp.get('status_msg')}, model={model}, voice_id={voice_id}"
+                    )
+                    return Reply(ReplyType.ERROR, "语音合成失败")
                 audio_hex = (event_data.get("data") or {}).get("audio")
                 if audio_hex:
                     try:
@@ -93,22 +97,15 @@ class MinimaxVoice(Voice):
                             f"[MINIMAX] textToVoice audio too large: over {MAX_FILE_BYTES} bytes, "
                             f"model={model}, voice_id={voice_id}"
                         )
-                        response.close()
                         return Reply(ReplyType.ERROR, "语音合成失败，音频超出大小限制")
                     audio_chunks.append(chunk)
 
             if not audio_chunks:
                 ct = response.headers.get("Content-Type", "")
-                if last_base_resp and last_base_resp.get("status_code") not in (None, 0):
-                    logger.error(
-                        f"[MINIMAX] TTS failed: status_code={last_base_resp.get('status_code')}, "
-                        f"status_msg={last_base_resp.get('status_msg')}, model={model}, voice_id={voice_id}"
-                    )
-                else:
-                    logger.error(
-                        f"[MINIMAX] TTS returned no audio data, model={model}, voice_id={voice_id}, "
-                        f"url={url}, http={response.status_code}, content_type={ct!r}, events={event_count}"
-                    )
+                logger.error(
+                    f"[MINIMAX] TTS returned no audio data, model={model}, voice_id={voice_id}, "
+                    f"url={url}, http={response.status_code}, content_type={ct!r}, events={event_count}"
+                )
                 return Reply(ReplyType.ERROR, "语音合成失败，未获取到音频数据")
 
             audio_data = b"".join(audio_chunks)
@@ -122,3 +119,7 @@ class MinimaxVoice(Voice):
         except Exception as e:
             logger.error(f"[MINIMAX] textToVoice error: {e}")
             return Reply(ReplyType.ERROR, "遇到了一点小问题，请稍后再试")
+
+        finally:
+            if response is not None:
+                response.close()

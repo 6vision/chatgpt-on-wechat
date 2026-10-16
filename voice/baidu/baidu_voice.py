@@ -6,6 +6,7 @@ import os
 import time
 import threading
 import requests
+import uuid
 
 from aip import AipSpeech
 
@@ -157,7 +158,7 @@ class BaiduVoice(Voice):
         # used to be buffered whole by `.content` and written out before
         # anything could object. `download_to_file` also writes through a temp
         # file, so an oversized or truncated download leaves nothing behind.
-        fn = TmpDir().path() + f"reply-long-{int(time.time())}-{hash(text)&0x7FFFFFFF}.mp3"
+        fn = TmpDir().path() + f"reply-long-{uuid.uuid4().hex}.mp3"
         try:
             download_to_file(audio_url, fn, MAX_FILE_BYTES, timeout=REQUEST_TIMEOUT)
         except Exception as e:
@@ -177,7 +178,7 @@ class BaiduVoice(Voice):
                     {"spd":self.spd, "pit":self.pit, "vol":self.vol, "per":self.per}
                 )
                 if not isinstance(result, dict):
-                    fn = TmpDir().path() + f"reply-{int(time.time())}-{hash(text)&0x7FFFFFFF}.mp3"
+                    fn = TmpDir().path() + f"reply-{uuid.uuid4().hex}.mp3"
                     with open(fn, "wb") as f:
                         f.write(result)
                     logger.info("[Baidu] 短文本合成 success: %s", fn)

@@ -174,7 +174,7 @@ class SkillManager:
         if not os.path.exists(self._skills_config_path):
             return {}
         try:
-            with open(self._skills_config_path, "r", encoding="utf-8") as f:
+            with open(self._skills_config_path, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
             if isinstance(data, dict):
                 return data
@@ -226,6 +226,9 @@ class SkillManager:
         for name, entry in self.skills.items():
             skill = entry.skill
             prev = saved.get(name, {})
+            if not isinstance(prev, dict):
+                logger.warning(f"[SkillManager] Ignoring malformed config entry for {name}")
+                prev = {}
             category = prev.get("category", "skill")
 
             if name in saved:

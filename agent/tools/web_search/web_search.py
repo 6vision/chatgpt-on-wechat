@@ -114,14 +114,27 @@ def _get_api_key(provider: str) -> str:
     return ""
 
 
+def anonymous_opt_in(value) -> bool:
+    """Whether a config value explicitly enables keyless search. Anything not
+    clearly "on" (e.g. the string "false") stays off, since it sends queries
+    to a third party."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value == 1
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes", "on")
+    return False
+
+
 def _anysearch_anonymous_enabled() -> bool:
     """Check if AnySearch anonymous mode is enabled via config."""
-    return bool(_tools_web_search_conf().get("anysearch_anonymous"))
+    return anonymous_opt_in(_tools_web_search_conf().get("anysearch_anonymous"))
 
 
 def _keenable_anonymous_enabled() -> bool:
     """Check if Keenable anonymous (keyless) mode is enabled via config."""
-    return bool(_tools_web_search_conf().get("keenable_anonymous"))
+    return anonymous_opt_in(_tools_web_search_conf().get("keenable_anonymous"))
 
 
 def _get_searxng_url() -> str:

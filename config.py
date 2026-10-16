@@ -949,7 +949,7 @@ def get_appdata_dir():
     data_path = os.path.join(get_data_root(), conf().get("appdata_dir", ""))
     if not os.path.exists(data_path):
         logger.info("[INIT] data path not exists, create it: {}".format(data_path))
-        os.makedirs(data_path)
+        os.makedirs(data_path, exist_ok=True)
     return data_path
 
 
@@ -980,7 +980,8 @@ def get_weixin_credentials_path(instance_id: str = ""):
 
 
 def subscribe_msg():
-    trigger_prefix = conf().get("single_chat_prefix", [""])[0]
+    prefixes = conf().get("single_chat_prefix") or [""]
+    trigger_prefix = prefixes[0]
     msg = conf().get("subscribe_msg", "")
     return msg.format(trigger_prefix=trigger_prefix)
 

@@ -53,7 +53,9 @@ def _is_pid_alive(pid: int) -> bool:
         try:
             os.kill(pid, 0)
             return True
-        except (ProcessLookupError, PermissionError):
+        except PermissionError:
+            return True
+        except ProcessLookupError:
             return False
 
 
@@ -178,6 +180,12 @@ def stop():
                 break
         else:
             _kill_pid(pid, force=True)
+    except PermissionError:
+        click.echo(click.style(
+            f"✗ No permission to stop PID {pid}; it was likely started by another user (try sudo).",
+            fg="red",
+        ))
+        sys.exit(1)
     except (ProcessLookupError, OSError):
         pass
 
