@@ -1,0 +1,307 @@
+---
+title: Chat API
+description: "Turn on the OpenAI-compatible /v1/chat/completions endpoint to call the full CowAgent from any app, SDK or workflow, with tools, skills and memory, plus reasoning, tool calls and token usage."
+---
+
+> CowAgent serves a chat endpoint compatible with the OpenAI Chat Completions protocol, on the same port as the Web Console. Any app, SDK or workflow that speaks the OpenAI protocol can connect to it directly.
+
+Unlike calling a model, the endpoint runs the full Agent: it uses its tools, skills, memory and knowledge base to finish the task, and returns its reasoning, tool calls and token usage along with the answer.
+
+## Turn on the API
+
+The API is off by default. Once it is on, every request must carry the API key.
+
+### From the console
+
+Open "Config → General → Chat API" and turn on the switch. After you confirm, an API key is generated, along with the base URL and ready-to-copy examples (cURL / Python / Node.js).
+
+<Frame caption="The Chat API card on the Config page">
+  <img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/web-console-chat-api-config.png" alt="Chat API config" width="700" />
+</Frame>
+
+- **Regenerate**: issues a new API key; the old one stops working at once
+- **Turn off**: the API stops serving requests. The key is kept and works again once the API is back on
+
+### From the config file
+
+Set these two keys in `config.json`, then restart the service:
+
+```json
+{
+  "external_api_enabled": true,
+  "external_api_token": "sk-your-random-key"
+}
+```
+
+| Key | Description |
+| --- | --- |
+| `external_api_enabled` | Whether the API is on. Defaults to `false` |
+| `external_api_token` | The API key; use a long random string. It is kept while the API is off |
+
+<Note>
+  The API shares the Web Console's address and port. By default it listens on `127.0.0.1`, so only this machine can reach it. To call it from other machines, set `web_host` to `0.0.0.0` as described in [Web Console](/channels/web) and open the port. The API key is independent from the console password `web_password`.
+</Note>
+
+## Quick start
+
+The examples assume the service runs on port `9899` of this machine. They name neither a model nor an Agent, so the default Agent answers on its own model.
+
+<Tabs>
+  <Tab title="cURL">
+    ```bash
+    curl http://localhost:9899/v1/chat/completions \
+      -H "Authorization: Bearer $API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{"messages": [{"role": "user", "content": "Summarize the files in the workspace"}]}'
+    ```
+  </Tab>
+  <Tab title="Python">
+    ```python
+    import requests
+
+    resp = requests.post(
+        "http://localhost:9899/v1/chat/completions",
+        headers={"Authorization": "Bearer your-api-key"},
+        json={"messages": [{"role": "user", "content": "Summarize the files in the workspace"}]},
+    )
+    print(resp.json()["choices"][0]["message"]["content"])
+    ```
+  </Tab>
+  <Tab title="Node.js">
+    ```javascript
+    const resp = await fetch("http://localhost:9899/v1/chat/completions", {
+      method: "POST",
+      headers: { "Authorization": "Bearer your-api-key", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: "Summarize the files in the workspace" }],
+      }),
+    });
+    const data = await resp.json();
+    console.log(data.choices[0].message.content);
+    ```
+  </Tab>
+</Tabs>
+
+## Endpoints
+
+### Authentication
+
+Every request carries the API key in its headers:
+
+```
+Authorization: Bearer <API key>
+```
+
+### Chat
+
+`POST /v1/chat/completions`
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `messages` | array | Yes | The conversation. Roles `system`, `developer`, `user` and `assistant` are accepted; `content` is a string or an array of `text` parts |
+| `model` | string | No | The model to answer on. Without it the Agent uses its own model. See [List models](#list-models) |
+| `agent_id` | string | No | CowAgent extension: the Agent that answers. Without it the default Agent answers. See [Choose an Agent](#choose-an-agent) |
+| `stream` | boolean | No | Stream the response. Defaults to `false` |
+| `stream_options` | object | No | With `{"include_usage": true}`, the stream ends with the token usage |
+| `conversation_id` | string | No | CowAgent extension: the server keeps this conversation's history. See [Conversations](#conversations) |
+
+The Agent uses its own tools and system prompt, so parameters such as `temperature`, `max_tokens` and `tools` are ignored.
+
+### Choose an Agent
+
+With [multiple Agents](/multi-agent/team) configured, `agent_id` chooses which one answers. An Agent's ID is shown under its name on the Agents page, with a button next to it to copy it. `default` always means the default Agent. An Agent that does not exist or is archived returns 404.
+
+```bash
+curl http://localhost:9899/v1/chat/completions \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "research",
+    "model": "deepseek-chat",
+    "messages": [{"role": "user", "content": "Look into recent open-source agent frameworks"}]
+  }'
+```
+
+`model` applies to that request only; it does not change the model set for the Agent or the conversation.
+
+### List models
+
+`GET /v1/models`
+
+Returns the available models: the chat models of every provider configured under "Config → Models", with the provider in `owned_by`. A request naming a model that is not listed returns 404.
+
+```json
+{
+  "object": "list",
+  "data": [
+    { "id": "deepseek-chat", "object": "model", "created": 0, "owned_by": "deepseek" },
+    { "id": "qwen-max", "object": "model", "created": 0, "owned_by": "dashscope" }
+  ]
+}
+```
+
+## Conversations
+
+The API supports two ways of keeping a conversation:
+
+- **Stateless (default)**: without `conversation_id`, send the whole `messages` list every time, as with any model. The last `user` message is this turn's input, and the `user` / `assistant` messages before it are the context. Nothing is written to CowAgent's conversation history.
+- **Stateful**: with `conversation_id`, CowAgent keeps the history, so each request only sends the new message and earlier entries in `messages` are ignored. Requests in the same conversation are handled one at a time, in order.
+
+```json
+{
+  "conversation_id": "order-bot-user-42",
+  "messages": [{ "role": "user", "content": "Let's continue where we left off" }]
+}
+```
+
+<Note>
+  `system` messages in the request are ignored: the Agent always keeps its own persona, skills and memory. Either way, the Agent can read and write its workspace and memory files through its tools.
+</Note>
+
+## Responses
+
+### Non-streaming
+
+Besides the standard OpenAI response, `message` carries the reasoning and a record of the tool calls:
+
+```json
+{
+  "id": "chatcmpl-82c19c44...",
+  "object": "chat.completion",
+  "created": 1791861130,
+  "model": "deepseek-chat",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "The workspace holds 4 core files and 7 folders...",
+        "reasoning_content": "The user wants to know what is in the workspace, so list it first...",
+        "tool_trace": [
+          {
+            "type": "tool_result",
+            "id": "call_00_wYInMZ...",
+            "name": "ls",
+            "arguments": { "path": "." },
+            "result": "AGENT.md\nMEMORY.md\n...",
+            "status": "success",
+            "elapsed": "0.01s"
+          }
+        ]
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 18151,
+    "completion_tokens": 180,
+    "total_tokens": 18331,
+    "prompt_tokens_details": { "cached_tokens": 11392 }
+  }
+}
+```
+
+| Field | Description |
+| --- | --- |
+| `model` | The model that answered |
+| `message.content` | The final answer |
+| `message.reasoning_content` | The reasoning, when deep thinking is on and the model supports it |
+| `message.tool_trace` | CowAgent extension: the tool calls, each with its arguments, result, status and duration. Hand-offs to other Agents and generated files are recorded here too, in the format of the [process events](#process-events) below |
+| `usage` | Token usage. One Agent turn may call the model several times; this is the sum of all calls. `prompt_tokens_details.cached_tokens` counts input tokens served from cache. Left out when the model reports no usage |
+
+### Streaming
+
+With `"stream": true` the response is a stream of standard `chat.completion.chunk` events over SSE:
+
+- The answer is in `choices[0].delta.content`
+- The reasoning is in `choices[0].delta.reasoning_content`
+- Process events such as tool calls are in the top-level `cow_event` field, with an empty `delta`
+- The last chunk has `finish_reason` set to `stop`. With `stream_options.include_usage`, one more chunk follows with empty `choices` and the `usage`
+- The stream ends with `data: [DONE]`
+
+```
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":null}],"cow_event":{"type":"tool_start","id":"call_1","name":"ls","arguments":{"path":"."}}}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"The workspace holds"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":18151,"completion_tokens":180,"total_tokens":18331,"prompt_tokens_details":{"cached_tokens":11392}}}
+
+data: [DONE]
+```
+
+Reading the stream:
+
+```python
+import json
+import requests
+
+resp = requests.post(
+    "http://localhost:9899/v1/chat/completions",
+    headers={"Authorization": "Bearer your-api-key"},
+    json={"messages": [{"role": "user", "content": "Summarize the files in the workspace"}], "stream": True},
+    stream=True,
+)
+for line in resp.iter_lines(decode_unicode=True):
+    if not line.startswith("data: ") or line == "data: [DONE]":
+        continue
+    chunk = json.loads(line[len("data: "):])
+    event = chunk.get("cow_event")
+    if event and event["type"] == "tool_start":
+        print(f"\n[tool] {event['name']} {event['arguments']}")
+    for choice in chunk["choices"]:
+        print(choice["delta"].get("content") or "", end="", flush=True)
+```
+
+### Process events
+
+`cow_event.type` takes these values:
+
+| Type | Description | Main fields |
+| --- | --- | --- |
+| `tool_start` | A tool call starts | `id`, `name`, `arguments` |
+| `tool_result` | A tool call finishes | `id`, `name`, `arguments`, `result`, `status`, `elapsed` |
+| `subagent_step` | A step taken by a sub-agent | `card_id`, `step_id`, `phase`, `tool`, `status` |
+| `peer_start` | The task is handed to another Agent; the content that follows is its answer | `card_id`, `agent_id`, `agent_name` |
+| `peer_end` | That Agent is done | `card_id`, `agent_id`, `status` |
+| `artifact` | A file the Agent produced | `artifact` |
+| `reasoning` | Reasoning, the same text as `delta.reasoning_content` | `delta` |
+| `error` | The run failed | `message` |
+
+## Errors
+
+Errors follow the OpenAI format:
+
+```json
+{ "error": { "message": "Invalid authentication credentials.", "type": "api_error", "code": "invalid_api_key" } }
+```
+
+| Status | `code` | Meaning |
+| --- | --- | --- |
+| 400 | `invalid_request` / `invalid_json` | Malformed request |
+| 401 | `invalid_api_key` | Wrong API key |
+| 404 | `model_not_found` | `model` is not in the [model list](#list-models) |
+| 404 | `agent_not_found` | The Agent `agent_id` names does not exist or is archived |
+| 503 | `api_disabled` | The API is off |
+| 500 | `internal_error` / `timeout` | The Agent failed or timed out |
+
+A streaming request waits up to 30 seconds for the Agent to produce the first event. A failure or a timeout before the first event returns one of the JSON errors above, and a timeout cancels that request. Once the stream has started its HTTP status can no longer change, so a later failure arrives as a `cow_event.type=error` chunk, followed by a terminal chunk with `finish_reason=error` and then `data: [DONE]`.
+
+## Use it from other apps
+
+Any client or platform that accepts a custom OpenAI endpoint can connect. Choose the "OpenAI" or "OpenAI compatible" provider and fill in:
+
+- **Base URL**: `http://<server address>:9899/v1` (some apps only want the address and port, and add `/v1` themselves)
+- **API key**: the key generated in the console
+- **Model**: pick one from the [model list](#list-models)
+
+The default Agent answers requests from these apps.
+
+The API allows cross-origin requests (CORS), so browser apps can call it directly.
+
+<Note>
+  Only text input is supported for now; images and other multimodal content are not. Caller-supplied `tools` for function calling are not supported either: the Agent finishes the task with its own tools.
+</Note>

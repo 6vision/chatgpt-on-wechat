@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Dict, Optional, Iterable
 from urllib.parse import quote, unquote
 
+from common.atomic_write import write_text_atomic
 from common.log import logger
 from config import conf
 from agent.memory.config import MemoryConfig
@@ -286,7 +287,7 @@ class KnowledgeService:
         content = "\n".join(lines).rstrip() + "\n"
         index_path = root / "index.md"
         try:
-            index_path.write_text(content, encoding="utf-8")
+            write_text_atomic(index_path, content)
             return True
         except Exception as exc:
             logger.warning(f"[KnowledgeService] Failed to rebuild index.md: {exc}")
@@ -384,7 +385,7 @@ class KnowledgeService:
             raise FileExistsError(f"target already exists: {rel_path}")
         old_paths = [rel_path] if full_path.exists() else []
         full_path.parent.mkdir(parents=True, exist_ok=True)
-        full_path.write_text(content or "", encoding="utf-8")
+        write_text_atomic(full_path, content or "")
         # Keep index.md in sync before reindexing so it is indexed too.
         self.rebuild_index_md()
         self._reindex(old_paths, force=True)
@@ -456,7 +457,7 @@ class KnowledgeService:
                 old_exists = destination.exists()
                 content = self._decode_document_content(content_bytes)
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_text(content, encoding="utf-8")
+                write_text_atomic(destination, content)
                 if old_exists:
                     old_paths.append(rel_path)
                 imported += 1

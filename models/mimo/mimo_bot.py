@@ -301,6 +301,7 @@ class MimoBot(Bot, OpenAICompatibleBot):
 
     def _handle_stream_response(self, request_body: dict):
         """SSE 流式 chunk 转为 OpenAI 标准 delta 输出（含 reasoning_content）。"""
+        response = None
         try:
             headers = self._build_headers()
             url = f"{self.api_base}/chat/completions"
@@ -418,6 +419,9 @@ class MimoBot(Bot, OpenAICompatibleBot):
             import traceback
             logger.error(traceback.format_exc())
             yield {"error": True, "message": str(e), "status_code": 500}
+        finally:
+            if response is not None:
+                response.close()
 
     # -------------------- sync --------------------
 

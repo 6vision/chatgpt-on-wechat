@@ -210,7 +210,10 @@ class FileServeHandler:
             from urllib.parse import quote
             web.header('Content-Type', content_type)
             web.header('Content-Disposition', f"inline; filename*=UTF-8''{quote(file_name)}")
-            web.header('Cache-Control', 'public, max-age=3600')
+            # Workspace outputs can be regenerated at the same path, including
+            # twice within an artifact URL's timestamp second. Revalidate the
+            # current bytes instead of hiding an update behind an hour of cache.
+            web.header('Cache-Control', 'no-cache')
             with open(file_path, 'rb') as f:
                 return f.read()
         except web.HTTPError:

@@ -201,6 +201,16 @@ def _close_run(store, run_id: str, result: Dict[str, Any]) -> None:
 _POLL_SECONDS = 0.1
 _PARENT_CANCELLED = "The parent run was cancelled."
 
+# Time left on the budget when a still-running sub agent is told to wrap up,
+# so it can write a report from what it has instead of being cut off with
+# nothing. Long enough for one final model reply.
+_WRAP_UP_MAX_SECONDS = 60.0
+_WRAP_UP_FRACTION = 0.2
+_WRAP_UP_INSTRUCTION = (
+    "Your time budget is almost used up. Stop calling tools and reply now "
+    "with what you have so far, noting anything left unfinished."
+)
+
 
 def _unfinished(index: int, template, status: str, error: str, on_state=None) -> Dict[str, Any]:
     """Result for a task that was stopped or timed out instead of finishing."""
@@ -211,7 +221,7 @@ def _unfinished(index: int, template, status: str, error: str, on_state=None) ->
 
 
 def _run_one(parent, template, task: SubagentTask, index: int, cancel_event,
-             on_state=None, on_event=None) -> Dict[str, Any]:
+             on_state=None, on_event=None, steer_inbox=None) -> Dict[str, Any]:
     if cancel_event.is_set():
         return _unfinished(index, template, "cancelled", _PARENT_CANCELLED, on_state)
     started = time.time()
@@ -240,7 +250,7 @@ def _run_one(parent, template, task: SubagentTask, index: int, cancel_event,
             child = _build_child(parent, template, task)
             summary = child.run_stream(
                 task.goal, clear_history=True, cancel_event=cancel_event,
-                on_event=child_events,
+                on_event=child_events, steer_inbox=steer_inbox,
             )
         result["status"] = "cancelled" if cancel_event.is_set() else "completed"
         result["summary"] = summary or ""
@@ -283,7 +293,10 @@ def run_tasks(
     this is for whoever is watching the run, who otherwise spends the minutes
     it takes looking at a spinner.
     """
+    from agent.protocol.steer import SteerInbox
+
     cancel_events = [threading.Event() for _ in tasks]
+    steer_inboxes = [SteerInbox() for _ in tasks]
     resolved = []
     for task in tasks:
         name = task.subagent_type or ""
@@ -307,11 +320,14 @@ def run_tasks(
             futures.append(
                 pool.submit(
                     ctx.run, _run_one, parent, template, task, index,
-                    cancel_events[index], on_state, on_event,
+                    cancel_events[index], on_state, on_event, steer_inboxes[index],
                 )
             )
 
         deadline = time.time() + settings.timeout_seconds
+        wrap_up_at = deadline - min(_WRAP_UP_MAX_SECONDS,
+                                    settings.timeout_seconds * _WRAP_UP_FRACTION)
+        wrapped_up = False
         results: List[Optional[Dict[str, Any]]] = [None] * len(tasks)
         pending = dict(enumerate(futures))
         while True:
@@ -320,6 +336,11 @@ def run_tasks(
             if not pending:
                 break
             stopped = cancel_event is not None and cancel_event.is_set()
+            if not wrapped_up and not stopped and time.time() >= wrap_up_at:
+                wrapped_up = True
+                for index in pending:
+                    steer_inboxes[index].submit(_WRAP_UP_INSTRUCTION)
+                logger.info(f"[SubAgent] Asked {len(pending)} task(s) to wrap up before the time budget runs out")
             remaining = deadline - time.time()
             if stopped or remaining <= 0:
                 timeout_error = (

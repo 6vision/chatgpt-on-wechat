@@ -1,6 +1,6 @@
 ---
 title: subagent - 子 Agent
-description: 创建临时的子 Agent 执行独立任务，支持并行，只返回结论
+description: "subagent 工具的类型、配置与实现：选择内置类型或在 subagents/ 目录下用 Markdown 自定义类型，通过 tools 字段限定可用工具，让子 Agent 在独立上下文中执行任务并只返回结论。"
 ---
 
 `subagent` 让主 Agent 在对话过程中临时创建执行单元，把一个独立任务交给它，在自己的上下文中完成后返回结果。功能效果和使用场景见[子 Agent](/zh/multi-agent/subagent)，本页介绍工具的类型、配置与实现细节。

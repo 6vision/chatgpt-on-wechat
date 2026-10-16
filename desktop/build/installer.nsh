@@ -54,10 +54,11 @@
 # user has no working way to launch it.
 #
 # Rewriting a shortcut regenerates its target and its shell link-tracking data
-# from $appExe, which is what actually repairs it. Shortcuts that aren't there
-# are left alone so one the user deleted isn't resurrected, except when updating
-# and NOTHING is left to click: a stray extra icon is a far smaller problem than
-# no way into the app.
+# from $appExe, which is what actually repairs it. When NOTHING is left to click
+# a shortcut is created, on an update and on a manual reinstall alike: a
+# reinstall over an existing app keeps shortcuts too (keepShortcuts), so one an
+# interrupted first install never created would otherwise never appear. A stray
+# extra icon is a far smaller problem than no way into the app.
 !macro customInstall
   !ifndef DO_NOT_CREATE_DESKTOP_SHORTCUT
     ${If} ${FileExists} "$newDesktopLink"
@@ -73,10 +74,10 @@
       ClearErrors
       WinShell::SetLnkAUMI "$oldDesktopLink" "${APP_ID}"
     ${EndIf}
-    # Neither recorded name is present. On an update that means the shortcut was
-    # renamed by a build that never told the installer (so it is invisible here
-    # and possibly broken), or it is simply gone. Leave a working one behind.
-    ${If} ${isUpdated}
+    # Neither recorded name is present: the shortcut was renamed by a build that
+    # never told the installer (so it is invisible here and possibly broken), or
+    # it is simply gone. Leave a working one behind.
+    ${IfNot} ${isNoDesktopShortcut}
     ${AndIfNot} ${FileExists} "$newDesktopLink"
     ${AndIfNot} ${FileExists} "$oldDesktopLink"
       CreateShortCut "$newDesktopLink" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
@@ -97,8 +98,7 @@
       ClearErrors
       WinShell::SetLnkAUMI "$oldStartMenuLink" "${APP_ID}"
     ${EndIf}
-    ${If} ${isUpdated}
-    ${AndIfNot} ${FileExists} "$newStartMenuLink"
+    ${IfNot} ${FileExists} "$newStartMenuLink"
     ${AndIfNot} ${FileExists} "$oldStartMenuLink"
       CreateShortCut "$newStartMenuLink" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
       ClearErrors
