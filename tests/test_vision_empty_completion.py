@@ -24,3 +24,10 @@ def test_empty_provider_completion_falls_back_to_valid_answer(monkeypatch):
     assert result.result['provider'] == 'second'
     assert result.result['content'] == 'Valid test answer'
     assert len(calls) == 2
+
+
+def test_list_content_from_a_compatible_gateway_still_passes(monkeypatch):
+    payload = {'choices': [{'message': {'content': [{'type': 'text', 'text': 'A cat'}]}}]}
+    monkeypatch.setattr(module.requests, 'post', lambda *args, **kwargs: SimpleNamespace(status_code=200, json=lambda: payload))
+    result = Vision()._call_api(VisionProvider('test', 'fake-key', 'https://example.invalid/v1'), 'fake-model', 'Question', {})
+    assert result.result['content'] == [{'type': 'text', 'text': 'A cat'}]
