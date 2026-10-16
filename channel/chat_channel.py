@@ -244,7 +244,9 @@ class ChatChannel(Channel):
                     logger.warning("[chat_channel]any to wav error, use raw path. " + str(e))
                     wav_path = file_path
                 # 语音识别
-                reply = super().build_voice_to_text(wav_path)
+                reply = self._safe_voice_to_text(wav_path)
+                if reply is None:
+                    reply = Reply(ReplyType.ERROR, "语音识别失败，请重试或发送文字消息")
                 # 删除临时文件
                 try:
                     os.remove(file_path)
@@ -281,8 +283,9 @@ class ChatChannel(Channel):
         from the voice factory and custom vendors answer ERROR when their
         endpoint/model is misconfigured. Unprotected, the exception reaches
         ``_fail_callback`` (log only) and the user loses the turn, and the
-        ERROR Reply replaces the answer with a generic error. ``voice_to_text``
-        already degrades gracefully in ``_generate_reply``; TTS should too.
+        ERROR Reply replaces the answer with a generic error.
+        ``_safe_voice_to_text`` guards the STT side of the same turn; TTS
+        should too.
         """
         try:
             voice_reply = super().build_text_to_voice(text)
@@ -294,6 +297,27 @@ class ChatChannel(Channel):
             logger.warning("[chat_channel] build_text_to_voice returned {}, fallback to text".format(bad_type))
             return None
         return voice_reply
+
+    def _safe_voice_to_text(self, wav_path):
+        """Transcribe ``wav_path`` into a Reply, or ``None`` when STT is unusable.
+
+        ``build_voice_to_text`` is not failure-safe either: an unknown vendor
+        raises from the voice factory, several vendors (edge, elevenlabs)
+        answer ``None`` because their ``voiceToText`` is an unimplemented
+        no-op, and a vendor network error escapes. Unprotected, the exception
+        reached ``_fail_callback`` (log only) and the user lost the turn, and a
+        ``None`` answer crashed on ``reply.type``. ``_safe_text_to_voice``
+        guards the TTS side of the same turn; this guards its sibling.
+        """
+        try:
+            reply = super().build_voice_to_text(wav_path)
+        except Exception as e:
+            logger.warning("[chat_channel] build_voice_to_text error: " + str(e))
+            return None
+        if reply is None:
+            logger.warning("[chat_channel] build_voice_to_text returned None")
+            return None
+        return reply
 
     def _decorate_reply(self, context: Context, reply: Reply) -> Reply:
         if reply and reply.type:

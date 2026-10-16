@@ -87,12 +87,16 @@ class Role(Plugin):
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 role = json.load(f)
+            tags = role.get("tags", [])
+            if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+                raise ValueError("role tags must be a list of strings")
             title_lower = role["title"].lower()
             if title_lower in self.roles:
                 old_tags = self.roles[title_lower].get("tags", [])
                 for tag in old_tags:
                     if tag in self.tags:
-                        self.tags[tag][1] = [r for r in self.tags[tag][1] if r["title"].lower() != title_lower]
+                        description, members = self.tags[tag]
+                        self.tags[tag] = (description, [r for r in members if r["title"].lower() != title_lower])
                 logger.info(f"[Role] overridden: {role['title']}")
             self.roles[title_lower] = role
             for tag in role.get("tags", []):

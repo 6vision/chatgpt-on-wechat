@@ -350,11 +350,11 @@ class BrowserTool(BaseTool):
         return ToolResult.success("Clicked successfully. Use 'snapshot' to see updated page.")
 
     def _do_fill(self, args: Dict[str, Any]) -> ToolResult:
-        text = args.get("text", "")
+        text = args.get("text")
         ref = args.get("ref")
         selector = args.get("selector")
         timeout = args.get("timeout", 5000)
-        if not text and text != "":
+        if not isinstance(text, str):
             return ToolResult.fail("Error: 'text' is required for fill action")
         result = self._get_service().fill(text, ref=ref, selector=selector, timeout=timeout)
         if "error" in result:

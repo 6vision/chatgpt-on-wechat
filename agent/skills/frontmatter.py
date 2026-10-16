@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional, List
 from agent.skills.types import SkillMetadata, SkillInstallSpec
 
 
-FRONTMATTER_RE = re.compile(r'^---\s*\n(.*?)\n---\s*\n', re.DOTALL)
+FRONTMATTER_RE = re.compile(r'^\ufeff?---\s*\n(.*?)\n---\s*\n', re.DOTALL)
 
 
 def strip_frontmatter(content: str) -> str:

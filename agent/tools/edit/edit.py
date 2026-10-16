@@ -101,6 +101,9 @@ class Edit(BaseTool):
         # Check if file exists
         if not os.path.exists(absolute_path):
             return ToolResult.fail(f"Error: File not found: {path}")
+
+        if not os.path.isfile(absolute_path):
+            return ToolResult.fail(f"Error: {path} is not a regular file")
         
         # Check if readable/writable
         if not os.access(absolute_path, os.R_OK | os.W_OK):

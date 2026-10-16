@@ -442,6 +442,21 @@
     text-security: disc;
 }
 
+/* Square icon buttons beside the chat API card's read-only fields */
+.cfg-api-btn {
+    flex-shrink: 0;
+    width: 38px;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    color: #94a3b8;
+    font-size: 12px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+.cfg-api-btn:hover { color: #475569; border-color: #cbd5e1; }
+.dark .cfg-api-btn { border-color: #475569; }
+.dark .cfg-api-btn:hover { color: #e2e8f0; border-color: #64748b; }
+
 /* Provider logo image — vendors flagged as `provider-logo-invert-dark`
    ship a black wordmark that disappears on the dark canvas; we invert their
    luminance only in dark mode so the brand stays recognizable without
@@ -541,7 +556,7 @@
     font-size: 12px;
     font-weight: 400;
     line-height: 1.4;
-    white-space: nowrap;
+    white-space: pre;
     background: #1e293b;
     color: #e2e8f0;
     box-shadow: 0 4px 12px rgba(0,0,0,0.15);

@@ -475,7 +475,16 @@ def download_media_from_cdn(cdn_base_url: str, encrypt_query_param: str,
     from urllib.parse import quote
     url = f"{cdn_base_url}/download?encrypted_query_param={quote(encrypt_query_param)}"
     resp = _get_cdn_session().get(url, timeout=60, stream=True)
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except BaseException:
+        # read_response owns successful downloads; rejected status responses
+        # never reach it, so release their streaming connection here.
+        try:
+            resp.close()
+        except Exception:
+            pass
+        raise
     body = read_response(resp, MAX_FILE_BYTES)
 
     # Determine key format:

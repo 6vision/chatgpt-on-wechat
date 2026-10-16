@@ -322,6 +322,7 @@ class DeepSeekBot(Bot, OpenAICompatibleBot):
 
     def _handle_stream_response(self, request_body: dict):
         """Stream SSE chunks from DeepSeek and yield OpenAI-format deltas (with reasoning_content)."""
+        response = None
         try:
             headers = self._build_headers()
             url = f"{self.api_base}/chat/completions"
@@ -440,6 +441,9 @@ class DeepSeekBot(Bot, OpenAICompatibleBot):
             import traceback
             logger.error(traceback.format_exc())
             yield {"error": True, "message": str(e), "status_code": 500}
+        finally:
+            if response is not None:
+                response.close()
 
     # -------------------- sync --------------------
 

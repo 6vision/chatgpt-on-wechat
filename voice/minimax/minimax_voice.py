@@ -27,6 +27,7 @@ class MinimaxVoice(Voice):
         raise NotImplementedError("MiniMax voice-to-text is not supported")
 
     def textToVoice(self, text):
+        response = None
         try:
             model = conf().get("text_to_voice_model") or "speech-2.8-hd"
             voice_id = conf().get("tts_voice_id") or "English_Graceful_Lady"
@@ -93,7 +94,6 @@ class MinimaxVoice(Voice):
                             f"[MINIMAX] textToVoice audio too large: over {MAX_FILE_BYTES} bytes, "
                             f"model={model}, voice_id={voice_id}"
                         )
-                        response.close()
                         return Reply(ReplyType.ERROR, "语音合成失败，音频超出大小限制")
                     audio_chunks.append(chunk)
 
@@ -122,3 +122,7 @@ class MinimaxVoice(Voice):
         except Exception as e:
             logger.error(f"[MINIMAX] textToVoice error: {e}")
             return Reply(ReplyType.ERROR, "遇到了一点小问题，请稍后再试")
+
+        finally:
+            if response is not None:
+                response.close()
