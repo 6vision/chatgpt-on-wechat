@@ -2,7 +2,7 @@
 google voice service
 """
 
-import time
+import uuid
 
 import speech_recognition
 from gtts import gTTS
@@ -39,7 +39,7 @@ class GoogleVoice(Voice):
     def textToVoice(self, text):
         try:
             # Avoid the same filename under multithreading
-            mp3File = TmpDir().path() + "reply-" + str(int(time.time())) + "-" + str(hash(text) & 0x7FFFFFFF) + ".mp3"
+            mp3File = TmpDir().path() + "reply-" + uuid.uuid4().hex + ".mp3"
             tts = gTTS(text=text, lang="zh")
             tts.save(mp3File)
             logger.info("[Google] textToVoice text={} voice file name={}".format(text, mp3File))

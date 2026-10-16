@@ -3,7 +3,7 @@ azure voice service
 """
 import json
 import os
-import time
+import uuid
 
 import azure.cognitiveservices.speech as speechsdk
 from langid import classify
@@ -81,7 +81,7 @@ class AzureVoice(Voice):
         else:
             self.speech_config.speech_synthesis_voice_name = self.config["speech_synthesis_voice_name"]
         # Avoid the same filename under multithreading
-        fileName = TmpDir().path() + "reply-" + str(int(time.time())) + "-" + str(hash(text) & 0x7FFFFFFF) + ".wav"
+        fileName = TmpDir().path() + "reply-" + uuid.uuid4().hex + ".wav"
         audio_config = speechsdk.AudioConfig(filename=fileName)
         speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=self.speech_config, audio_config=audio_config)
         result = speech_synthesizer.speak_text(text)
