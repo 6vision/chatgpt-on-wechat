@@ -949,7 +949,7 @@ def get_appdata_dir():
     data_path = os.path.join(get_data_root(), conf().get("appdata_dir", ""))
     if not os.path.exists(data_path):
         logger.info("[INIT] data path not exists, create it: {}".format(data_path))
-        os.makedirs(data_path)
+        os.makedirs(data_path, exist_ok=True)
     return data_path
 
 
