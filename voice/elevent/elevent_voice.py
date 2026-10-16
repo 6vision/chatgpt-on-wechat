@@ -1,5 +1,5 @@
 # Requires: elevenlabs==1.0.3  (pip install elevenlabs==1.0.3)
-import time
+import uuid
 
 from elevenlabs.client import ElevenLabs
 from elevenlabs import save
@@ -22,7 +22,7 @@ class ElevenLabsVoice(Voice):
         pass
 
     def textToVoice(self, text):
-        fileName = TmpDir().path() + "reply-" + str(int(time.time())) + "-" + str(hash(text) & 0x7FFFFFFF) + ".mp3"
+        fileName = TmpDir().path() + "reply-" + uuid.uuid4().hex + ".mp3"
 
         try:
             audio = client.generate(
