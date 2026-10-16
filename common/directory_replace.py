@@ -3,12 +3,8 @@
 import os
 import shutil
 import tempfile
-import threading
 
 from common.log import logger
-
-_LOCKS = tuple(threading.RLock() for _ in range(256))
-
 
 def replace_directory(source: str, target: str, move_source: bool = False) -> None:
     source = os.path.realpath(source)
@@ -20,8 +16,7 @@ def replace_directory(source: str, target: str, move_source: bool = False) -> No
         shared = None
     if shared in (os.path.normcase(source), os.path.normcase(real_target)):
         raise ValueError("source and target directories overlap")
-    with _LOCKS[hash(os.path.normcase(real_target)) % len(_LOCKS)]:
-        _replace(source, target, move_source)
+    _replace(source, target, move_source)
 
 
 def _replace(source: str, target: str, move_source: bool) -> None:

@@ -99,6 +99,15 @@ def test_successful_update_replaces_the_skill_and_reloads_metadata(installed, ki
     assert [p.name for p in custom.iterdir() if p.is_dir()] == ["sample"]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_url_install_keeps_umask_permissions(installed):
+    service, skill, _, _ = installed
+    service.add(_payload("url"))
+    umask = os.umask(0)
+    os.umask(umask)
+    assert skill.stat().st_mode & 0o777 == 0o777 & ~umask
+
+
 @pytest.mark.parametrize("kind", ["local", "staged"])
 def test_cli_copy_failure_keeps_the_previous_registered_skill(installed, tmp_path, monkeypatch, kind):
     from cli.commands import skill as skill_cli

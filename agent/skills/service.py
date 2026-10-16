@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import tempfile
+import uuid
 from typing import List, Optional
 from common.directory_replace import replace_directory
 from common.log import logger
@@ -506,7 +507,9 @@ class SkillService:
 
         parent = os.path.dirname(skill_dir)
         os.makedirs(parent, exist_ok=True)
-        tmp_dir = tempfile.mkdtemp(prefix=f".{os.path.basename(skill_dir)}.download-", dir=parent)
+        # Not mkdtemp: this directory becomes the skill dir and must keep umask permissions.
+        tmp_dir = os.path.join(parent, f".{os.path.basename(skill_dir)}.download-{uuid.uuid4().hex[:8]}")
+        os.makedirs(tmp_dir)
 
         try:
             for file_info in files:
