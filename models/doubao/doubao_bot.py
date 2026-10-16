@@ -279,6 +279,7 @@ class DoubaoBot(Bot):
 
     def _handle_stream_response(self, request_body: dict):
         """Handle streaming SSE response from Doubao API and yield OpenAI-format chunks."""
+        response = None
         try:
             headers = {
                 "Content-Type": "application/json",
@@ -410,6 +411,9 @@ class DoubaoBot(Bot):
             import traceback
             logger.error(traceback.format_exc())
             yield {"error": True, "message": str(e), "status_code": 500}
+        finally:
+            if response is not None:
+                response.close()
 
     # -------------------- sync --------------------
 

@@ -1,6 +1,6 @@
 ---
 title: Web 控制台
-description: 通过 Web 控制台使用 CowAgent
+description: "Web 控制台是 CowAgent 的默认通道，启动后在浏览器中即可与 Agent 对话，并在线管理模型、技能、记忆、通道等配置，支持密码登录，还可开启 OpenAI 兼容的对话 API。"
 ---
 
 Web 控制台是 CowAgent 的默认通道，启动后会自动运行，通过浏览器即可与 Agent 对话，并支持在线管理模型、技能、记忆、通道等配置。
@@ -40,6 +40,10 @@ Web 控制台是 CowAgent 的默认通道，启动后会自动运行，通过浏
   请确保服务器防火墙和安全组已放行对应端口。
 </Note>
 
+## 对话 API
+
+Web 控制台的端口同时提供 OpenAI 兼容的对话接口 `/v1/chat/completions`，默认关闭，可在「配置」页的「对话 API」卡片中开启并获取 API Key。详见 [对话 API](/zh/extensions/chat-api)。
+
 ## 功能介绍
 
 ### 对话界面
@@ -70,6 +74,12 @@ Web 控制台是 CowAgent 的默认通道，启动后会自动运行，通过浏
 <Frame caption="会话级权限模式：只读、工作空间可写、完全访问">
   <img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/zh/web-console-access-mode.png" style={{ maxWidth: "600px" }} />
 </Frame>
+
+### 产物中心
+
+按时间线汇集 Agent 生成的网页、文档、图片和视频，支持预览、置顶和跳转回原对话。页面默认隐藏，可在 [自定义菜单](/zh/extensions/custom-menu) 中开启：
+
+<img width="850" src="https://cdn.link-ai.tech/doc/artifacts-zh.png" />
 
 ### 模型管理
 

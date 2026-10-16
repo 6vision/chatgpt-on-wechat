@@ -311,6 +311,8 @@ export const SaveRow: React.FC<{ status: string; onSave: () => void; label?: str
 
 export const MASK_RE = /[*•]/
 
+const MODAL_WIDTH = { md: 'max-w-md', lg: 'max-w-2xl', xl: 'max-w-4xl' } as const
+
 export const Modal: React.FC<{
   open: boolean
   title: string
@@ -321,8 +323,9 @@ export const Modal: React.FC<{
   // (e.g. an owner chip), so it doesn't consume a full body row.
   headerRight?: React.ReactNode
   // Dialog width. 'md' (default) keeps the compact settings dialog; 'lg' gives
-  // form-heavy dialogs (e.g. the task editor) more breathing room.
-  size?: 'md' | 'lg'
+  // form-heavy dialogs (e.g. the task editor) more breathing room; 'xl' suits
+  // browsing dialogs that lay out a grid of cards.
+  size?: 'md' | 'lg' | 'xl'
   // Stack above another open modal. A confirm dialog spawned from inside a modal
   // (e.g. "delete this task?" over the task editor) must sit on top; both share
   // the base z-50 otherwise and the later-painted one wins, hiding the confirm.
@@ -337,7 +340,7 @@ export const Modal: React.FC<{
       }}
     >
       <div
-        className={`w-full ${size === 'lg' ? 'max-w-2xl' : 'max-w-md'} rounded-card border border-default bg-elevated shadow-xl`}
+        className={`w-full ${MODAL_WIDTH[size]} rounded-card border border-default bg-elevated shadow-xl`}
       >
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-default">
           <h3 className="font-semibold text-content flex-shrink-0">{title}</h3>
@@ -351,7 +354,7 @@ export const Modal: React.FC<{
             </button>
           </div>
         </div>
-        <div className="px-5 py-4 space-y-4 max-h-[60vh] overflow-y-auto">{children}</div>
+        <div className={`px-5 py-4 space-y-4 overflow-y-auto ${size === 'xl' ? 'h-[70vh]' : 'max-h-[60vh]'}`}>{children}</div>
         {footer && <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-default">{footer}</div>}
       </div>
     </div>

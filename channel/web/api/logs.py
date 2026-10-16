@@ -44,11 +44,14 @@ class LogsHandler:
                         initialized = True
                         yield f"data: {payload}\n\n".encode('utf-8')
                     except Exception as e:
-                        yield f"data: {{\"type\": \"error\", \"message\": \"{e}\"}}\n\n".encode('utf-8')
+                        payload = json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)
+                        yield f"data: {payload}\n\n".encode('utf-8')
                         return
 
                     deadline = time.time() + 600  # 10 min max
                     while time.time() < deadline:
+                        if os.fstat(f.fileno()).st_size < f.tell():
+                            f.seek(0)
                         line = f.readline()
                         if line:
                             payload = json.dumps({"type": "line", "content": line}, ensure_ascii=False)

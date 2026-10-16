@@ -124,6 +124,9 @@ class MemoryGetTool(BaseTool):
 
             if not file_path.exists():
                 return ToolResult.fail(f"Error: File not found: {path}")
+
+            if not file_path.is_file():
+                return ToolResult.fail(f"Error: {path} is not a regular file")
             
             content = file_path.read_text(encoding='utf-8')
             lines = content.split('\n')

@@ -42,11 +42,13 @@ def _stream(run_chat):
     ), patch("agent.protocol.get_cancel_registry", return_value=registry_of()):
         return oc._stream_completion(
             run_chat,
-            query="hi",
-            session_id=SESSION_ID,
+            {
+                "model": "m", "query": "hi", "session_id": SESSION_ID,
+                "transcript": None, "stream": True, "include_usage": False,
+            },
+            None,
             completion_id=COMPLETION_ID,
             created=0,
-            model="m",
         )
 
 

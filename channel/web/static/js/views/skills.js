@@ -1236,7 +1236,7 @@ function loadSkillsSection(highlight) {
                 + 'p-4 flex items-start gap-3 transition-opacity cursor-pointer '
                 + 'hover:border-slate-300 dark:hover:border-white/20';
             card.dataset.skillName = sk.name;
-            card.dataset.skillDesc = sk.description || '';
+            card.dataset.skillDesc = sk.display_description || sk.description || '';
             card.dataset.skillDisplayName = sk.display_name || '';
             card.dataset.enabled = sk.enabled ? '1' : '0';
             card.dataset.deletable = sk.deletable ? '1' : '0';
@@ -1289,7 +1289,7 @@ function renderSkillCard(card, sk) {
                     <span class="inline-block h-3 w-3 mt-0.5 rounded-full bg-white shadow transform transition-transform duration-200 ease-in-out ${thumbTranslate}"></span>
                 </button>
             </div>
-            <p class="text-xs text-slate-400 dark:text-slate-500 line-clamp-2">${escapeHtml(sk.description || '--')}</p>
+            <p class="text-xs text-slate-400 dark:text-slate-500 line-clamp-2">${escapeHtml(sk.display_description || sk.description || '--')}</p>
         </div>`;
 
     // Bound here rather than written into the markup above: a skill name comes

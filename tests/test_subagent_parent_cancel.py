@@ -20,7 +20,7 @@ def children(monkeypatch):
                             release=threading.Event())
 
     class Child:
-        def run_stream(self, goal, clear_history, cancel_event, on_event):
+        def run_stream(self, goal, clear_history, cancel_event, on_event, steer_inbox=None):
             state.started.append(goal)
             state.events[goal] = cancel_event
             if not goal.startswith("slow"):

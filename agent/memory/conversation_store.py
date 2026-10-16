@@ -977,9 +977,9 @@ class ConversationStore:
                 rows = conn.execute(
                     "SELECT seq, content FROM messages "
                     "WHERE agent_id = ? AND session_id = ? AND role = 'user' "
-                    "ORDER BY seq DESC LIMIT 20",
+                    "ORDER BY seq DESC",
                     (aid, session_id),
-                ).fetchall()
+                )
                 for seq, content_raw in rows:
                     try:
                         content = json.loads(content_raw)
@@ -2300,9 +2300,9 @@ class ConversationStore:
         rows = conn.execute(
             "SELECT seq, content FROM messages "
             "WHERE agent_id = ? AND session_id = ? AND role = 'user' "
-            "ORDER BY seq DESC LIMIT 50",
+            "ORDER BY seq DESC",
             (self._agent_id, session_id),
-        ).fetchall()
+        )
         for seq, raw in rows:
             try:
                 content = json.loads(raw)

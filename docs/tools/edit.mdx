@@ -1,6 +1,6 @@
 ---
 title: edit - File Edit
-description: Edit files via precise text replacement
+description: "The edit tool changes files by exact text replacement, sending only the changed part. Matches must be unique unless replaceAll is set; it can append to the end and runs safety checks first."
 ---
 
 Edit files via precise text replacement. Unlike `write`, which replaces the whole file, `edit` only sends the part being changed - faster, and less likely to disturb the rest of the file, so prefer it when modifying an existing file. If `oldText` is empty, appends to the end of the file.
