@@ -8,6 +8,7 @@ import { useUIStore } from '../../store/uiStore'
 import { useSessionStore } from '../../store/sessionStore'
 import { useSessionSettingsStore } from '../../store/sessionSettingsStore'
 import { Card, Field, Dropdown, Toggle, TextInput, SaveRow, MASK_RE } from './primitives'
+import ChatApiCard from './ChatApiCard'
 import { PERMISSION_META, PERMISSION_MODE_ORDER, asPermissionMode } from '../../lib/permission'
 
 const CustomModelPicker = product.models?.ModelPicker
@@ -675,6 +676,8 @@ const BasicSettings: React.FC<BasicSettingsProps> = ({ baseUrl, onLangChange, on
           <SaveRow status={pwStatus} onSave={savePassword} />
         </div>
       </Card>
+
+      <ChatApiCard baseUrl={baseUrl} />
 
       {/* System — language + notification preferences (client-side, no save) */}
       <Card icon={<Settings size={16} />} title={t('config_system')}>

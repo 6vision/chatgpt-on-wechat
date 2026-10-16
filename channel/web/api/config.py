@@ -46,6 +46,7 @@ class ConfigHandler:
         "agent_max_context_tokens", "agent_max_context_turns", "agent_max_steps",
         "enable_thinking", "reasoning_effort", "reasoning_effort_by_model", "self_evolution_enabled", "web_password",
         "agent_permission_mode",
+        "skill_hub_url", "skill_hub_api_key",
     }
 
     # Switches the API exposes flat - one key, one control - while the config
@@ -155,6 +156,7 @@ class ConfigHandler:
                 "api_keys": api_keys_masked,
                 "providers": providers,
                 "web_password_masked": masked_pwd,
+                "skill_hub_url": local_config.get("skill_hub_url", ""),
                 # Whether "show in folder" can open this machine's file manager.
                 "can_reveal_files": _can_reveal_in_file_manager(),
             }
@@ -293,4 +295,53 @@ class ConfigHandler:
             return json.dumps({"status": "success", "applied": applied, "warning": password_warning}, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Error updating config: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+
+class ExternalApiHandler:
+    """/api/external_api: the OpenAI-compatible chat API's switch and key.
+
+    Turning the API off keeps its key, so callers keep working once it is
+    back on; only regenerating replaces the key.
+    """
+
+    ACTIONS = ("enable", "disable", "regenerate")
+
+    @staticmethod
+    def _state() -> dict:
+        local_config = conf()
+        token = str(local_config.get("external_api_token", "") or "")
+        enabled = bool(local_config.get("external_api_enabled")) and bool(token)
+        return {"status": "success", "enabled": enabled, "api_key": token}
+
+    def GET(self):
+        _require_auth()
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        return json.dumps(self._state(), ensure_ascii=False)
+
+    def POST(self):
+        _require_auth()
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        try:
+            import secrets
+
+            action = (json.loads(web.data() or b"{}") or {}).get("action")
+            if action not in self.ACTIONS:
+                return json.dumps({"status": "error", "message": f"unknown action: {action!r}"})
+            local_config = conf()
+            token = str(local_config.get("external_api_token", "") or "")
+            if action == "regenerate" or (action == "enable" and not token):
+                token = "sk-cow-" + secrets.token_hex(24)
+            updates = {"external_api_token": token}
+            if action != "regenerate":
+                updates["external_api_enabled"] = action == "enable"
+            file_cfg = _read_config_file_for_write()
+            file_cfg.update(updates)
+            _write_config_file_for_write(os.path.join(get_data_root(), "config.json"), file_cfg)
+            for key, value in updates.items():
+                local_config[key] = value
+            logger.info(f"[WebChannel] Chat API {action}d")
+            return json.dumps(self._state(), ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WebChannel] Chat API setting failed: {e}")
             return json.dumps({"status": "error", "message": str(e)})

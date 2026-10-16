@@ -3,6 +3,7 @@ import type {
   ChannelInfo,
   ChannelAction,
   SkillInfo,
+  SkillInstallMeta,
   SkillContent,
   SkillFileEntry,
   SkillCreateResult,
@@ -51,6 +52,11 @@ import { getLang, t } from '../i18n'
 export interface ApiResult {
   status: string
   message?: string
+}
+
+export interface ExternalApiState {
+  enabled: boolean
+  api_key: string
 }
 
 export interface UploadResult {
@@ -693,6 +699,17 @@ class ApiClient {
     })
   }
 
+  /** The OpenAI-compatible chat API: whether it is on, its key, and the Agents it serves. */
+  async getExternalApi(): Promise<ApiResult & ExternalApiState> {
+    return this.request('/api/external_api')
+  }
+
+  async updateExternalApi(
+    action: 'enable' | 'disable' | 'regenerate'
+  ): Promise<ApiResult & ExternalApiState> {
+    return this.request('/api/external_api', { method: 'POST', body: JSON.stringify({ action }) })
+  }
+
   // ---------------------------------------------------------
   // Menu (shared with the web console) and the artifacts it can hold
   // ---------------------------------------------------------
@@ -977,10 +994,11 @@ class ApiClient {
   }
 
   /** Install straight from a remote spec (e.g. an https archive URL), without staging. */
-  async installSkill(spec: string): Promise<ApiResult & { installed?: string[] }> {
+  /** `meta` is recorded on the skill when the spec installs exactly one. */
+  async installSkill(spec: string, meta?: SkillInstallMeta): Promise<ApiResult & { installed?: string[] }> {
     return this.request('/api/skills', {
       method: 'POST',
-      body: JSON.stringify({ action: 'install', spec }),
+      body: JSON.stringify({ action: 'install', spec, ...(meta ? { meta } : {}) }),
     })
   }
 

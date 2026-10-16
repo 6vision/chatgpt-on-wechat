@@ -42,13 +42,13 @@ The code sits in two packages, mirroring the frontend's `core/` and `views/`:
 | `artifacts.py` | `/api/artifacts`, `/api/artifacts/add`, `/api/artifacts/pin`, `/api/artifacts/rename`, `/api/artifacts/delete`: the cross-Agent index of files the conversations produced |
 | `menu.py` | `/api/menu`: the menu the user arranged, shared with the desktop client; its custom pages open at `/m/<id>` |
 | `agents.py` | `/api/agents/*`, core files, avatars |
-| `config.py` | `/api/config` |
+| `config.py` | `/api/config`, `/api/external_api` (turn the chat API on or off, issue its key) |
 | `models.py` | `/api/models` |
 | `channels.py` | `/api/channels`, the WeChat QR and Feishu registration flows |
 | `scheduler.py` | `/api/scheduler/*` |
 | `skills.py`, `memory.py`, `knowledge.py`, `logs.py` | The remaining management views |
 | `update.py` | `/VERSION`, `/api/update/*` |
-| `openai_compat.py` | `/v1/chat/completions` |
+| `openai_compat.py` | `/v1/chat/completions`, `/v1/models` |
 
 Two things to know before moving code between these modules:
 
