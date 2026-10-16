@@ -810,29 +810,9 @@ def _session_roster(session_id: str, host_agent_id: str) -> List[dict]:
 
 
 def _addressed_agent_id(text: str, roster: List[dict]) -> str:
-    """The teammate this message names, or "" when it names nobody.
+    from agent.team_addressing import addressed_agent_id
 
-    Matching accepts the display name as well as the id, because the composer
-    writes the name — nobody types ``@agent-17n3e8`` on purpose. Longer labels
-    are tried first so that a name containing another name still resolves to
-    the one actually written.
-
-    Only a leading mention counts. Naming somebody mid-sentence is usually
-    talking *about* them ("ask Ops to..."), not handing them the turn.
-    """
-    stripped = (text or "").lstrip()
-    if not stripped.startswith("@"):
-        return ""
-    candidates = []
-    for item in roster:
-        for label in (item.get("name") or "", item.get("id") or ""):
-            if label:
-                candidates.append((label, item["id"]))
-    for label, agent_id in sorted(candidates, key=lambda pair: -len(pair[0])):
-        pattern = r"^@" + re.escape(label) + r"(?=[\s，,：:、]|$)"
-        if re.match(pattern, stripped, re.IGNORECASE):
-            return agent_id
-    return ""
+    return addressed_agent_id(text, roster)
 
 
 def _live_channel_manager():
