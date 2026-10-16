@@ -207,25 +207,19 @@ def _skill_service(agent_id: str = ''):
 
 
 def _record_staged_fields(staging_dir: str, installed: list, service) -> None:
-    """Carry the registry's presentation fields from staging into the live config.
+    """Carry the fields a configured Skill Hub registry recorded at staging
+    (category, display_description, icon, version) into the live config."""
+    from cli.commands.skill import _read_staged_config
 
-    ``commit_staged`` forwards only ``source`` and ``display_name``; what a
-    configured Skill Hub registry said about a single skill (category,
-    display_description, icon, version) lives in the staged
-    ``skills_config.json`` and would be dropped together with the staging
-    directory. The plain install action records the caller's ``meta`` through
-    ``record_install``; do the same here, from the staged entry, before the
-    staging is gone. A package of several has no one owner, so it is skipped.
-    """
     if len(installed) != 1:
         return
-    try:
-        with open(os.path.join(staging_dir, "skills_config.json"), "r", encoding="utf-8") as f:
-            config = json.load(f)
-    except (OSError, ValueError):
-        return
-    entry = config.get(installed[0]) if isinstance(config, dict) else None
+    entry = _read_staged_config(staging_dir).get(installed[0])
     if not isinstance(entry, dict):
+        return
+    # A plain staged entry carries no registry fields; applying it would drop
+    # the icon/version a reinstalled market skill already has.
+    if entry.get("category", "skill") == "skill" and not any(
+            entry.get(k) for k in ("display_description", "icon", "version")):
         return
     try:
         service.record_install(installed[0], entry)
