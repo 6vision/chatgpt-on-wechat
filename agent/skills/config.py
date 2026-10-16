@@ -36,8 +36,9 @@ def has_custom_provider(skill_name: str) -> bool:
         return False
     if not isinstance(payload, dict):
         return False
-    return bool((payload.get("api_key") or "").strip()) and bool(
-        (payload.get("api_base") or "").strip()
+    return all(
+        isinstance(payload.get(field), str) and bool(payload[field].strip())
+        for field in ("api_key", "api_base")
     )
 
 

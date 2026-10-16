@@ -257,8 +257,10 @@ class SubagentTool(BaseTool):
             "reads or runs out of yours.\n\n"
             "Reach for it on substantial research, investigation or data "
             "gathering — one task, or several at once via `tasks` (up to "
-            f"{settings.max_concurrent}) which run in parallel. Do simple work "
-            "you can finish yourself directly instead.\n\n"
+            f"{settings.max_concurrent}) which run in parallel. A sub agent "
+            "takes more time and costs more than working directly, so use it "
+            "only when needed; do simple work you can finish yourself directly "
+            "instead.\n\n"
             "The sub agent starts with no history and cannot reach you or the "
             "user mid-task, so state the goal in full and put every path, "
             "identifier and constraint it needs into `context`; a vague goal "
@@ -286,7 +288,7 @@ class SubagentTool(BaseTool):
                     SubagentTask(
                         goal=goal,
                         context=str(entry.get("context") or ""),
-                        subagent_type=entry.get("subagent_type"),
+                        subagent_type=str(entry.get("subagent_type") or "").strip() or None,
                     )
                 )
             return tasks
@@ -298,7 +300,7 @@ class SubagentTool(BaseTool):
             SubagentTask(
                 goal=goal,
                 context=str(params.get("context") or ""),
-                subagent_type=params.get("subagent_type"),
+                subagent_type=str(params.get("subagent_type") or "").strip() or None,
             )
         ]
 

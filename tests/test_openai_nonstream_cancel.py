@@ -6,6 +6,13 @@ from unittest.mock import patch
 from channel.web.api import openai_compat as oc
 
 
+def _values(session_id):
+    return {
+        "model": "m", "query": "hi", "session_id": session_id,
+        "transcript": None, "stream": False, "include_usage": False,
+    }
+
+
 class NonStreamingCancellationTest(unittest.TestCase):
     def setUp(self):
         from agent.protocol import get_cancel_registry
@@ -24,8 +31,8 @@ class NonStreamingCancellationTest(unittest.TestCase):
              patch("agent.protocol.get_cancel_registry", return_value=self.registry):
             oc._non_stream_completion(
                 run_chat,
-                query="hi", session_id="sess-y",
-                completion_id="chatcmpl-cancel", created=0, model="m",
+                _values("sess-y"), None,
+                completion_id="chatcmpl-cancel", created=0,
             )
 
         self.assertEqual(observed.get("cancelled"), 1)
@@ -36,8 +43,8 @@ class NonStreamingCancellationTest(unittest.TestCase):
              patch("agent.protocol.get_cancel_registry", return_value=self.registry):
             oc._non_stream_completion(
                 lambda q, s, cb, **kw: cb({"chunk_type": "content", "delta": "x"}),
-                query="hi", session_id="sess-z",
-                completion_id="chatcmpl-done", created=0, model="m",
+                _values("sess-z"), None,
+                completion_id="chatcmpl-done", created=0,
             )
 
         self.assertNotIn("chatcmpl-done", self.registry._by_request)
@@ -52,8 +59,8 @@ class NonStreamingCancellationTest(unittest.TestCase):
              patch("agent.protocol.get_cancel_registry", return_value=self.registry):
             with self.assertRaises(oc.OpenAIAPIError):
                 oc._non_stream_completion(
-                    boom, query="hi", session_id="sess-w",
-                    completion_id="chatcmpl-boom", created=0, model="m",
+                    boom, _values("sess-w"), None,
+                    completion_id="chatcmpl-boom", created=0,
                 )
 
         self.assertNotIn("chatcmpl-boom", self.registry._by_request)

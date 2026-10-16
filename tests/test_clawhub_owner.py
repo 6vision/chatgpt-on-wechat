@@ -39,7 +39,8 @@ def hub(tmp_path, monkeypatch):
     calls = {"post": [], "get": []}
     state = {"has_mirror": True, "ambiguous": True}
 
-    def fake_post(url, json=None, timeout=None):
+    def fake_post(url, json=None, headers=None, timeout=None):
+        assert not headers, "a provider request carried registry credentials"
         calls["post"].append((url, json))
         if json and json.get("mirror"):
             return _Resp(content=_zip("gog"), content_type="application/zip")

@@ -77,7 +77,8 @@ def _save_store(store: dict) -> None:
 
 def load_server_record(server_name: str) -> dict:
     with _STORE_LOCK:
-        return dict(_load_store().get(server_name, {}))
+        record = _load_store().get(server_name, {})
+        return dict(record) if isinstance(record, dict) else {}
 
 
 def save_server_record(server_name: str, record: dict) -> None:

@@ -269,6 +269,84 @@
                                     </div>
                                 </div>
 
+                                <!-- Chat API Card -->
+                                <div id="config-api-card" class="bg-white dark:bg-[#1A1A1A] rounded-xl border border-slate-200 dark:border-white/10 p-6">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-9 h-9 rounded-lg bg-violet-50 dark:bg-violet-900/30 flex items-center justify-center">
+                                            <i class="fas fa-plug text-violet-500 text-sm"></i>
+                                        </div>
+                                        <div class="min-w-0">
+                                            <h3 class="font-semibold text-slate-800 dark:text-slate-100" data-i18n="config_api">对话 API</h3>
+                                            <p class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                                                <span data-i18n="config_api_desc">通过 OpenAI 兼容接口调用 Agent</span>
+                                                <a id="cfg-api-docs" href="https://docs.cowagent.ai/zh/extensions/chat-api" target="_blank" rel="noopener noreferrer"
+                                                   class="ml-1 text-primary-500 hover:underline" data-i18n="config_api_docs">查看文档</a>
+                                            </p>
+                                        </div>
+                                        <label class="ml-auto relative inline-flex items-center cursor-pointer flex-shrink-0">
+                                            <input id="cfg-api-enabled" type="checkbox" class="sr-only peer" onchange="onExternalApiToggle(this)">
+                                            <div class="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-checked:bg-primary-400 rounded-full
+                                                        after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white
+                                                        after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                                        </label>
+                                    </div>
+                                    <div id="cfg-api-detail" class="hidden space-y-4 mt-5">
+                                        <div>
+                                            <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5" data-i18n="config_api_base_url">接口地址</label>
+                                            <div class="flex gap-2">
+                                                <input id="cfg-api-base-url" type="text" readonly
+                                                       class="flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                                                              bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100 font-mono focus:outline-none">
+                                                <button type="button" class="cfg-api-btn" onclick="copyExternalApiField('cfg-api-base-url', this)"
+                                                        data-tip-key="config_api_copy" data-tip-float><i class="far fa-copy"></i></button>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label class="flex items-center gap-1.5 text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">
+                                                <span>API Key</span>
+                                                <span class="cfg-tip" data-tip-key="config_api_key_hint" data-tip-float><i class="fas fa-circle-question"></i></span>
+                                            </label>
+                                            <div class="flex gap-2">
+                                                <div class="relative flex-1 min-w-0">
+                                                    <input id="cfg-api-token" type="text" readonly autocomplete="off" data-1p-ignore data-lpignore="true"
+                                                           class="w-full px-3 py-2 pr-10 rounded-lg border border-slate-200 dark:border-slate-600
+                                                                  bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100 font-mono focus:outline-none cfg-key-masked">
+                                                    <button type="button" id="cfg-api-token-toggle"
+                                                            class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer transition-colors p-1"
+                                                            onclick="toggleExternalApiKey()">
+                                                        <i class="fas fa-eye text-xs"></i>
+                                                    </button>
+                                                </div>
+                                                <button type="button" class="cfg-api-btn" onclick="copyExternalApiField('cfg-api-token', this)"
+                                                        data-tip-key="config_api_copy" data-tip-float><i class="far fa-copy"></i></button>
+                                                <button type="button" class="cfg-api-btn" onclick="regenerateExternalApiKey()"
+                                                        data-tip-key="config_api_regenerate" data-tip-float><i class="fas fa-rotate"></i></button>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div class="flex items-center justify-between mb-1.5">
+                                                <label class="flex items-center gap-1.5 text-sm font-medium text-slate-600 dark:text-slate-400">
+                                                    <span data-i18n="config_api_example">调用示例</span>
+                                                    <span class="cfg-tip" data-tip-key="config_api_example_hint" data-tip-float><i class="fas fa-circle-question"></i></span>
+                                                </label>
+                                                <div class="flex items-center bg-slate-100 dark:bg-white/10 rounded-md p-0.5">
+                                                    <button type="button" class="cfg-api-lang px-2.5 py-0.5 rounded text-xs cursor-pointer active" data-lang="curl" onclick="switchExternalApiExample('curl')">cURL</button>
+                                                    <button type="button" class="cfg-api-lang px-2.5 py-0.5 rounded text-xs cursor-pointer" data-lang="python" onclick="switchExternalApiExample('python')">Python</button>
+                                                    <button type="button" class="cfg-api-lang px-2.5 py-0.5 rounded text-xs cursor-pointer" data-lang="node" onclick="switchExternalApiExample('node')">Node.js</button>
+                                                </div>
+                                            </div>
+                                            <div class="relative">
+                                                <pre id="cfg-api-example" class="text-xs leading-relaxed font-mono rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-white/5
+                                                            text-slate-700 dark:text-slate-200 p-3 pr-10 overflow-x-auto whitespace-pre"></pre>
+                                                <button type="button" class="absolute right-2 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer p-1"
+                                                        onclick="copyExternalApiField('cfg-api-example', this)" data-tip-key="config_api_copy" data-tip-float>
+                                                    <i class="far fa-copy text-xs"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- System Config Card -->
                                 <div class="bg-white dark:bg-[#1A1A1A] rounded-xl border border-slate-200 dark:border-white/10 p-6">
                                     <div class="flex items-center gap-3 mb-5">

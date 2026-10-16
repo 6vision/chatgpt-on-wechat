@@ -1,6 +1,6 @@
 ---
 title: Sub-Agent
-description: "Sub-Agent: hand independent tasks to a sub-Agent, run them in parallel, and get back only the conclusion"
+description: "Sub-agents are temporary workers the main agent spawns for independent tasks. They run in their own context, can work in parallel and return only the result, saving tokens in the main conversation."
 ---
 
 A sub-Agent is a temporary execution unit that the lead Agent creates during a conversation. The lead Agent hands it one independent task, it completes that task in its own context, and it returns the result. The pages it opens, the files it reads, and the commands it runs never enter the main conversation.

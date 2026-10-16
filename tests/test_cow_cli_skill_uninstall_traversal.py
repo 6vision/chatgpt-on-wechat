@@ -27,7 +27,7 @@ def dirs(tmp_path, monkeypatch):
     (skills / "alpha").mkdir(parents=True)
     (tmp_path / "victim").mkdir()
     (tmp_path / "victim" / "important.txt").write_text("keep")
-    monkeypatch.setattr(cli.utils, "get_skills_dir", lambda: str(skills))
+    monkeypatch.setattr(cli.utils, "get_skills_dir", lambda agent_id=None: str(skills))
     return skills, tmp_path / "victim"
 
 

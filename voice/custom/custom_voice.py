@@ -87,7 +87,7 @@ class CustomVoice(Voice):
                 data = response.json()
             except ValueError:
                 data = {"raw": response.text[:200]}
-            if response.status_code != 200 or "text" not in data:
+            if response.status_code != 200 or not isinstance(data, dict) or not isinstance(data.get("text"), str):
                 logger.error(
                     f"[Custom] voiceToText failed: status={response.status_code}, resp={data}"
                 )

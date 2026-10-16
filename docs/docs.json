@@ -271,6 +271,18 @@
             "tab": "Extensions",
             "groups": [
               {
+                "group": "API",
+                "pages": [
+                  "extensions/chat-api"
+                ]
+              },
+              {
+                "group": "Customization",
+                "pages": [
+                  "extensions/custom-menu"
+                ]
+              },
+              {
                 "group": "Third-party Integrations",
                 "pages": [
                   "extensions/agent-mail"
@@ -285,6 +297,7 @@
                 "group": "Release Notes",
                 "pages": [
                   "releases/overview",
+                  "releases/v2.2.1",
                   "releases/v2.2.0",
                   "releases/v2.1.9",
                   "releases/v2.1.8",
@@ -532,6 +545,18 @@
             "tab": "扩展",
             "groups": [
               {
+                "group": "开放接口",
+                "pages": [
+                  "zh/extensions/chat-api"
+                ]
+              },
+              {
+                "group": "界面定制",
+                "pages": [
+                  "zh/extensions/custom-menu"
+                ]
+              },
+              {
                 "group": "三方集成",
                 "pages": [
                   "zh/extensions/agent-mail"
@@ -546,6 +571,7 @@
                 "group": "发布记录",
                 "pages": [
                   "zh/releases/overview",
+                  "zh/releases/v2.2.1",
                   "zh/releases/v2.2.0",
                   "zh/releases/v2.1.9",
                   "zh/releases/v2.1.8",
@@ -792,6 +818,18 @@
             "tab": "拡張",
             "groups": [
               {
+                "group": "API",
+                "pages": [
+                  "ja/extensions/chat-api"
+                ]
+              },
+              {
+                "group": "UI カスタマイズ",
+                "pages": [
+                  "ja/extensions/custom-menu"
+                ]
+              },
+              {
                 "group": "サードパーティ連携",
                 "pages": [
                   "ja/extensions/agent-mail"
@@ -806,6 +844,7 @@
                 "group": "リリースノート",
                 "pages": [
                   "ja/releases/overview",
+                  "ja/releases/v2.2.1",
                   "ja/releases/v2.2.0",
                   "ja/releases/v2.1.9",
                   "ja/releases/v2.1.8",

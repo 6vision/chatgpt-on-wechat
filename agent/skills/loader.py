@@ -217,7 +217,7 @@ class SkillLoader:
         # Normalize name (handle both string and list)
         if isinstance(name, list):
             name = name[0] if name else parent_dir_name
-        elif not isinstance(name, str):
+        if not isinstance(name, str):
             name = str(name) if name else parent_dir_name
         
         # Normalize description (handle both string and list)
