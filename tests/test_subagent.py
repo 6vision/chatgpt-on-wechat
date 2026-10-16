@@ -6,6 +6,7 @@ what a model happens to reply.
 """
 
 import json
+import os
 import shutil
 import threading
 import time
@@ -165,6 +166,36 @@ def test_bad_template_encoding_does_not_disable_valid_subagents(
     }
     assert "broken" not in load_templates(str(workspace))
     assert invalid.read_bytes().endswith(b"\xff\n")
+
+
+def test_an_unlistable_templates_dir_does_not_disable_subagents(
+    spawn_tool, enabled, workspace, monkeypatch
+):
+    """The sibling read is guarded (an undecodable file must not disable valid
+    types); the listdir that feeds it was not, so a directory that cannot be
+    listed -- permissions changed, a race with a delete -- raised out of
+    load_templates and out of execute, while the description degraded."""
+    directory = workspace / "subagents"
+    directory.mkdir(parents=True)
+    (directory / "auditor.md").write_text(
+        "---\nname: auditor\ndescription: Review defects.\n---\nAudit carefully.\n",
+        encoding="utf-8",
+    )
+
+    real_listdir = os.listdir
+
+    def unlistable(path):
+        if str(path) == str(directory):
+            raise PermissionError(13, "Permission denied")
+        return real_listdir(path)
+
+    monkeypatch.setattr(os, "listdir", unlistable)
+    _capture_children(monkeypatch)
+
+    result = spawn_tool.execute({"goal": "review", "subagent_type": "general-purpose"})
+
+    assert result.success
+    assert set(load_templates(str(workspace))) == {"general-purpose", "explore"}
 
 
 def test_the_shipped_guide_is_not_offered_as_a_type(workspace):
@@ -438,6 +469,24 @@ def test_unknown_type_names_what_is_available(spawn_tool, enabled):
     result = spawn_tool.execute({"goal": "go", "subagent_type": "nope"})
     assert result.status == "error"
     assert "nope" in result.result and "general-purpose" in result.result
+
+
+@pytest.mark.parametrize("bad_type", [123, True, ["a"]], ids=["int", "bool", "list"])
+@pytest.mark.parametrize("as_tasks", [False, True], ids=["single", "tasks"])
+def test_a_non_string_type_is_reported_as_unknown_not_a_crash(spawn_tool, enabled, bad_type, as_tasks):
+    """The model quotes scalars the way _coerce_integer_args exists for.
+    goal/context are coerced in _collect_tasks; subagent_type was not, so a
+    non-string reached the unknown-type report and crashed it with a raw
+    TypeError -- sorted() across mixed types, then join() -- instead of
+    naming what was wrong and what the available types are."""
+    params = {"tasks": [{"goal": "go", "subagent_type": bad_type}]} if as_tasks \
+        else {"goal": "go", "subagent_type": bad_type}
+
+    result = spawn_tool.execute(params)
+
+    assert result.status == "error"
+    assert "general-purpose" in result.result
+    assert str(bad_type) in result.result
 
 
 def test_missing_goal_is_refused(spawn_tool, enabled):

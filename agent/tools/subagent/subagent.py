@@ -288,7 +288,7 @@ class SubagentTool(BaseTool):
                     SubagentTask(
                         goal=goal,
                         context=str(entry.get("context") or ""),
-                        subagent_type=entry.get("subagent_type"),
+                        subagent_type=str(entry.get("subagent_type") or "").strip() or None,
                     )
                 )
             return tasks
@@ -300,7 +300,7 @@ class SubagentTool(BaseTool):
             SubagentTask(
                 goal=goal,
                 context=str(params.get("context") or ""),
-                subagent_type=params.get("subagent_type"),
+                subagent_type=str(params.get("subagent_type") or "").strip() or None,
             )
         ]
 

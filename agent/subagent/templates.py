@@ -181,7 +181,17 @@ def load_templates(workspace_dir: Optional[str] = None) -> Dict[str, SubagentTem
     if not os.path.isdir(directory):
         return templates
 
-    for entry in sorted(os.listdir(directory)):
+    try:
+        entries = sorted(os.listdir(directory))
+    except OSError as e:
+        # A directory that cannot be listed (permissions, a race with a
+        # delete) must not take the tool down with it: the built-in types
+        # stay available, the same way one undecodable file below does not
+        # remove them.
+        logger.warning(f"[SubAgent] Cannot list templates in {directory}: {e}")
+        return templates
+
+    for entry in entries:
         if not entry.endswith(".md"):
             continue
         # The shipped format guide lives here too. It is documentation, not a
