@@ -234,7 +234,10 @@ class OpenAICompatibleBot:
             api_key=api_key, api_base=api_base, timeout=timeout,
             stream=False, **payload,
         )
-        return responses_adapter.responses_to_chat_completion(response)
+        result = responses_adapter.responses_to_chat_completion(response)
+        if result.get("error"):
+            raise OpenAIHTTPError(result.get("status_code") or 500, response, result.get("message") or "")
+        return result
 
     def _call_with_tools_responses(self, *, model_name, messages, tools, stream,
                                    api_config, kwargs):

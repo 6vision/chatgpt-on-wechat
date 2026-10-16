@@ -33,3 +33,15 @@ def test_successful_response_retains_text():
         {"status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": "hello"}]}]}
     )
     assert result["choices"][0]["message"]["content"] == "hello"
+
+
+def test_chat_completion_helper_raises_on_failed_response(monkeypatch):
+    import pytest
+    from models.openai.openai_http_client import OpenAIHTTPError
+
+    bot = OpenAICompatibleBot.__new__(OpenAICompatibleBot)
+    client = Mock()
+    client.responses.return_value = {"status": "failed", "error": {"message": "Generation failed"}}
+    monkeypatch.setattr(bot, "_get_http_client", lambda: client)
+    with pytest.raises(OpenAIHTTPError, match="Generation failed"):
+        bot._responses_as_chat_completion(model="gpt-test", messages=[{"role": "user", "content": "hi"}])
