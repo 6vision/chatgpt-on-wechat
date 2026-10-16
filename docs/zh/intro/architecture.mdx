@@ -95,9 +95,9 @@ Agent 的系统工作空间默认位于 `~/cow` 目录，用于存储系统提�
 {
   "agent": true,
   "agent_workspace": "~/cow",
-  "agent_max_context_tokens": 40000,
+  "agent_max_context_tokens": 200000,
   "agent_max_context_turns": 30,
-  "agent_max_steps": 15,
+  "agent_max_steps": 100,
   "agent_permission_mode": "workspace-write",
   "enable_thinking": false,
   "cow_lang": "auto"
@@ -108,9 +108,9 @@ Agent 的系统工作空间默认位于 `~/cow` 目录，用于存储系统提�
 | --- | --- | --- |
 | `agent` | 是否启用 Agent 模式 | `true` |
 | `agent_workspace` | 系统工作空间路径 | `~/cow` |
-| `agent_max_context_tokens` | 最大上下文 token 数 | `50000` |
-| `agent_max_context_turns` | 最大上下文记忆轮次 | `20` |
-| `agent_max_steps` | 单次任务最大决策步数 | `20` |
+| `agent_max_context_tokens` | 最大上下文 token 数 | `200000` |
+| `agent_max_context_turns` | 最大上下文记忆轮次 | `30` |
+| `agent_max_steps` | 单次任务最大决策步数 | `100` |
 | `agent_permission_mode` | 全局默认权限，新会话沿用：`read-only` / `workspace-write` / `full-access` | `full-access` |
 | `enable_thinking` | 是否启用深度思考模式 | `false` |
 | `knowledge` | 是否启用个人知识库 | `true` |

@@ -671,7 +671,7 @@ class AgentBridge:
             description=kwargs.get("description", "AI Super Agent"),
             model=model,
             tools=tools,
-            max_steps=kwargs.get("max_steps", 15),
+            max_steps=kwargs.get("max_steps", 100),
             output_mode=kwargs.get("output_mode", "logger"),
             workspace_dir=kwargs.get("workspace_dir"),
             skill_manager=kwargs.get("skill_manager"),
@@ -1012,7 +1012,7 @@ class AgentBridge:
         try:
             if not conf().get("conversation_persistence", True):
                 return []
-            max_turns = conf().get("agent_max_context_turns", 20)
+            max_turns = conf().get("agent_max_context_turns", 30)
             saved = self.get_conversation_store(owner_agent_id).load_messages(
                 session_id, max_turns=max(3, max_turns // 2), with_authors=True
             )
@@ -1720,7 +1720,7 @@ class AgentBridge:
             if session_id and session_id.startswith("scheduler_"):
                 from config import conf
                 scheduler_keep_turns = max(
-                    1, int(conf().get("agent_max_context_turns", 20)) // 5
+                    1, int(conf().get("agent_max_context_turns", 30)) // 5
                 )
                 self._trim_in_memory_to_turns(agent, scheduler_keep_turns)
 

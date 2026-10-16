@@ -37,9 +37,9 @@
   "external_api_enabled": false,
   "external_api_token": "",
   "agent": true,
-  "agent_max_context_tokens": 64000,
+  "agent_max_context_tokens": 200000,
   "agent_max_context_turns": 30,
-  "agent_max_steps": 30,
+  "agent_max_steps": 100,
   "agent_permission_mode": "full-access",
   "subagent": {
     "enabled": true,

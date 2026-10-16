@@ -139,9 +139,9 @@ class ConfigHandler:
                 "channel_type": local_config.get("channel_type", ""),
                 # Manual cap on the input budget (compact once reached); 0
                 # disables the cap and follows the model window.
-                "agent_max_context_tokens": local_config.get("agent_max_context_tokens", 64000),
-                "agent_max_context_turns": local_config.get("agent_max_context_turns", 20),
-                "agent_max_steps": local_config.get("agent_max_steps", 20),
+                "agent_max_context_tokens": local_config.get("agent_max_context_tokens", 200000),
+                "agent_max_context_turns": local_config.get("agent_max_context_turns", 30),
+                "agent_max_steps": local_config.get("agent_max_steps", 100),
                 "enable_thinking": bool(local_config.get("enable_thinking", False)),
                 "reasoning_effort": local_config.get("reasoning_effort", "high"),
                 "reasoning_effort_by_model": local_config.get("reasoning_effort_by_model", {}),

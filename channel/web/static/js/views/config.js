@@ -174,9 +174,9 @@ function initConfigView(data) {
     onProviderChange(cfgProviderValue);
     syncModelSelection(configCurrentModel);
 
-    document.getElementById('cfg-max-tokens').value = data.agent_max_context_tokens ?? 64000;
-    document.getElementById('cfg-max-turns').value = data.agent_max_context_turns || 20;
-    document.getElementById('cfg-max-steps').value = data.agent_max_steps || 20;
+    document.getElementById('cfg-max-tokens').value = data.agent_max_context_tokens ?? 200000;
+    document.getElementById('cfg-max-turns').value = data.agent_max_context_turns || 30;
+    document.getElementById('cfg-max-steps').value = data.agent_max_steps || 100;
     const thinkingEl = document.getElementById('cfg-enable-thinking');
     thinkingEl.checked = data.enable_thinking === true;
     if (!thinkingEl._cfgReasoningBound) {
@@ -539,8 +539,8 @@ function saveAgentConfig() {
     const mergedEffortByModel = Object.assign({}, configReasoningByModel, { [effortKey]: cfgReasoningEffortValue });
     const updates = {
         agent_max_context_tokens: parseInt(document.getElementById('cfg-max-tokens').value) || 0,
-        agent_max_context_turns: parseInt(document.getElementById('cfg-max-turns').value) || 20,
-        agent_max_steps: parseInt(document.getElementById('cfg-max-steps').value) || 20,
+        agent_max_context_turns: parseInt(document.getElementById('cfg-max-turns').value) || 30,
+        agent_max_steps: parseInt(document.getElementById('cfg-max-steps').value) || 100,
         enable_thinking: document.getElementById('cfg-enable-thinking').checked,
         // Persist effort per model (merge with the existing map so other
         // models' saved efforts survive the flat config save).

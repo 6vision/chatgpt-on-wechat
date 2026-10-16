@@ -79,7 +79,7 @@ description: "scheduler 工具通过自然语言创建和管理定时任务，�
 scheduler_keep_turns = max(1, agent_max_context_turns / 5)
 ```
 
-`agent_max_context_turns` 默认为 `20`，所以定时任务每次执行默认带最近 **4 轮**历史。需要更长记忆可调大 `agent_max_context_turns`。
+`agent_max_context_turns` 默认为 `30`，所以定时任务每次执行默认带最近 **6 轮**历史。需要更长记忆可调大 `agent_max_context_turns`。
 
 <Note>
 群聊场景（飞书 / 企微群机器人 / 钉钉等）下用户的真实 session_id 形如 `user_id:group_id`，与 receiver 不同。创建任务时会自动记录正确的 session_id；老的 `tasks.json` 缺该字段时回落到 receiver，行为与历史版本一致。

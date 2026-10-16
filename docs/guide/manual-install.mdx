@@ -134,9 +134,9 @@ sudo docker logs -f chatgpt-on-wechat
   "deepseek_api_key": "",
   "agent": true,
   "agent_workspace": "~/cow",
-  "agent_max_context_tokens": 40000,
+  "agent_max_context_tokens": 200000,
   "agent_max_context_turns": 30,
-  "agent_max_steps": 15,
+  "agent_max_steps": 100,
   "cow_lang": "auto"
 }
 ```
@@ -147,9 +147,9 @@ sudo docker logs -f chatgpt-on-wechat
 | `model` | Model name | `deepseek-flash` |
 | `agent` | Enable Agent mode | `true` |
 | `agent_workspace` | Agent workspace path | `~/cow` |
-| `agent_max_context_tokens` | Max context tokens | `40000` |
+| `agent_max_context_tokens` | Max context tokens | `200000` |
 | `agent_max_context_turns` | Max context turns | `30` |
-| `agent_max_steps` | Max decision steps per task | `15` |
+| `agent_max_steps` | Max decision steps per task | `100` |
 | `cow_lang` | Language for the UI, command text and system prompts; `auto` to detect, or set `zh` / `en` | `auto` |
 
 <Tip>

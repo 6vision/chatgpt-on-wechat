@@ -95,9 +95,9 @@ Configure Agent mode parameters in `config.json`:
 {
   "agent": true,
   "agent_workspace": "~/cow",
-  "agent_max_context_tokens": 50000,
-  "agent_max_context_turns": 20,
-  "agent_max_steps": 20,
+  "agent_max_context_tokens": 200000,
+  "agent_max_context_turns": 30,
+  "agent_max_steps": 100,
   "agent_permission_mode": "full-access",
   "enable_thinking": false,
   "cow_lang": "auto"
@@ -108,9 +108,9 @@ Configure Agent mode parameters in `config.json`:
 | --- | --- | --- |
 | `agent` | Enable Agent mode | `true` |
 | `agent_workspace` | Workspace path | `~/cow` |
-| `agent_max_context_tokens` | Max context tokens | `50000` |
-| `agent_max_context_turns` | Max context turns | `20` |
-| `agent_max_steps` | Max decision steps per task | `20` |
+| `agent_max_context_tokens` | Max context tokens | `200000` |
+| `agent_max_context_turns` | Max context turns | `30` |
+| `agent_max_steps` | Max decision steps per task | `100` |
 | `agent_permission_mode` | Global default permission inherited by new sessions: `read-only` / `workspace-write` / `full-access` | `full-access` |
 | `enable_thinking` | Enable deep-thinking mode | `false` |
 | `knowledge` | Enable personal knowledge base | `true` |

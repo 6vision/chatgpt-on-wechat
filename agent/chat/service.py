@@ -364,7 +364,7 @@ class ChatService:
         )
 
         from config import conf
-        max_context_turns = conf().get("agent_max_context_turns", 20)
+        max_context_turns = conf().get("agent_max_context_turns", 30)
 
         # Get full system prompt with skills
         full_system_prompt = agent.get_full_system_prompt()
@@ -763,7 +763,7 @@ class ChatService:
             from agent.memory import get_conversation_store
             from bridge.agent_initializer import AgentInitializer
 
-            max_turns = conf().get("agent_max_context_turns", 20)
+            max_turns = conf().get("agent_max_context_turns", 30)
             saved = get_conversation_store(owner.workspace).load_messages(
                 session_id, max_turns=max(3, max_turns // 2), with_authors=True
             )

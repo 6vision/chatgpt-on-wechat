@@ -820,7 +820,7 @@ class Agent:
 
         # Get max_context_turns from config
         from config import conf
-        max_context_turns = conf().get("agent_max_context_turns", 20)
+        max_context_turns = conf().get("agent_max_context_turns", 30)
         
         # Create stream executor with copied message history
         executor = AgentStreamExecutor(

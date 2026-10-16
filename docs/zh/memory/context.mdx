@@ -19,9 +19,9 @@ description: "短期记忆即对话上下文，包含用户消息、Agent 回复
 
 | 参数 | 说明 | 默认值 |
 | --- | --- | --- |
-| `agent_max_context_tokens` | 上下文最大 token 预算 | `64000` |
+| `agent_max_context_tokens` | 上下文最大 token 预算 | `200000` |
 | `agent_max_context_turns` | 上下文最大对话轮次 | `30` |
-| `agent_max_steps` | 单轮对话最大决策步数（工具调用次数） | `30` |
+| `agent_max_steps` | 单轮对话最大决策步数（工具调用次数） | `100` |
 
 可通过 `config.json` 或对话中的 `/config` 命令修改。
 

@@ -71,8 +71,8 @@ The memory management page in the Web console allows browsing memory files and d
 | Parameter | Description | Default |
 | --- | --- | --- |
 | `agent_workspace` | Workspace path, memory files stored under this directory | `~/cow` |
-| `agent_max_context_tokens` | Max context tokens; when exceeded, content is trimmed and summarized into memory | `50000` |
-| `agent_max_context_turns` | Max context turns; when exceeded, content is trimmed and summarized into memory | `20` |
+| `agent_max_context_tokens` | Max context tokens; when exceeded, content is trimmed and summarized into memory | `200000` |
+| `agent_max_context_turns` | Max context turns; when exceeded, content is trimmed and summarized into memory | `30` |
 | `rerank_provider` | Rerank service for memory retrieval; empty disables it, `local` uses a local cross-encoder | `""` |
 | `rerank_model` | Rerank model; empty uses the provider's default | `BAAI/bge-reranker-base` |
 | `memory.hit_boost` | Nudge frequently retrieved memories up the ranking (fading after about a week idle); off keeps ranking unchanged and searches write nothing | `false` |
