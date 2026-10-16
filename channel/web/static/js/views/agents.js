@@ -301,6 +301,14 @@ document.addEventListener('mouseout', (e) => {
 });
 document.addEventListener('scroll', _hideFieldTip, true);
 
+function copyAgentId(agentId, btn) {
+    copyToClipboard(agentId).then(() => {
+        const icon = btn.querySelector('i');
+        icon.className = 'fas fa-check';
+        setTimeout(() => { icon.className = 'far fa-copy'; }, 1200);
+    }).catch(() => {});
+}
+
 function renderAgentDetail() {
     const agent = findAgent(selectedAdminAgentId);
     const identity = document.getElementById('agent-detail-identity');
@@ -310,7 +318,13 @@ function renderAgentDetail() {
         ${agentAvatarHTML(agent, 56)}
         <div class="min-w-0">
             <div class="text-lg font-semibold text-slate-800 dark:text-slate-100 truncate">${escapeHtml(agent.name)}</div>
-            <div class="text-xs text-slate-400 font-mono truncate">${escapeHtml(agent.id)}</div>
+            <div class="flex items-center gap-1 text-xs text-slate-400 min-w-0">
+                <span class="font-mono truncate">ID: ${escapeHtml(agent.id)}</span>
+                <button type="button" class="flex-shrink-0 p-0.5 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer"
+                        onclick="copyAgentId('${escapeHtml(agent.id)}', this)" data-tooltip="${escapeHtml(t('agents_copy_id'))}" data-tip-float>
+                    <i class="far fa-copy"></i>
+                </button>
+            </div>
         </div>`;
     const isDefault = agent.id === defaultAgentId;
     profile.innerHTML = `
@@ -504,7 +518,7 @@ function renderAgentSkillsPane() {
                     <input type="checkbox" class="agent-skill-item" value="${escapeHtml(name)}" ${checked ? 'checked' : ''} ${all ? 'disabled' : ''}>
                     <div>
                         <div class="text-sm text-slate-700 dark:text-slate-200">${escapeHtml(skill.display_name || name)}</div>
-                        <div class="text-xs text-slate-400">${escapeHtml(skill.description || '')}</div>
+                        <div class="text-xs text-slate-400">${escapeHtml(skill.display_description || skill.description || '')}</div>
                     </div>
                 </label>`;
             }).join('')}`;

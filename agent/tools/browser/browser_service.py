@@ -1380,8 +1380,6 @@ class BrowserService:
     # ------------------------------------------------------------------
 
     def _get_screenshot_dir(self, cwd: str = "") -> str:
-        if self._screenshot_dir and os.path.isdir(self._screenshot_dir):
-            return self._screenshot_dir
         base = cwd or os.getcwd()
         d = os.path.join(base, "tmp")
         os.makedirs(d, exist_ok=True)

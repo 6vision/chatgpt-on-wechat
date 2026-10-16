@@ -50,7 +50,7 @@ def _skills_dir(tmp_path, monkeypatch):
     (skills_dir / "alpha" / "SKILL.md").write_text("# alpha\n", encoding="utf-8")
     config_path = skills_dir / "skills_config.json"
     config_path.write_text(json.dumps(EXISTING, indent=4), encoding="utf-8")
-    monkeypatch.setattr("cli.utils.get_skills_dir", lambda: str(skills_dir))
+    monkeypatch.setattr("cli.utils.get_skills_dir", lambda agent_id=None: str(skills_dir))
     return config_path
 
 

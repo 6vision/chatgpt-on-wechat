@@ -27,6 +27,7 @@ import threading
 import time
 from typing import Dict, List, Optional
 
+from common.atomic_write import write_json_atomic
 from common.log import logger
 
 # Recents cap: enough to be useful in the picker, small enough that the file
@@ -87,12 +88,12 @@ def _save(data: Dict) -> None:
     path = _store_file()
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = f"{path}.tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, path)
+        write_json_atomic(path, data, indent=2)
     except Exception as e:
         logger.warning(f"[ProjectStore] Could not write {path}: {e}")
+        # Mutating callers and HTTP handlers must not acknowledge an update
+        # that cannot be loaded again after a restart.
+        raise
 
 
 def _normalize(path: str) -> str:

@@ -20,9 +20,9 @@ class GoogleVoice(Voice):
         pass
 
     def voiceToText(self, voice_file):
-        with speech_recognition.AudioFile(voice_file) as source:
-            audio = self.recognizer.record(source)
         try:
+            with speech_recognition.AudioFile(voice_file) as source:
+                audio = self.recognizer.record(source)
             text = self.recognizer.recognize_google(audio, language="zh-CN")
             logger.info("[Google] voiceToText text={} voice file name={}".format(text, voice_file))
             return Reply(ReplyType.TEXT, text)

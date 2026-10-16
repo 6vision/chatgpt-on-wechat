@@ -3,8 +3,10 @@ Skill manager for managing skill lifecycle and operations.
 """
 
 import os
+import re
 import json
 import threading
+import time
 from typing import Dict, Iterable, List, Optional
 from common.log import logger
 from agent.skills.types import SkillEntry, SkillSnapshot
@@ -13,6 +15,59 @@ from agent.skills.formatter import format_skill_entries_for_prompt
 
 SKILLS_CONFIG_FILE = "skills_config.json"
 SKILLS_CONFIG_TMP_PREFIX = f".{SKILLS_CONFIG_FILE}."
+
+# Optional presentation fields an entry may carry, set by whoever installed or
+# created the skill rather than read from SKILL.md, so a rescan keeps them.
+# All optional: entries without them read exactly as before.
+#   display_name        - title shown in place of the name
+#   display_description - description shown in place of SKILL.md's; the
+#                         agent itself always reads SKILL.md's
+#   icon                - image URL shown beside it
+#   version             - version of the package the skill was installed from
+SKILL_DISPLAY_FIELDS = ("display_name", "display_description", "icon", "version")
+
+_ICON_URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
+
+
+def _display_text(value, max_len: int) -> str:
+    """A single-line presentation field, or ''."""
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())[:max_len]
+
+
+def _display_url(value) -> str:
+    """An http(s) image URL, or ''."""
+    url = value.strip() if isinstance(value, str) else ""
+    if len(url) > 2048 or not _ICON_URL_RE.match(url):
+        return ""
+    return url
+
+
+def apply_install_fields(entry: dict, fields: dict) -> bool:
+    """Copy what an installer says about a skill onto its skills_config entry.
+
+    ``fields`` may carry ``category`` and the SKILL_DISPLAY_FIELDS; values that
+    are missing or malformed are skipped. ``icon`` and ``version`` describe the
+    package just installed, so a reinstall without them drops the old ones;
+    ``display_name`` and ``display_description`` are not tied to a package and
+    are kept. Returns whether the entry changed.
+    """
+    before = dict(entry)
+    category = _display_text(fields.get("category"), 64)
+    if category:
+        entry["category"] = category
+    for key, max_len in (("display_name", 128), ("display_description", 1024)):
+        value = _display_text(fields.get(key), max_len)
+        if value:
+            entry[key] = value
+    for key, value in (("icon", _display_url(fields.get("icon"))),
+                       ("version", _display_text(fields.get("version"), 64))):
+        if value:
+            entry[key] = value
+        else:
+            entry.pop(key, None)
+    return entry != before
 
 
 def build_skill_manager(
@@ -119,7 +174,7 @@ class SkillManager:
         if not os.path.exists(self._skills_config_path):
             return {}
         try:
-            with open(self._skills_config_path, "r", encoding="utf-8") as f:
+            with open(self._skills_config_path, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
             if isinstance(data, dict):
                 return data
@@ -157,15 +212,23 @@ class SkillManager:
         - New skills: use metadata.default_enabled as initial enabled state.
         - Existing skills: preserve their persisted enabled state.
         - Skills that no longer exist on disk are removed.
-        - name/description/source are always refreshed from the latest scan.
+        - name/description are always refreshed from the latest scan.
+        - source, category and SKILL_DISPLAY_FIELDS are kept from the file.
+        - installed_at (epoch seconds) is stamped when a skill first appears and
+          kept after; entries written before it existed go without, so an
+          existing file is not rewritten for it.
         """
         loaded = self._load_skills_config()
         saved = loaded if loaded is not None else self.skills_config
         merged: Dict[str, dict] = {}
+        now = int(time.time())
 
         for name, entry in self.skills.items():
             skill = entry.skill
             prev = saved.get(name, {})
+            if not isinstance(prev, dict):
+                logger.warning(f"[SkillManager] Ignoring malformed config entry for {name}")
+                prev = {}
             category = prev.get("category", "skill")
 
             if name in saved:
@@ -180,9 +243,14 @@ class SkillManager:
                 "enabled": enabled,
                 "category": category,
             }
-            display_name = prev.get("display_name")
-            if display_name:
-                entry_dict["display_name"] = display_name
+            for key in SKILL_DISPLAY_FIELDS:
+                value = prev.get(key)
+                if value:
+                    entry_dict[key] = value
+            if name not in saved:
+                entry_dict["installed_at"] = now
+            elif isinstance(prev.get("installed_at"), int):
+                entry_dict["installed_at"] = prev["installed_at"]
             merged[name] = entry_dict
 
         self.skills_config = merged

@@ -22,7 +22,7 @@ from bridge.reply import Reply, ReplyType
 from common.atomic_write import write_json_atomic
 from common.log import logger
 from linkai import LinkAIClient, PushMsg
-from config import conf, pconf, plugin_config, available_setting, write_plugin_config, get_root, get_weixin_credentials_path
+from config import conf, pconf, plugin_config, available_setting, write_plugin_config, get_root, get_weixin_credentials_path, drag_sensitive
 from plugins import PluginManager
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -373,7 +373,7 @@ class CloudClient(LinkAIClient):
         # config, and potentially long, so it is not echoed to the log.
         if self._peer_transport is not None and self._peer_transport.handle_message(config):
             return
-        logger.info(f"[CloudClient] Loading remote config: {config}")
+        logger.info(f"[CloudClient] Loading remote config: {drag_sensitive(config)}")
 
         action = config.get("action")
         if action in CHANNEL_ACTIONS:

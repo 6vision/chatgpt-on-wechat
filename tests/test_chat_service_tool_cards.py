@@ -128,3 +128,52 @@ def test_the_closing_batch_still_carries_every_result(runtime):
     batches = [c for c in chunks if c["chunk_type"] == "tool_calls"]
     assert len(batches) == 1
     assert [t["id"] for t in batches[0]["tool_calls"]] == ["peer_1", "call_1"]
+
+
+def _answer_turn():
+    return [
+        ("message_update", {"delta": "hi"}),
+        ("turn_end", {"turn": 1, "has_tool_calls": False}),
+    ]
+
+
+def test_run_returns_the_usage_summed_over_the_run(runtime, monkeypatch):
+    usage = {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12, "calls": 1}
+    monkeypatch.setattr(_ScriptedExecutor, "run_usage", usage, raising=False)
+    _ScriptedExecutor.script = _answer_turn()
+
+    assert _service().run("q", "s1", lambda chunk: None) == usage
+
+
+class _AnsweringExecutor(_ScriptedExecutor):
+    def run_stream(self, query):
+        self.messages.append({"role": "user", "content": [{"type": "text", "text": query}]})
+        self.messages.append({"role": "assistant", "content": [{"type": "text", "text": "hi"}]})
+        return super().run_stream(query)
+
+
+def test_run_answers_on_the_requested_model(runtime):
+    _ScriptedExecutor.script = []
+    service = _service()
+    agent = service.agent_bridge.get_agent()
+    routes = []
+    agent.model.set_session_override = lambda provider, model: routes.append((provider, model))
+
+    service.run("q", "s1", lambda chunk: None)
+    service.run("q", "s1", lambda chunk: None, model_override=("deepseek", "deepseek-chat"))
+
+    assert routes == [("deepseek", "deepseek-chat")]
+
+
+def test_run_without_persist_stores_nothing(runtime, monkeypatch):
+    monkeypatch.setattr("agent.protocol.agent_stream.AgentStreamExecutor", _AnsweringExecutor)
+    _ScriptedExecutor.script = _answer_turn()
+    service = _service()
+    writes = []
+    service._persist_messages = lambda *a, **k: writes.append(a) or True
+
+    service.run("q", "s1", lambda chunk: None, persist=False)
+    assert writes == []
+
+    service.run("q", "s1", lambda chunk: None)
+    assert writes
