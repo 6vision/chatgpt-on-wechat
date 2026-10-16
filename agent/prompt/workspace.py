@@ -178,9 +178,12 @@ def _create_template_if_missing(filepath: str, template_content: str):
     """Create the template file if it does not exist."""
     if not os.path.exists(filepath):
         try:
-            with open(filepath, 'w', encoding='utf-8') as f:
+            with open(filepath, 'x', encoding='utf-8') as f:
                 f.write(template_content)
             logger.debug(f"[Workspace] Created template: {os.path.basename(filepath)}")
+        except FileExistsError:
+            # Another initializer or writer created it after the existence check.
+            pass
         except Exception as e:
             logger.error(f"[Workspace] Failed to create template {filepath}: {e}")
 
