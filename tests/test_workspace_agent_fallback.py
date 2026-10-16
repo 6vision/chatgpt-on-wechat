@@ -83,3 +83,60 @@ def test_project_copy_and_default_agent_controls(console):
     assert result["content"] == "project-local notes\n"
     default = json.loads(app.request("/read?path=MEMORY.md").data)
     assert default["content"] == "primary notes\n"
+
+
+@pytest.mark.parametrize("absolute", [False, True])
+@pytest.mark.parametrize("session", ["chat", ""])
+def test_agent_without_own_knowledge_can_edit_shared_knowledge(console, absolute, session, monkeypatch):
+    app, roots = console
+    dirty = []
+    monkeypatch.setattr(workspace, "_mark_memory_dirty", lambda agent_id=None: dirty.append(agent_id))
+    shared = roots["primary"] / "knowledge"
+    shared.mkdir()
+    note = shared / "shared.md"
+    note.write_text("shared knowledge\n", encoding="utf-8")
+    path = str(note) if absolute else "knowledge/shared.md"
+    query = urlencode({"path": path, "session": session, "agent_id": "writer"})
+    loaded = json.loads(app.request("/read?" + query).data)
+    assert loaded["status"] == "success", loaded
+    assert loaded["content"] == "shared knowledge\n"
+    saved = json.loads(app.request("/write", method="POST", data=json.dumps({
+        "path": path, "session": session, "agent_id": "writer",
+        "content": "updated shared knowledge\n", "expected_mtime": loaded["mtime"],
+    })).data)
+    assert saved["status"] == "success", saved
+    assert note.read_text() == "updated shared knowledge\n"
+    assert dirty == ["writer"]
+    assert not (roots["writer"] / "knowledge").exists()
+    resolved = json.loads(app.request("/resolve?" + query).data)
+    assert resolved["status"] == "success", resolved
+    assert Path(resolved["file"]["abs_path"]) == note
+
+
+def test_agent_own_knowledge_takes_precedence_over_shared(console):
+    app, roots = console
+    for name in ("primary", "writer"):
+        (roots[name] / "knowledge").mkdir()
+        (roots[name] / "knowledge" / "note.md").write_text(name + " knowledge\n")
+    query = urlencode({"path": "knowledge/note.md", "session": "chat", "agent_id": "writer"})
+    loaded = json.loads(app.request("/read?" + query).data)
+    assert loaded["status"] == "success", loaded
+    assert loaded["content"] == "writer knowledge\n"
+
+
+def test_shared_knowledge_fallback_does_not_allow_default_agents_memory(console):
+    app, roots = console
+    (roots["primary"] / "knowledge").mkdir()
+    query = urlencode({"path": str(roots["primary"] / "MEMORY.md"), "session": "chat", "agent_id": "writer"})
+    result = json.loads(app.request("/read?" + query).data)
+    assert result["status"] == "error", result
+    assert (roots["primary"] / "MEMORY.md").read_text() == "primary notes\n"
+
+
+def test_shared_knowledge_fallback_keeps_the_knowledge_boundary(console):
+    app, roots = console
+    (roots["primary"] / "knowledge").mkdir()
+    query = urlencode({"path": "knowledge/../MEMORY.md", "session": "chat", "agent_id": "writer"})
+    result = json.loads(app.request("/read?" + query).data)
+    assert result["status"] == "error", result
+    assert (roots["primary"] / "MEMORY.md").read_text() == "primary notes\n"
