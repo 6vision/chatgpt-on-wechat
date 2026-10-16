@@ -71,6 +71,9 @@ class Send(BaseTool):
         if not os.path.exists(absolute_path):
             return ToolResult.fail(f"Error: File not found: {path}")
         
+        if not os.path.isfile(absolute_path):
+            return ToolResult.fail(f"Error: Not a regular file: {path}")
+
         # Check if readable
         if not os.access(absolute_path, os.R_OK):
             return ToolResult.fail(f"Error: File is not readable: {path}")
