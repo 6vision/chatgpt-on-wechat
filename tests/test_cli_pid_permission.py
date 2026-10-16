@@ -19,3 +19,16 @@ def test_permission_denied_preserves_pid_file(tmp_path, monkeypatch):
     monkeypatch.setattr(process.os, 'kill', kill)
     assert process._read_pid() == 1234
     assert (tmp_path / '.cow.pid').read_text() == '1234'
+
+def test_stop_without_permission_keeps_pid_file_and_fails(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+    monkeypatch.setattr(process, '_IS_WIN', False)
+    monkeypatch.setattr(process, 'get_project_root', lambda: str(tmp_path))
+    (tmp_path / '.cow.pid').write_text('1234')
+    def kill(pid, sig):
+        raise PermissionError()
+    monkeypatch.setattr(process.os, 'kill', kill)
+    result = CliRunner().invoke(process.stop)
+    assert result.exit_code == 1
+    assert 'stopped' not in result.output
+    assert (tmp_path / '.cow.pid').read_text() == '1234'
