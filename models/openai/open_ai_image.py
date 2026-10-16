@@ -46,7 +46,7 @@ class OpenAIImage(object):
                 if retry_count < 1:
                     time.sleep(5)
                     logger.warn("[OPEN_AI] ImgCreate RateLimit exceed, 第{}次重试".format(retry_count + 1))
-                    return self.create_img(query, retry_count + 1)
+                    return self.create_img(query, retry_count + 1, api_key=api_key, api_base=api_base)
                 return False, "画图出现问题，请休息一下再问我吧"
             logger.exception(mapped)
             return False, "画图出现问题，请休息一下再问我吧"
@@ -55,7 +55,7 @@ class OpenAIImage(object):
             if retry_count < 1:
                 time.sleep(5)
                 logger.warn("[OPEN_AI] ImgCreate RateLimit exceed, 第{}次重试".format(retry_count + 1))
-                return self.create_img(query, retry_count + 1)
+                return self.create_img(query, retry_count + 1, api_key=api_key, api_base=api_base)
             return False, "画图出现问题，请休息一下再问我吧"
         except Exception as e:
             logger.exception(e)
