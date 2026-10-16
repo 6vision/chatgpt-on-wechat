@@ -82,7 +82,7 @@ class BrowserTool(BaseTool):
             },
             "selector": {
                 "type": "string",
-                "description": "CSS selector as fallback when ref is unavailable (for click/fill/select/wait/get_text)"
+                "description": "CSS selector as fallback when ref is unavailable (for click/fill/select/wait/get_text), or to scope a snapshot to one region"
             },
             "text": {
                 "type": "string",
