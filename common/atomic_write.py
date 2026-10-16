@@ -44,9 +44,13 @@ def _replace(path, write, encoding: str = "utf-8", newline=None) -> None:
         # Stage with the target's own mode, so a private file is never readable
         # mid-write while a new file keeps the umask default.
         try:
-            mode = stat.S_IMODE(os.stat(target).st_mode)
+            target_stat = os.stat(target)
         except OSError:
             mode = 0o666
+        else:
+            if not stat.S_ISREG(target_stat.st_mode):
+                raise OSError(errno.EINVAL, "target is not a regular file", target)
+            mode = stat.S_IMODE(target_stat.st_mode)
         f = open(
             tmp_path, "w", encoding=encoding, newline=newline,
             opener=lambda name, flags: os.open(name, flags | os.O_EXCL, mode),

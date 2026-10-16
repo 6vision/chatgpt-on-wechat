@@ -1,6 +1,6 @@
 ---
 title: 对话 API
-description: 通过 OpenAI 兼容的 /v1/chat/completions 接口调用 CowAgent
+description: "开启 OpenAI 兼容的 /v1/chat/completions 接口，让任意应用、SDK 或工作流调用完整的 CowAgent：背后会使用工具、技能、记忆和知识库，并返回思考过程、工具调用和 Token 用量。"
 ---
 
 > CowAgent 提供与 OpenAI Chat Completions 协议兼容的对话接口，复用 Web 控制台的端口。任何支持 OpenAI 协议的应用、SDK 或工作流都可以直接接入。
@@ -15,7 +15,9 @@ description: 通过 OpenAI 兼容的 /v1/chat/completions 接口调用 CowAgent
 
 进入「配置 → 基础配置 → 对话 API」，打开开关并确认后会自动生成 API Key，并给出接口地址和调用示例（cURL / Python / Node.js），可直接复制使用。
 
-{/* TODO: 截图 - 配置页「对话 API」卡片 */}
+<Frame caption="配置页的「对话 API」卡片">
+  <img src="https://cdn.link-ai.tech/doc/chat-api-config-zh.png" alt="对话 API 配置" width="700" />
+</Frame>
 
 - **重新生成**：生成新的 API Key，旧 Key 立即失效
 - **关闭开关**：接口停止服务，API Key 会保留，再次开启后可继续使用

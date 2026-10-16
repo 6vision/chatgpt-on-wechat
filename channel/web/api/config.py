@@ -46,6 +46,7 @@ class ConfigHandler:
         "agent_max_context_tokens", "agent_max_context_turns", "agent_max_steps",
         "enable_thinking", "reasoning_effort", "reasoning_effort_by_model", "self_evolution_enabled", "web_password",
         "agent_permission_mode",
+        "skill_hub_url", "skill_hub_api_key",
     }
 
     # Switches the API exposes flat - one key, one control - while the config
@@ -155,6 +156,7 @@ class ConfigHandler:
                 "api_keys": api_keys_masked,
                 "providers": providers,
                 "web_password_masked": masked_pwd,
+                "skill_hub_url": local_config.get("skill_hub_url", ""),
                 # Whether "show in folder" can open this machine's file manager.
                 "can_reveal_files": _can_reveal_in_file_manager(),
             }

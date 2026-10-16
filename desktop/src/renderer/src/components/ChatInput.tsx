@@ -274,7 +274,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     { cmd: '/context', desc: t('slash_context') },
     { cmd: '/compact', desc: t('slash_compact') },
     { cmd: '/skill list', desc: t('slash_skill_list') },
-    ...(product.skills?.uploadOnly
+    // An upload-only product still searches and installs from its own catalogue.
+    ...(product.skills?.uploadOnly && !product.skills?.Market
       ? []
       : [
           { cmd: '/skill search ', desc: t('slash_skill_search') },
