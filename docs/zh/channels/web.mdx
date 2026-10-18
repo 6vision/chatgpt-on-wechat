@@ -40,6 +40,57 @@ Web 控制台是 CowAgent 的默认通道，启动后会自动运行，通过浏
   请确保服务器防火墙和安全组已放行对应端口。
 </Note>
 
+## HTTPS 与域名访问
+
+如需通过域名和 HTTPS 访问控制台，可任选以下一种方式。
+
+**方式一：nginx 反向代理（推荐）**。由 nginx 负责 TLS，并以 HTTP 转发到控制台；同时设置 `"web_host": "127.0.0.1"`，让控制台只能经 nginx 访问：
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name cow.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/cow.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/cow.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:9899;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Replies stream over SSE: keep connections open and unbuffered
+        proxy_read_timeout 3600s;
+        proxy_buffering off;
+        # File uploads up to 512 MB
+        client_max_body_size 512m;
+    }
+}
+```
+
+**方式二：直接启用 HTTPS**。由控制台自身提供 TLS：
+
+```json
+{
+  "web_https_enabled": true,
+  "web_ssl_certfile": "/etc/letsencrypt/live/cow.example.com/fullchain.pem",
+  "web_ssl_keyfile": "/etc/letsencrypt/live/cow.example.com/privkey.pem"
+}
+```
+
+| 参数 | 说明 | 默认值 |
+| --- | --- | --- |
+| `web_https_enabled` | 控制台直接以 HTTPS 提供服务 | `false` |
+| `web_ssl_certfile` | PEM 证书文件（建议使用完整证书链） | `""` |
+| `web_ssl_keyfile` | PEM 私钥文件 | `""` |
+
+证书文件缺失或不可读时会直接报错并停止启动，不会退回 HTTP。
+
+<Note>
+  控制台需部署在根路径，请使用独立子域名，不支持 `/cow/` 这类子路径。如使用需要 OAuth 授权的 MCP 服务，还需设置 `"mcp_oauth_redirect_base": "https://cow.example.com"`。
+</Note>
+
 ## 对话 API
 
 Web 控制台的端口同时提供 OpenAI 兼容的对话接口 `/v1/chat/completions`，默认关闭，可在「配置」页的「对话 API」卡片中开启并获取 API Key。详见 [对话 API](/zh/extensions/chat-api)。
