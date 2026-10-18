@@ -137,7 +137,7 @@ function addressedAgentId(text: string, roster: AgentBadge[]): string {
   }
   labels.sort((x, y) => y[0].length - x[0].length)
   for (const [label, id] of labels) {
-    const re = new RegExp(`^@${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=[\\s，,：:、]|$)`, 'i')
+    const re = new RegExp(`^@${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=[\\s,，:：、。！？；!?;]|$)`, 'i')
     if (re.test(stripped)) return id
   }
   return ''

@@ -245,13 +245,13 @@ class TestSkillServiceFilePathTraversal(unittest.TestCase):
     def test_relative_file_path_allowed(self):
         """A plain nested path stays inside the skill directory."""
         written = self._add_url_with_path("scripts/run.py")
-        expected = os.path.realpath(
-            os.path.join(self.skills_root, "innocent.tmp", "scripts/run.py")
+        self.assertEqual(1, len(written))
+        self.assertEqual(
+            os.path.realpath(self.skills_root),
+            os.path.commonpath([os.path.realpath(self.skills_root), os.path.realpath(written[0])]),
         )
-        self.assertEqual([expected], [os.path.realpath(p) for p in written])
-        self.assertTrue(
-            os.path.exists(os.path.join(self.skills_root, "innocent", "scripts", "run.py"))
-        )
+        with open(os.path.join(self.skills_root, "innocent", "scripts", "run.py")) as installed:
+            self.assertEqual("pwned", installed.read())
 
     def test_dotdot_file_path_blocked(self):
         """'../../escaped.py' must be rejected before anything is downloaded."""

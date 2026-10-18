@@ -63,6 +63,7 @@ def format_unavailable_skills_for_prompt(
     :param missing_map: Dict mapping skill name to its missing requirements
     :return: Formatted prompt text
     """
+    entries = [entry for entry in entries if not entry.skill.disable_model_invocation]
     if not entries:
         return ""
 

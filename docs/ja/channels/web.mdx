@@ -1,6 +1,6 @@
 ---
 title: Web コンソール
-description: Web コンソールで CowAgent を使用する
+description: "Web コンソールは CowAgent の既定チャネルです。ブラウザで Agent と会話し、モデル・スキル・記憶・チャネルを管理でき、パスワード保護と OpenAI 互換 API にも対応。"
 ---
 
 Web コンソールは CowAgent のデフォルトチャネルです。起動後に自動的に実行され、ブラウザを通じて Agent と対話できるほか、モデル、Skill、メモリ、チャネルなどの設定をオンラインで管理できます。
@@ -40,6 +40,10 @@ Web コンソールは CowAgent のデフォルトチャネルです。起動後
   サーバーのファイアウォールとセキュリティグループで該当ポートが許可されていることを確認してください。
 </Note>
 
+## チャット API
+
+Web コンソールのポートでは OpenAI 互換のチャット API `/v1/chat/completions` も提供しています。初期状態では無効で、設定ページの「チャット API」カードから有効にして API キーを取得できます。詳しくは [チャット API](/ja/extensions/chat-api) を参照してください。
+
 ## 機能紹介
 
 ### チャット画面
@@ -70,6 +74,12 @@ Web コンソールは CowAgent のデフォルトチャネルです。起動後
 <Frame caption="セッション単位の権限モード：読み取り専用、ワークスペース書き込み可、フルアクセス">
   <img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/web-console-access-mode.png" style={{ maxWidth: "600px" }} />
 </Frame>
+
+### 成果物
+
+Agent が作成した Web ページ、ドキュメント、画像、動画をタイムラインにまとめ、プレビュー、ピン留め、元の会話への移動ができます。初期状態では非表示で、[カスタムメニュー](/ja/extensions/custom-menu) のエディタから表示できます：
+
+<img width="850" src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/web-console-artifacts.png" />
 
 ### モデル管理
 

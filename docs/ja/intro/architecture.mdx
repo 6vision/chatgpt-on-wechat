@@ -1,6 +1,6 @@
 ---
 title: アーキテクチャ
-description: CowAgent 2.0 のシステムアーキテクチャとコア設計
+description: "CowAgent のシステム構成とコア設計。チャネル、Agent コア、モデル、ツール、スキル、記憶、ナレッジの連携と、メッセージ受信から計画・ツール実行・応答までの流れを解説。"
 ---
 
 CowAgent はすぐに使えるスーパー AI アシスタントであり、完全な Agent harness フレームワークでもあります。複雑なタスク計画、長期記憶、Skill の拡張性、自己進化、マルチエージェント協働などの能力を備えています。
@@ -95,9 +95,9 @@ Agent のシステムワークスペースはデフォルトで `~/cow` にあ�
 {
   "agent": true,
   "agent_workspace": "~/cow",
-  "agent_max_context_tokens": 40000,
+  "agent_max_context_tokens": 200000,
   "agent_max_context_turns": 30,
-  "agent_max_steps": 15,
+  "agent_max_steps": 100,
   "agent_permission_mode": "full-access",
   "cow_lang": "auto"
 }
@@ -107,9 +107,9 @@ Agent のシステムワークスペースはデフォルトで `~/cow` にあ�
 | --- | --- | --- |
 | `agent` | Agent モードの有効化 | `true` |
 | `agent_workspace` | ワークスペースのパス | `~/cow` |
-| `agent_max_context_tokens` | 最大コンテキストトークン数 | `40000` |
+| `agent_max_context_tokens` | 最大コンテキストトークン数 | `200000` |
 | `agent_max_context_turns` | 最大コンテキストターン数 | `30` |
-| `agent_max_steps` | タスクあたりの最大判断ステップ数 | `15` |
+| `agent_max_steps` | タスクあたりの最大判断ステップ数 | `100` |
 | `agent_permission_mode` | 新規セッションが引き継ぐグローバルのデフォルト権限：`read-only` / `workspace-write` / `full-access` | `full-access` |
 | `knowledge` | パーソナルナレッジベースの有効化 | `true` |
 | `self_evolution_enabled` | 自己進化の有効化（新規インストールではデフォルト有効） | `false` |

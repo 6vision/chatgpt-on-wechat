@@ -43,3 +43,32 @@ def test_chat_stream_retries_failed_step_without_losing_its_tool_chain(
     assert messages[1]["content"][0]["id"] == "read-1"
     assert messages[2]["content"][0]["tool_use_id"] == "read-1"
     assert messages[3]["content"][0]["text"] == "answer"
+
+
+def test_chat_stream_does_not_rewrite_step_when_artifact_indexing_fails(
+    chat_run, monkeypatch, tmp_path,
+):
+    store = ConversationStore(tmp_path / "history.db")
+    monkeypatch.setattr("config.conf", lambda: {"conversation_persistence": True})
+    monkeypatch.setattr("agent.memory.get_conversation_store", lambda *a, **k: store)
+    monkeypatch.setattr(ChatService, "_persist_messages", staticmethod(_persist_messages))
+
+    def broken_index(*args, **kwargs):
+        raise RuntimeError("index unavailable")
+
+    monkeypatch.setattr("agent.protocol.artifact.index_message_artifacts", broken_index)
+
+    class Run:
+        def play(self, executor, query, on_event):
+            executor.run_user_message = _text("user", query)
+            executor.messages.append(executor.run_user_message)
+            executor.messages.extend([_tool_use("read-1"), _tool_result("read-1")])
+            on_event({"type": "turn_end", "data": {}})
+            executor.messages.append(_text("assistant", "answer"))
+            on_event({"type": "turn_end", "data": {}})
+            return "answer"
+
+    chat_run.run(Run())
+    messages = store.load_messages("s1", max_turns=100)
+    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"]
+    assert messages[3]["content"][0]["text"] == "answer"

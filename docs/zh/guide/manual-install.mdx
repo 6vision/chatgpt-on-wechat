@@ -1,6 +1,6 @@
 ---
 title: 手动安装
-description: 手动部署 CowAgent（源码 / Docker）
+description: "手动部署 CowAgent 的完整步骤：从源码克隆项目、安装核心与扩展依赖（附国内镜像加速）、安装 Cow CLI、编辑 config.json 并启动服务，或使用 Docker Compose 一键部署到服务器。"
 ---
 
 ## 源码部署
@@ -152,9 +152,9 @@ sudo docker logs -f chatgpt-on-wechat
       "deepseek_api_key": "",
       "agent": true,
       "agent_workspace": "~/cow",
-      "agent_max_context_tokens": 40000,
+      "agent_max_context_tokens": 200000,
       "agent_max_context_turns": 30,
-      "agent_max_steps": 15,
+      "agent_max_steps": 100,
       "cow_lang": "auto"
     }
     ```
@@ -167,9 +167,9 @@ sudo docker logs -f chatgpt-on-wechat
       DEEPSEEK_API_KEY: 'your-api-key'
       DEEPSEEK_API_BASE: 'https://api.deepseek.com/v1'
       AGENT: 'True'
-      AGENT_MAX_CONTEXT_TOKENS: 40000
+      AGENT_MAX_CONTEXT_TOKENS: 200000
       AGENT_MAX_CONTEXT_TURNS: 30
-      AGENT_MAX_STEPS: 15
+      AGENT_MAX_STEPS: 100
       COW_LANG: 'auto'
     ```
   </Tab>
@@ -181,9 +181,9 @@ sudo docker logs -f chatgpt-on-wechat
 | `model` | `MODEL` | 模型名称 | `deepseek-flash` |
 | `agent` | `AGENT` | 是否启用 Agent 模式 | `true` |
 | `agent_workspace` | - | Agent 工作空间路径 | `~/cow` |
-| `agent_max_context_tokens` | `AGENT_MAX_CONTEXT_TOKENS` | 最大上下文 tokens | `40000` |
+| `agent_max_context_tokens` | `AGENT_MAX_CONTEXT_TOKENS` | 最大上下文 tokens | `200000` |
 | `agent_max_context_turns` | `AGENT_MAX_CONTEXT_TURNS` | 最大上下文记忆轮次 | `30` |
-| `agent_max_steps` | `AGENT_MAX_STEPS` | 单次任务最大决策步数 | `15` |
+| `agent_max_steps` | `AGENT_MAX_STEPS` | 单次任务最大决策步数 | `100` |
 | `cow_lang` | `COW_LANG` | 界面、命令文案、系统提示词等的语言，`auto` 自动检测，可设为 `zh` / `en` | `auto` |
 
 <Tip>

@@ -279,7 +279,8 @@ available_setting = {
     "web_host": "",  # Web console bind address; empty means auto
     "web_port": 9899,
     "web_password": "",  # Web console password; empty means no authentication required
-    "external_api_token": "",  # Bearer token for the OpenAI-compatible /v1/chat/completions API; empty disables it
+    "external_api_enabled": False,  # serve the OpenAI-compatible /v1 chat API
+    "external_api_token": "",  # API key for the /v1 chat API; kept while the API is off
     "web_session_expire_days": 30,  # Auth session expiry in days
     "web_file_serve_root": "~",  # Root dir the /api/file endpoint may serve; "/" allows the whole filesystem
     "mcp_oauth_redirect_base": "",  # Base URL for MCP OAuth callback (e.g. http://your-ip:9899); empty uses local web console
@@ -304,13 +305,13 @@ available_setting = {
     "agent_bindings": [],
     # Manual cap on the Agent-mode input budget, used to control cost / token
     # burn: history is compacted once the prompt reaches this many tokens, even
-    # when the model's window is far larger. Defaults to 64000. This value is
+    # when the model's window is far larger. Defaults to 200000. This value is
     # still clamped below the effective model's window (window - output
     # reserve), so a small-window model is never asked for more than it allows.
     # Set 0 to disable the manual cap and follow the model window instead.
-    "agent_max_context_tokens": 64000,
+    "agent_max_context_tokens": 200000,
     "agent_max_context_turns": 30,  # max context memory turns in Agent mode
-    "agent_max_steps": 30,  # max decision steps per run in Agent mode
+    "agent_max_steps": 100,  # max decision steps per run in Agent mode
     # Default permission mode for sessions that have not picked one of their own:
     # "read-only" | "workspace-write" | "full-access". Kept at full-access so an
     # existing install behaves exactly as before an upgrade. Only a fresh desktop
@@ -353,6 +354,11 @@ available_setting = {
     # Deep Dream: nightly memory distillation into MEMORY.md + dream diary.
     "deep_dream_enabled": True,             # scheduled deep dream switch; manual /memory dream is unaffected
     "skill": {},  # Per-skill runtime config; nested keys flatten to SKILL_<NAME>_<KEY> env vars at startup
+    # Registry that installs by bare name, skill search and skill list --remote
+    # use; empty means the default Skill Hub. It must speak the same API. The key,
+    # if set, is sent as a bearer token to this registry only.
+    "skill_hub_url": "",
+    "skill_hub_api_key": "",
     "mcp_servers": [],  # MCP server list; each entry supports type "stdio" (local process) or "sse" (remote URL)
     # On-demand MCP tool retrieval: when many MCP tools are connected, inject
     # only the most query-relevant ones instead of all of them. Built-in tools
@@ -943,7 +949,7 @@ def get_appdata_dir():
     data_path = os.path.join(get_data_root(), conf().get("appdata_dir", ""))
     if not os.path.exists(data_path):
         logger.info("[INIT] data path not exists, create it: {}".format(data_path))
-        os.makedirs(data_path)
+        os.makedirs(data_path, exist_ok=True)
     return data_path
 
 
@@ -974,7 +980,8 @@ def get_weixin_credentials_path(instance_id: str = ""):
 
 
 def subscribe_msg():
-    trigger_prefix = conf().get("single_chat_prefix", [""])[0]
+    prefixes = conf().get("single_chat_prefix") or [""]
+    trigger_prefix = prefixes[0]
     msg = conf().get("subscribe_msg", "")
     return msg.format(trigger_prefix=trigger_prefix)
 

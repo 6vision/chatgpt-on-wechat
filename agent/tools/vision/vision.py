@@ -789,6 +789,8 @@ class Vision(BaseTool):
             )
 
         file_path = self._maybe_compress(image)
+        if file_path != image:
+            mime_type = "image/jpeg"
         try:
             with open(file_path, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("ascii")
@@ -854,7 +856,7 @@ class Vision(BaseTool):
                 # Omit resampling when the source already fits the maximum.
                 resize = ["-Z", max_dim] if max(dimensions.values()) > int(max_dim) else []
                 subprocess.run(
-                    ["sips", *resize, "-s", "formatOptions", quality,
+                    ["sips", *resize, "-s", "format", "jpeg", "-s", "formatOptions", quality,
                      path, "--out", tmp.name],
                     capture_output=True, check=True,
                 )
@@ -959,6 +961,9 @@ class Vision(BaseTool):
         choices = data.get("choices", [])
         if choices:
             content = choices[0].get("message", {}).get("content", "")
+
+        if not content or (isinstance(content, str) and not content.strip()):
+            raise VisionAPIError("Vision API returned no text content")
 
         usage = data.get("usage", {})
         result = {

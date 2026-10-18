@@ -1,6 +1,6 @@
 ---
 title: 常用命令
-description: 查看状态、管理配置和上下文等常用命令
+description: "CowAgent 常用命令参考：help、status、cancel、steer、config、context 等，可在对话中用 / 前缀或在终端中用 cow 前缀执行，用于查看运行状态、中止任务、修改配置和管理上下文。"
 ---
 
 以下命令支持在对话中使用 `/` 前缀，也支持在终端中使用 `cow` 前缀（部分命令仅对话可用）。
@@ -84,9 +84,9 @@ Web 控制台在回复进行中会显示“引导当前任务”按钮。普通�
 | 配置项 | 说明 | 示例值 |
 | --- | --- | --- |
 | `model` | AI 模型名称 | `deepseek-flash` |
-| `agent_max_context_tokens` | 最大上下文 tokens | `40000` |
+| `agent_max_context_tokens` | 最大上下文 tokens | `200000` |
 | `agent_max_context_turns` | 最大上下文记忆轮次 | `30` |
-| `agent_max_steps` | 单次任务最大决策步数 | `15` |
+| `agent_max_steps` | 单次任务最大决策步数 | `100` |
 | `enable_thinking` | 是否启用深度思考模式 | `true` / `false` |
 
 <Note>

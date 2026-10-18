@@ -1,6 +1,6 @@
 ---
 title: scheduler - Scheduler
-description: Create and manage scheduled tasks
+description: "The scheduler tool creates and manages scheduled tasks in plain language: one-off, interval or cron schedules that send a fixed message or run an agent task, with a run-now option in the console."
 ---
 
 Create and manage dynamic scheduled tasks with flexible scheduling and execution modes.
@@ -84,7 +84,7 @@ The isolated session for scheduled tasks retains a few recent runs of conversati
 scheduler_keep_turns = max(1, agent_max_context_turns / 5)
 ```
 
-`agent_max_context_turns` defaults to `20`, so each scheduled run keeps the most recent **4 turns** of history by default. Increase `agent_max_context_turns` if you need longer memory.
+`agent_max_context_turns` defaults to `30`, so each scheduled run keeps the most recent **6 turns** of history by default. Increase `agent_max_context_turns` if you need longer memory.
 
 <Note>
 For group-chat scenarios (Feishu / WeCom group bots / DingTalk, etc.), the user's real `session_id` looks like `user_id:group_id` — different from `receiver`. Scheduler records the correct `session_id` when a task is created. For older `tasks.json` entries missing this field, the runtime falls back to `receiver`, matching legacy behavior.

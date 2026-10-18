@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_active       INTEGER NOT NULL,
     msg_count         INTEGER NOT NULL DEFAULT 0,
     pinned            INTEGER NOT NULL DEFAULT 0,
+    context_usage     TEXT    NOT NULL DEFAULT '',
     PRIMARY KEY (agent_id, session_id)
 );
 
@@ -191,6 +192,11 @@ ALTER TABLE sessions ADD COLUMN context_start_seq INTEGER NOT NULL DEFAULT 0;
 # User-pinned conversations, kept at the top of the session list.
 _MIGRATION_ADD_PINNED = """
 ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+"""
+
+# Context-usage snapshot from the session's last run, shown when no live Agent exists.
+_MIGRATION_ADD_CONTEXT_USAGE = """
+ALTER TABLE sessions ADD COLUMN context_usage TEXT NOT NULL DEFAULT '';
 """
 
 # Generic JSON sidecar for per-message attachments (TTS audio URL, future use).
@@ -924,7 +930,8 @@ class ConversationStore:
                     ).fetchone()
                     new_start = row[0] + 1
                     conn.execute(
-                        "UPDATE sessions SET context_start_seq = ? WHERE agent_id = ? AND session_id = ?",
+                        "UPDATE sessions SET context_start_seq = ?, context_usage = '' "
+                        "WHERE agent_id = ? AND session_id = ?",
                         (new_start, aid, session_id),
                     )
                     return new_start
@@ -977,9 +984,9 @@ class ConversationStore:
                 rows = conn.execute(
                     "SELECT seq, content FROM messages "
                     "WHERE agent_id = ? AND session_id = ? AND role = 'user' "
-                    "ORDER BY seq DESC LIMIT 20",
+                    "ORDER BY seq DESC",
                     (aid, session_id),
-                ).fetchall()
+                )
                 for seq, content_raw in rows:
                     try:
                         content = json.loads(content_raw)
@@ -2042,6 +2049,53 @@ class ConversationStore:
             finally:
                 conn.close()
 
+    def set_context_usage(self, session_id: str, usage: Optional[dict]) -> bool:
+        """Store a session's context-usage snapshot (None clears it). Best-effort;
+        returns True if the session existed."""
+        try:
+            payload = "" if usage is None else json.dumps(usage, ensure_ascii=False)
+        except (TypeError, ValueError) as e:
+            logger.debug(f"[ConversationStore] Context usage not serialisable: {e}")
+            return False
+        try:
+            with self._lock:
+                conn = self._connect()
+                try:
+                    with conn:
+                        cur = conn.execute(
+                            "UPDATE sessions SET context_usage = ? WHERE agent_id = ? AND session_id = ?",
+                            (payload, self._agent_id, session_id),
+                        )
+                        return cur.rowcount > 0
+                finally:
+                    conn.close()
+        except Exception as e:
+            logger.debug(f"[ConversationStore] Context usage write skipped: {e}")
+            return False
+
+    def get_context_usage(self, session_id: str) -> Optional[dict]:
+        """The snapshot written by :meth:`set_context_usage`; None if missing or unreadable."""
+        try:
+            with self._lock:
+                conn = self._connect()
+                try:
+                    row = conn.execute(
+                        "SELECT context_usage FROM sessions WHERE agent_id = ? AND session_id = ?",
+                        (self._agent_id, session_id),
+                    ).fetchone()
+                finally:
+                    conn.close()
+        except Exception as e:
+            logger.debug(f"[ConversationStore] Context usage read skipped: {e}")
+            return None
+        if not row or not row[0]:
+            return None
+        try:
+            data = json.loads(row[0])
+        except (TypeError, ValueError):
+            return None
+        return data if isinstance(data, dict) else None
+
     def list_session_ids(self, channel_type: Optional[str] = None) -> List[str]:
         """Every session id, optionally filtered by channel.
 
@@ -2300,9 +2354,9 @@ class ConversationStore:
         rows = conn.execute(
             "SELECT seq, content FROM messages "
             "WHERE agent_id = ? AND session_id = ? AND role = 'user' "
-            "ORDER BY seq DESC LIMIT 50",
+            "ORDER BY seq DESC",
             (self._agent_id, session_id),
-        ).fetchall()
+        )
         for seq, raw in rows:
             try:
                 content = json.loads(raw)
@@ -2500,6 +2554,13 @@ class ConversationStore:
                 logger.info("[ConversationStore] Migrated: added pinned column")
             except Exception as e:
                 logger.warning(f"[ConversationStore] Migration (pinned) failed: {e}")
+        if "context_usage" not in cols:
+            try:
+                conn.execute(_MIGRATION_ADD_CONTEXT_USAGE)
+                conn.commit()
+                logger.info("[ConversationStore] Migrated: added context_usage column")
+            except Exception as e:
+                logger.warning(f"[ConversationStore] Migration (context_usage) failed: {e}")
 
         msg_cols = {
             row[1]
@@ -2589,13 +2650,14 @@ class ConversationStore:
                     last_active       INTEGER NOT NULL,
                     msg_count         INTEGER NOT NULL DEFAULT 0,
                     pinned            INTEGER NOT NULL DEFAULT 0,
+                    context_usage     TEXT    NOT NULL DEFAULT '',
                     PRIMARY KEY (agent_id, session_id)
                 );
                 INSERT INTO sessions_new
                     (agent_id, session_id, channel_type, title, context_start_seq,
-                     created_at, last_active, msg_count, pinned)
+                     created_at, last_active, msg_count, pinned, context_usage)
                 SELECT agent_id, session_id, channel_type, title, context_start_seq,
-                       created_at, last_active, msg_count, pinned
+                       created_at, last_active, msg_count, pinned, context_usage
                 FROM sessions;
                 DROP TABLE sessions;
                 ALTER TABLE sessions_new RENAME TO sessions;
@@ -2978,13 +3040,16 @@ def _merge_one_agent(conn: sqlite3.Connection, src_path: str, agent_id: str) -> 
                     )
                 )
                 pinned = "pinned" if "pinned" in session_cols else "0"
+                context_usage = (
+                    "context_usage" if "context_usage" in session_cols else "''"
+                )
                 conn.execute(
                     f"""
                     INSERT OR IGNORE INTO sessions
                         (agent_id, session_id, channel_type, title, context_start_seq,
-                         created_at, last_active, msg_count, pinned)
+                         created_at, last_active, msg_count, pinned, context_usage)
                     SELECT ?, session_id, {optional_session_cols},
-                           created_at, last_active, msg_count, {pinned}
+                           created_at, last_active, msg_count, {pinned}, {context_usage}
                     FROM src.sessions
                     """,
                     (agent_id,),

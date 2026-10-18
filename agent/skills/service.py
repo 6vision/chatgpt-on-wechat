@@ -11,10 +11,12 @@ import os
 import re
 import shutil
 import tempfile
+import uuid
 from typing import List, Optional
+from common.directory_replace import replace_directory
 from common.log import logger
 from agent.skills.archive import extract_archive
-from agent.skills.manager import SkillManager
+from agent.skills.manager import SkillManager, apply_install_fields
 from common.media_download import MAX_FILE_BYTES, download_to_file
 
 try:
@@ -450,6 +452,10 @@ class SkillService:
                 "files": [{"url": "https://cdn.example.com/skills/custom-tool.zip"}]
             }
 
+        Either type may also carry how the skill presents itself, all optional:
+        ``display_name``, ``display_description``, ``icon`` (image URL) and
+        ``version``. The description the agent reads always comes from SKILL.md.
+
         :param payload: skill add payload from server
         """
         name = payload.get("name")
@@ -464,10 +470,31 @@ class SkillService:
             self._add_url(name, payload)
 
         self.manager.refresh_skills()
+        self.record_install(name, payload)
 
-        category = payload.get("category")
-        if category and name in self.manager.skills_config:
-            self.manager.skills_config[name]["category"] = category
+    def _installed_name(self, name: str) -> Optional[str]:
+        """
+        The name the loader gave the skill just installed under ``name``.
+
+        The directory is named after the payload, but a skill is known by its
+        SKILL.md ``name``; when the two differ the entry lives under the latter.
+        """
+        if name in self.manager.skills_config:
+            return name
+        skill_dir = os.path.realpath(self._safe_skill_dir(name))
+        for loaded, entry in self.manager.skills.items():
+            if os.path.realpath(entry.skill.base_dir) == skill_dir:
+                logger.warning(f"[SkillService] add: skill installed as '{name}' is named "
+                               f"'{loaded}' in its SKILL.md")
+                return loaded
+        return None
+
+    def record_install(self, name: str, payload: dict) -> None:
+        """Keep the category and presentation fields an installer gives for a skill
+        just installed under ``name`` (see ``apply_install_fields``)."""
+        installed = self._installed_name(name)
+        entry = self.manager.skills_config.get(installed) if installed else None
+        if entry is not None and apply_install_fields(entry, payload):
             self.manager._save_skills_config()
 
     def _add_url(self, name: str, payload: dict) -> None:
@@ -478,10 +505,11 @@ class SkillService:
 
         skill_dir = self._safe_skill_dir(name)
 
-        tmp_dir = skill_dir + ".tmp"
-        if os.path.exists(tmp_dir):
-            shutil.rmtree(tmp_dir)
-        os.makedirs(tmp_dir, exist_ok=True)
+        parent = os.path.dirname(skill_dir)
+        os.makedirs(parent, exist_ok=True)
+        # Not mkdtemp: this directory becomes the skill dir and must keep umask permissions.
+        tmp_dir = os.path.join(parent, f".{os.path.basename(skill_dir)}.download-{uuid.uuid4().hex[:8]}")
+        os.makedirs(tmp_dir)
 
         try:
             for file_info in files:
@@ -492,13 +520,9 @@ class SkillService:
                     continue
                 dest = self._safe_file_path(tmp_dir, rel_path)
                 self._download_file(url, dest)
-        except Exception:
+            replace_directory(tmp_dir, skill_dir, move_source=True)
+        finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
-            raise
-
-        if os.path.exists(skill_dir):
-            shutil.rmtree(skill_dir)
-        os.rename(tmp_dir, skill_dir)
 
         logger.info(f"[SkillService] add: skill '{name}' installed via url ({len(files)} files)")
 
@@ -543,9 +567,7 @@ class SkillService:
                 if os.path.isdir(single):
                     extract_dir = single
 
-            if os.path.exists(skill_dir):
-                shutil.rmtree(skill_dir)
-            shutil.copytree(extract_dir, skill_dir)
+            replace_directory(extract_dir, skill_dir)
 
         logger.info(f"[SkillService] add: skill '{name}' installed via package ({url})")
 

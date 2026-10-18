@@ -6,6 +6,7 @@ what a model happens to reply.
 """
 
 import json
+import os
 import shutil
 import threading
 import time
@@ -90,7 +91,7 @@ def _capture_children(monkeypatch, reply="done"):
             self.extra_system_suffix = None
             built.append(self)
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             self.goal = goal
             self.clear_history = clear_history
             self.depth_seen = current_depth()
@@ -167,6 +168,36 @@ def test_bad_template_encoding_does_not_disable_valid_subagents(
     assert invalid.read_bytes().endswith(b"\xff\n")
 
 
+def test_an_unlistable_templates_dir_does_not_disable_subagents(
+    spawn_tool, enabled, workspace, monkeypatch
+):
+    """The sibling read is guarded (an undecodable file must not disable valid
+    types); the listdir that feeds it was not, so a directory that cannot be
+    listed -- permissions changed, a race with a delete -- raised out of
+    load_templates and out of execute, while the description degraded."""
+    directory = workspace / "subagents"
+    directory.mkdir(parents=True)
+    (directory / "auditor.md").write_text(
+        "---\nname: auditor\ndescription: Review defects.\n---\nAudit carefully.\n",
+        encoding="utf-8",
+    )
+
+    real_listdir = os.listdir
+
+    def unlistable(path):
+        if str(path) == str(directory):
+            raise PermissionError(13, "Permission denied")
+        return real_listdir(path)
+
+    monkeypatch.setattr(os, "listdir", unlistable)
+    _capture_children(monkeypatch)
+
+    result = spawn_tool.execute({"goal": "review", "subagent_type": "general-purpose"})
+
+    assert result.success
+    assert set(load_templates(str(workspace))) == {"general-purpose", "explore"}
+
+
 def test_the_shipped_guide_is_not_offered_as_a_type(workspace):
     """README.md sits in the same directory as real templates. Loading it would
     put a bogus type in front of the Agent on every turn."""
@@ -198,8 +229,8 @@ def test_the_repo_ships_a_guide_that_documents_the_real_format():
     [
         # Wording the tool listing does not also carry, or this would still
         # pass with the rule itself deleted.
-        ("en", "needs research, search or information gathering"),
-        ("zh", "信息采集的独立任务"),
+        ("en", "needs deep research or broad information gathering"),
+        ("zh", "大范围信息采集的独立任务"),
     ],
 )
 def test_the_prompt_tells_the_agent_when_to_delegate(language, marker):
@@ -440,6 +471,24 @@ def test_unknown_type_names_what_is_available(spawn_tool, enabled):
     assert "nope" in result.result and "general-purpose" in result.result
 
 
+@pytest.mark.parametrize("bad_type", [123, True, ["a"]], ids=["int", "bool", "list"])
+@pytest.mark.parametrize("as_tasks", [False, True], ids=["single", "tasks"])
+def test_a_non_string_type_is_reported_as_unknown_not_a_crash(spawn_tool, enabled, bad_type, as_tasks):
+    """The model quotes scalars the way _coerce_integer_args exists for.
+    goal/context are coerced in _collect_tasks; subagent_type was not, so a
+    non-string reached the unknown-type report and crashed it with a raw
+    TypeError -- sorted() across mixed types, then join() -- instead of
+    naming what was wrong and what the available types are."""
+    params = {"tasks": [{"goal": "go", "subagent_type": bad_type}]} if as_tasks \
+        else {"goal": "go", "subagent_type": bad_type}
+
+    result = spawn_tool.execute(params)
+
+    assert result.status == "error"
+    assert "general-purpose" in result.result
+    assert str(bad_type) in result.result
+
+
 def test_missing_goal_is_refused(spawn_tool, enabled):
     assert spawn_tool.execute({}).status == "error"
     assert spawn_tool.execute({"tasks": []}).status == "error"
@@ -457,7 +506,7 @@ def test_a_task_that_overruns_its_budget_is_reported_not_dropped(parent, workspa
         def __init__(self, **kwargs):
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             started.set()
             # Honour the cancel the runner sets on timeout, as a real run would.
             cancel_event.wait(timeout=5)
@@ -471,6 +520,30 @@ def test_a_task_that_overruns_its_budget_is_reported_not_dropped(parent, workspa
     assert len(results) == 1
     assert results[0]["status"] == "timeout"
     assert "timeout_seconds" in results[0]["error"]
+
+
+def test_a_task_near_its_budget_is_asked_to_wrap_up(parent, workspace, monkeypatch):
+    """Work done before the deadline should come back as a report, not be
+    discarded with the timeout."""
+    settings = SubagentSettings(enabled=True, max_depth=1, max_concurrent=2, timeout_seconds=2.0)
+
+    class _Researching:
+        def __init__(self, **kwargs):
+            self.extra_system_suffix = None
+
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
+            while not cancel_event.is_set():
+                if steer_inbox.drain():
+                    return "partial findings"
+                time.sleep(0.01)
+            return ""
+
+    monkeypatch.setattr("agent.protocol.agent.Agent", _Researching)
+
+    results = run_tasks(parent, [SubagentTask(goal="research")], load_templates(str(workspace)), settings)
+
+    assert results[0]["status"] == "completed"
+    assert results[0]["summary"] == "partial findings"
 
 
 def test_a_timed_out_call_returns_without_waiting_for_the_worker(parent, workspace, monkeypatch):
@@ -488,7 +561,7 @@ def test_a_timed_out_call_returns_without_waiting_for_the_worker(parent, workspa
         def __init__(self, **kwargs):
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             release.wait(timeout=10)  # ignores the cancel, as a wedged run would
             return ""
 
@@ -522,7 +595,7 @@ def test_siblings_do_not_share_tool_instances(parent, workspace, enabled, monkey
             self.tools = kwargs["tools"]
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             # Keep the objects alive, not their ids: a freed copy's address can
             # be handed straight back to the next allocation.
             seen.append({t.name: t for t in self.tools})
@@ -554,7 +627,7 @@ def test_a_sub_agent_gets_half_the_parents_step_budget(parent, workspace, enable
             seen.append(kwargs["max_steps"])
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             return "ok"
 
     monkeypatch.setattr("agent.protocol.agent.Agent", _Recording)
@@ -574,7 +647,7 @@ def test_a_failing_task_is_reported_as_failed(parent, workspace, enabled, monkey
         def __init__(self, **kwargs):
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             raise RuntimeError("model unavailable")
 
     monkeypatch.setattr("agent.protocol.agent.Agent", _Exploding)
@@ -592,7 +665,7 @@ def test_all_tasks_failing_surfaces_as_a_tool_error(spawn_tool, enabled, monkeyp
         def __init__(self, **kwargs):
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             raise RuntimeError("nope")
 
     monkeypatch.setattr("agent.protocol.agent.Agent", _Exploding)
@@ -685,7 +758,7 @@ def test_a_failed_sub_agent_closes_with_its_error(spawn_tool, enabled, monkeypat
         def __init__(self, **kwargs):
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             raise RuntimeError("model unavailable")
 
     monkeypatch.setattr("agent.protocol.agent.Agent", _Exploding)
@@ -708,7 +781,7 @@ def test_a_sub_agent_that_overruns_its_budget_is_still_closed(spawn_tool, worksp
         def __init__(self, **kwargs):
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             cancel_event.wait(timeout=5)
             return ""
 
@@ -738,7 +811,7 @@ def _child_emitting(monkeypatch, events_by_goal, reply="done"):
         def __init__(self, **kwargs):
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             for event in events_by_goal.get(goal, []):
                 if on_event:
                     on_event(event)
@@ -914,7 +987,7 @@ def test_a_conclusion_that_never_arrived_says_so(spawn_tool, enabled, monkeypatc
         def __init__(self, **kwargs):
             self.extra_system_suffix = None
 
-        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None):
+        def run_stream(self, goal, clear_history=False, cancel_event=None, on_event=None, steer_inbox=None):
             raise RuntimeError("model unavailable")
 
     monkeypatch.setattr("agent.protocol.agent.Agent", _Exploding)

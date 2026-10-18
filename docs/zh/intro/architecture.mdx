@@ -1,6 +1,6 @@
 ---
 title: 项目架构
-description: CowAgent 的系统架构和核心设计
+description: "CowAgent 的系统架构与核心设计：通道、Agent 核心、模型、工具、技能、记忆与知识库等模块如何协作，以及 Agent 模式下从接收消息、理解意图、规划任务、调用工具到更新记忆并返回结果的完整工作流。"
 ---
 
 CowAgent 是一个开箱即用的超级 AI 助理，也是一个完整的 Agent harness 框架，具备复杂任务规划、长期记忆、技能扩展、自主进化和多智能体协作等能力。
@@ -95,9 +95,9 @@ Agent 的系统工作空间默认位于 `~/cow` 目录，用于存储系统提�
 {
   "agent": true,
   "agent_workspace": "~/cow",
-  "agent_max_context_tokens": 40000,
+  "agent_max_context_tokens": 200000,
   "agent_max_context_turns": 30,
-  "agent_max_steps": 15,
+  "agent_max_steps": 100,
   "agent_permission_mode": "workspace-write",
   "enable_thinking": false,
   "cow_lang": "auto"
@@ -108,9 +108,9 @@ Agent 的系统工作空间默认位于 `~/cow` 目录，用于存储系统提�
 | --- | --- | --- |
 | `agent` | 是否启用 Agent 模式 | `true` |
 | `agent_workspace` | 系统工作空间路径 | `~/cow` |
-| `agent_max_context_tokens` | 最大上下文 token 数 | `50000` |
-| `agent_max_context_turns` | 最大上下文记忆轮次 | `20` |
-| `agent_max_steps` | 单次任务最大决策步数 | `20` |
+| `agent_max_context_tokens` | 最大上下文 token 数 | `200000` |
+| `agent_max_context_turns` | 最大上下文记忆轮次 | `30` |
+| `agent_max_steps` | 单次任务最大决策步数 | `100` |
 | `agent_permission_mode` | 全局默认权限，新会话沿用：`read-only` / `workspace-write` / `full-access` | `full-access` |
 | `enable_thinking` | 是否启用深度思考模式 | `false` |
 | `knowledge` | 是否启用个人知识库 | `true` |

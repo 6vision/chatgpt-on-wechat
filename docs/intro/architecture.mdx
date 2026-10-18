@@ -1,6 +1,6 @@
 ---
 title: Architecture
-description: CowAgent 2.0 system architecture and core design
+description: "How CowAgent is built: the channel, agent core, model, tool, skill, memory and knowledge modules, and the agent loop from receiving a message to planning, calling tools, updating memory and replying."
 ---
 
 CowAgent is an out-of-the-box super AI assistant and a complete Agent harness framework, featuring complex task planning, long-term memory, skill extensibility, self-evolution, and multi-agent collaboration.
@@ -95,9 +95,9 @@ Configure Agent mode parameters in `config.json`:
 {
   "agent": true,
   "agent_workspace": "~/cow",
-  "agent_max_context_tokens": 50000,
-  "agent_max_context_turns": 20,
-  "agent_max_steps": 20,
+  "agent_max_context_tokens": 200000,
+  "agent_max_context_turns": 30,
+  "agent_max_steps": 100,
   "agent_permission_mode": "full-access",
   "enable_thinking": false,
   "cow_lang": "auto"
@@ -108,9 +108,9 @@ Configure Agent mode parameters in `config.json`:
 | --- | --- | --- |
 | `agent` | Enable Agent mode | `true` |
 | `agent_workspace` | Workspace path | `~/cow` |
-| `agent_max_context_tokens` | Max context tokens | `50000` |
-| `agent_max_context_turns` | Max context turns | `20` |
-| `agent_max_steps` | Max decision steps per task | `20` |
+| `agent_max_context_tokens` | Max context tokens | `200000` |
+| `agent_max_context_turns` | Max context turns | `30` |
+| `agent_max_steps` | Max decision steps per task | `100` |
 | `agent_permission_mode` | Global default permission inherited by new sessions: `read-only` / `workspace-write` / `full-access` | `full-access` |
 | `enable_thinking` | Enable deep-thinking mode | `false` |
 | `knowledge` | Enable personal knowledge base | `true` |

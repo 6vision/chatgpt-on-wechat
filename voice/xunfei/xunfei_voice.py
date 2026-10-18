@@ -29,6 +29,7 @@ from voice.voice import Voice
 from .xunfei_asr import xunfei_asr
 from .xunfei_tts import xunfei_tts
 import shutil
+import uuid
 
 try:
     from voice.audio_convert import any_to_mp3
@@ -81,7 +82,7 @@ class XunfeiVoice(Voice):
     def textToVoice(self, text):
         try:
             # Avoid the same filename under multithreading
-            fileName = TmpDir().path() + "reply-" + str(int(time.time())) + "-" + str(hash(text) & 0x7FFFFFFF) + ".mp3"
+            fileName = TmpDir().path() + "reply-" + uuid.uuid4().hex + ".mp3"
             xunfei_tts(self.APPID,self.APIKey,self.APISecret,self.BusinessArgsTTS,text,fileName)
             logger.info("[Xunfei] textToVoice text={} voice file name={}".format(text, fileName))
             reply = Reply(ReplyType.VOICE, fileName)

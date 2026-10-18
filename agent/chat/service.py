@@ -5,7 +5,6 @@ Translates agent events (message_update, message_end, tool_execution_end, etc.)
 into the CHAT socket protocol format (content chunks with segment_id, tool_calls chunks).
 """
 
-import re
 import uuid
 from typing import Callable, Optional
 
@@ -39,12 +38,15 @@ class ChatService:
         speaker_agent_id: str = None,
         members: list = None,
         transcript: list = None,
+        persist: bool = True,
+        model_override: tuple = None,
     ):
         """
         Run the agent for *query* and stream results back via *send_chunk_fn*.
 
         The method blocks until the agent finishes. After it returns the SDK
-        will automatically send the final (streaming=false) message.
+        will automatically send the final (streaming=false) message. Returns
+        the provider usage summed over the run's model calls, or None.
 
         :param query: user query text
         :param session_id: session identifier for agent isolation
@@ -58,6 +60,10 @@ class ChatService:
             is authoritative and reconciled onto the session, like a team channel
         :param transcript: attributed messages to run against instead of the
             restored history (conversation kept elsewhere)
+        :param persist: store the turn in the conversation history; off for a
+            one-off request whose caller keeps the conversation itself
+        :param model_override: ``(provider, model)`` to answer this turn on,
+            instead of the conversation's or the Agent's own model
         """
         # The conversation belongs to ``resolved_agent_id`` (its owner); only the
         # voice answering this turn may differ. Same model as agent_reply.
@@ -115,6 +121,10 @@ class ChatService:
         if transcript is not None:
             with agent.messages_lock:
                 agent.messages = list(transcript)
+        # Lasts until the next fetch of this runtime re-applies the
+        # conversation's own settings.
+        if model_override and hasattr(getattr(agent, "model", None), "set_session_override"):
+            agent.model.set_session_override(*model_override)
 
         # Pass context metadata to model for downstream API requests
         if hasattr(agent, 'model'):
@@ -136,6 +146,8 @@ class ChatService:
         # The store is the owner's: a guest speaker writes into the shared
         # transcript, stamped as author.
         def write_run_messages(messages: list):
+            if not persist:
+                return
             workspace_root = agent.workspace_dir
             if is_team:
                 messages = self.agent_bridge._attribute_to_speaker(messages, speaker_id)
@@ -351,7 +363,7 @@ class ChatService:
         )
 
         from config import conf
-        max_context_turns = conf().get("agent_max_context_turns", 20)
+        max_context_turns = conf().get("agent_max_context_turns", 30)
 
         # Get full system prompt with skills
         full_system_prompt = agent.get_full_system_prompt()
@@ -512,12 +524,18 @@ class ChatService:
         # Record this user turn for the self-evolution idle trigger. This
         # streaming path bypasses agent_bridge.agent_reply, so the activity must
         # be noted here, otherwise idle scans never see any signal to evolve.
-        self._note_evolution_turn(agent, context)
+        if persist:
+            self._note_evolution_turn(agent, context)
+
+        if persist and session_id:
+            self._remember_context_usage(agent, session_id, resolved_agent_id)
 
         logger.info(
             f"[ChatService] Agent run completed: agent={resolved_agent_id}, "
             f"session={session_id}"
         )
+        run_usage = getattr(executor, "run_usage", None)
+        return dict(run_usage) if run_usage else None
 
 
 
@@ -693,16 +711,9 @@ class ChatService:
     @staticmethod
     def _strip_peer_address(query: str, peer) -> str:
         """Drop the leading "@name" aimed at ``peer``; see AgentBridge._strip_address."""
-        if not query:
-            return query
-        labels = [label for label in (peer.name, peer.id) if label]
-        pattern = (
-            r"^\s*@(?:"
-            + "|".join(re.escape(label) for label in sorted(labels, key=len, reverse=True))
-            + r")[\s,，:：、]*"
-        )
-        stripped = re.sub(pattern, "", query, count=1, flags=re.IGNORECASE)
-        return stripped if stripped.strip() else query
+        from agent.team_addressing import strip_address
+
+        return strip_address(query, [peer.name, peer.id])
 
     @staticmethod
     def _restore_verbatim_query(messages: list, model_query: str, query: str) -> list:
@@ -747,7 +758,7 @@ class ChatService:
             from agent.memory import get_conversation_store
             from bridge.agent_initializer import AgentInitializer
 
-            max_turns = conf().get("agent_max_context_turns", 20)
+            max_turns = conf().get("agent_max_context_turns", 30)
             saved = get_conversation_store(owner.workspace).load_messages(
                 session_id, max_turns=max(3, max_turns // 2), with_authors=True
             )
@@ -778,6 +789,13 @@ class ChatService:
         except Exception as e:
             logger.debug(f"[ChatService] alias lookup failed: {e}")
         return agent_id
+
+    def _remember_context_usage(self, agent, session_id: str, owner_agent_id: str) -> None:
+        """Best-effort: a turn that answered must not fail over the usage chart."""
+        try:
+            self.agent_bridge.remember_context_usage(agent, session_id, owner_agent_id)
+        except Exception as e:
+            logger.debug(f"[ChatService] Context usage snapshot skipped: {e}")
 
     def _owner_workspace(self, owner_agent_id: str, agent) -> str:
         """Workspace whose store holds the conversation: the owner's."""
@@ -839,6 +857,7 @@ class ChatService:
                 return True
         except Exception:
             pass
+        stored = False
         try:
             from agent.memory import get_conversation_store
             store = get_conversation_store(workspace_root)
@@ -857,7 +876,8 @@ class ChatService:
             logger.warning(
                 f"[ChatService] Failed to persist messages for session={session_id}: {e}"
             )
-            return False
+            # Artifact indexing happens after the append committed; do not replay it.
+            return bool(stored)
 
 
 class _StreamState:

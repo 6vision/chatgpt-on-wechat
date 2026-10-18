@@ -211,11 +211,12 @@ function menuOpenItem(id) {
 // The custom view
 // ---------------------------------------------------------------------
 
-/** Called by navigateTo for /m/<id>. */
+/** Called by navigateTo for /m/<id>. Every visit reloads the page, since the
+    file or site behind an unchanged entry may have changed since the last one. */
 function menuShowPage(id) {
     menuCustomId = id || '';
     menuSyncActive();
-    _menuRenderPage();
+    _menuRenderPage(true);
 }
 
 function _menuSetBreadcrumb(found) {
@@ -235,12 +236,12 @@ function _menuPageTarget(item) {
     return (item.file && (item.file.preview_url || item.file.raw_url)) || '';
 }
 
-function _menuRenderPage() {
+function _menuRenderPage(force) {
     const found = menuFind(menuCustomId);
     const item = found && found.item.type !== 'builtin' ? found.item : null;
     _menuSetBreadcrumb(item ? found : null);
     const key = item ? JSON.stringify(item) : (menuLoaded ? 'missing' : 'loading');
-    if (key === menuPageKey) return;
+    if (!force && key === menuPageKey) return;
     menuPageKey = key;
 
     const body = document.getElementById('menu-page-body');

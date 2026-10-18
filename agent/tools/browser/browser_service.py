@@ -57,7 +57,7 @@ _SEMANTIC_TAGS = {
 _KEEP_TAGS = _INTERACTIVE_TAGS | _SEMANTIC_TAGS
 
 _SNAPSHOT_JS = """
-() => {
+(selector) => {
     const KEEP = new Set(%s);
     const INTERACTIVE = new Set(%s);
     const SKIP = new Set(["script","style","noscript","svg","path","meta","link","br","hr"]);
@@ -218,7 +218,9 @@ _SNAPSHOT_JS = """
         return obj;
     }
 
-    const result = walk(document.body);
+    const root = selector ? document.querySelector(selector) : document.body;
+    if (!root) throw new Error("Snapshot selector not found: " + selector);
+    const result = walk(root);
     window.__cowRefMap = refMap;
     return { tree: result, refCount: refCounter };
 }
@@ -233,7 +235,7 @@ _SNAPSHOT_JS = """
 # trip carries fixed overhead that is dramatically amplified in the frozen
 # bundle (a ~300-node tree can take 20s+). JSON.stringify in-page collapses it
 # to a single string transfer; Python then json.loads it. Behaviour identical.
-_SNAPSHOT_JS_STR = "() => JSON.stringify((%s)())" % _SNAPSHOT_JS.strip()
+_SNAPSHOT_JS_STR = "selector => JSON.stringify((%s)(selector))" % _SNAPSHOT_JS.strip()
 
 
 _BROWSER_DEAD_HINTS = (
@@ -1138,7 +1140,7 @@ class BrowserService:
             # Return a single JSON string (not a nested object) to avoid
             # Playwright's per-node serialization round trips, which are slow
             # in the frozen build. See _SNAPSHOT_JS_STR.
-            raw = page.evaluate(_SNAPSHOT_JS_STR)
+            raw = page.evaluate(_SNAPSHOT_JS_STR, selector)
             result = json.loads(raw) if isinstance(raw, str) else raw
         except Exception as e:
             return f"[Snapshot error: {e}]"
@@ -1378,8 +1380,6 @@ class BrowserService:
     # ------------------------------------------------------------------
 
     def _get_screenshot_dir(self, cwd: str = "") -> str:
-        if self._screenshot_dir and os.path.isdir(self._screenshot_dir):
-            return self._screenshot_dir
         base = cwd or os.getcwd()
         d = os.path.join(base, "tmp")
         os.makedirs(d, exist_ok=True)

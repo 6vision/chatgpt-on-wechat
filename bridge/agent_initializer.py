@@ -81,7 +81,7 @@ def configured_runtime_limits() -> Tuple[int, Optional[int]]:
     window we can't infer.
     """
     from config import conf
-    max_steps = conf().get("agent_max_steps", 20)
+    max_steps = conf().get("agent_max_steps", 100)
     try:
         max_context_tokens = int(conf().get("agent_max_context_tokens", 0) or 0)
     except (TypeError, ValueError):
@@ -281,7 +281,7 @@ class AgentInitializer:
             store = get_conversation_store(
                 transcript_workspace or agent.workspace_dir
             )
-            max_turns = conf().get("agent_max_context_turns", 20)
+            max_turns = conf().get("agent_max_context_turns", 30)
             # Restore honours the session's context boundary (cleared history is
             # never brought back). Regular chats restore about a third of the
             # runtime budget so a dialogue feels continuous after a restart

@@ -871,9 +871,9 @@ base = {
     'linkai_api_key': e('LINKAI_KEY', ''),
     'linkai_app_code': '',
     'agent': True,
-    'agent_max_context_tokens': 50000,
-    'agent_max_context_turns': 20,
-    'agent_max_steps': 20,
+    'agent_max_context_tokens': 200000,
+    'agent_max_context_turns': 30,
+    'agent_max_steps': 100,
     # New installs opt into self-evolution; existing users (no key) keep the
     # code default (off) so an upgrade never silently changes their behavior.
     'self_evolution_enabled': True,

@@ -2,6 +2,7 @@
 
 import os
 import sys
+import shutil
 import subprocess
 from typing import Callable, Optional
 
@@ -131,7 +132,7 @@ def _playwright_cli(args: list, env: Optional[dict] = None) -> int:
         # the caller's overrides (PLAYWRIGHT_BROWSERS_PATH / DOWNLOAD_HOST) above,
         # so mirror + pinned browsers dir are honored here too.
         return subprocess.call(cmd, env=get_driver_env())
-    except Exception as e:
+    except Exception:
         # Last resort: try the module main via runpy (works if the frozen build
         # kept playwright.__main__ importable).
         try:
@@ -149,6 +150,27 @@ def _playwright_cli(args: list, env: Optional[dict] = None) -> int:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+
+
+def _apt_install(package: str) -> int:
+    """apt-get install one system package, escalating with sudo only if needed.
+
+    A container is usually root already and ships no ``sudo`` binary at all;
+    prefixing a hard-coded ``sudo`` made the whole installer abort with an
+    unhandled FileNotFoundError. Use sudo only when we are not root and it is
+    actually available, and return non-zero otherwise so the caller falls back
+    to its "install it manually" message.
+    """
+    cmd = ["apt-get", "install", "-y", "--no-install-recommends", package]
+    if os.geteuid() != 0:
+        if not shutil.which("sudo"):
+            return 1
+        cmd.insert(0, "sudo")
+    try:
+        return subprocess.call(cmd, stderr=subprocess.DEVNULL)
+    except FileNotFoundError:
+        # No apt-get at all (e.g. a non-Debian base): nothing to install here.
+        return 1
 
 
 def _default_stream(msg: str, fg: Optional[str] = None) -> None:
@@ -298,10 +320,7 @@ def run_install_browser(
             )
         # Prefer fonts-wqy-zenhei only (~few MB). fonts-noto-cjk is much larger (~150MB+).
         stream("  Installing CJK font (fonts-wqy-zenhei, lightweight)...")
-        font_ret = subprocess.call(
-            ["sudo", "apt-get", "install", "-y", "--no-install-recommends", "fonts-wqy-zenhei"],
-            stderr=subprocess.DEVNULL,
-        )
+        font_ret = _apt_install("fonts-wqy-zenhei")
         if font_ret != 0:
             stream(
                 "  Could not auto-install CJK font.\n"
