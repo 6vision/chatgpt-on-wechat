@@ -291,15 +291,12 @@ class SkillManager:
         if name not in self.skills_config:
             raise ValueError(f"skill '{name}' not found in config")
         entry = self.skills_config[name]
-        previous = entry.get("enabled")
+        previous = entry.get("enabled", True)
         entry["enabled"] = enabled
         try:
             self._save_skills_config(strict=True)
         except Exception:
-            if previous is None:
-                entry.pop("enabled", None)
-            else:
-                entry["enabled"] = previous
+            entry["enabled"] = previous
             raise
 
     def get_skills_config(self) -> Dict[str, dict]:
