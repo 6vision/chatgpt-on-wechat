@@ -7,6 +7,7 @@
 // =====================================================================
 const I18N = {
     zh: {
+        chat_scroll_to_bottom: '滚动到底部',
         console: '控制台',
         nav_chat: '对话', nav_manage: '管理', nav_monitor: '监控',
         menu_chat: '对话', menu_agents: '智能体', menu_config: '配置', menu_skills: '能力',
@@ -700,6 +701,7 @@ const I18N = {
     },
     'zh-Hant': {
 
+        chat_scroll_to_bottom: '捲動至底部',
         console: '控制台',
         nav_chat: '對話', nav_manage: '管理', nav_monitor: '監控',
         menu_chat: '對話', menu_agents: '智慧體', menu_config: '設定', menu_skills: '能力',
@@ -1388,6 +1390,7 @@ const I18N = {
         mermaid_preview_failed: '圖表無法渲染',
         },
     en: {
+        chat_scroll_to_bottom: 'Scroll to bottom',
         console: 'Console',
         nav_chat: 'Chat', nav_manage: 'Management', nav_monitor: 'Monitor',
         menu_chat: 'Chat', menu_agents: 'Agents', menu_config: 'Config', menu_skills: 'Capabilities',

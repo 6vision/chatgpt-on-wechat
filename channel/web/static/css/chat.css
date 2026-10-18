@@ -1143,3 +1143,46 @@
     100% { box-shadow: 0 0 0 3px rgba(74, 190, 110, 0); }
 }
 
+/* Keep the browser's scroll anchor on the message list while content grows. */
+#chat-messages {
+    overflow-anchor: auto;
+}
+
+.chat-scroll-to-bottom {
+    position: absolute;
+    z-index: 20;
+    left: 50%;
+    bottom: calc(var(--chat-composer-height, 96px) + 12px);
+    display: flex;
+    width: 36px;
+    height: 36px;
+    align-items: center;
+    justify-content: center;
+    transform: translateX(-50%);
+    border: 1px solid #e2e8f0;
+    border-radius: 9999px;
+    background: #fff;
+    color: #64748b;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+.chat-scroll-to-bottom.hidden {
+    display: none;
+}
+.chat-scroll-to-bottom:hover {
+    color: #16a34a;
+    transform: translateX(-50%) scale(1.05);
+}
+.chat-scroll-to-bottom:focus-visible {
+    outline: 2px solid #35a85b;
+    outline-offset: 2px;
+}
+.dark .chat-scroll-to-bottom {
+    border-color: rgba(255, 255, 255, 0.15);
+    background: #2a2a2a;
+    color: #94a3b8;
+}
+.dark .chat-scroll-to-bottom:hover {
+    color: #4ade80;
+}

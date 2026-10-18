@@ -1,5 +1,6 @@
 const translations: Record<string, Record<string, string>> = {
   zh: {
+    chat_scroll_to_bottom: '滚动到底部',
     console: '控制台',
     nav_chat: '对话',
     nav_manage: '管理',
@@ -984,6 +985,7 @@ const translations: Record<string, Record<string, string>> = {
     slash_version: '查看版本',
   },
   en: {
+    chat_scroll_to_bottom: 'Scroll to bottom',
     console: 'Console',
     nav_chat: 'Chat',
     nav_manage: 'Management',

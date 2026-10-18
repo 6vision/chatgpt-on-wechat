@@ -351,6 +351,7 @@ function startSSE(requestId, loadingEl, timestamp, titleInfo, replayItems, resum
             </div>
         `;
         messagesDiv.appendChild(botEl);
+        refreshChatScrollControls();
         stepsEl = botEl.querySelector('.agent-steps');
         contentEl = botEl.querySelector('.answer-content');
         mediaEl = botEl.querySelector('.media-content');
