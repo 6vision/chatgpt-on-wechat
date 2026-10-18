@@ -8,7 +8,7 @@ from contextlib import contextmanager
 
 
 def iter_docx_body_text(document):
-    """Yield paragraphs and table rows in the order they occur in the body.
+    """Yield paragraphs and table rows in body order, including content controls.
 
     Builds python-docx's block objects directly, which also works on versions
     that predate ``Document.iter_inner_content()``.
@@ -25,6 +25,10 @@ def _iter_docx_blocks(container, parent):
     for element in container.iterchildren():
         if element.tag == qn("w:p"):
             yield Paragraph(element, parent).text
+        elif element.tag == qn("w:sdt"):
+            content = element.find(qn("w:sdtContent"))
+            if content is not None:
+                yield from _iter_docx_blocks(content, parent)
         elif element.tag == qn("w:tbl"):
             seen_cells = set()
             for row in Table(element, parent).rows:
