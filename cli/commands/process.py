@@ -4,7 +4,7 @@ import os
 import sys
 import subprocess
 import time
-from typing import Optional
+from typing import List, Optional
 
 import click
 
@@ -13,7 +13,7 @@ from cli.utils import _ensure_project_on_path, get_project_root, load_config_jso
 _IS_WIN = sys.platform == "win32"
 
 
-def _configured_channels() -> list[str]:
+def _configured_channels() -> List[str]:
     channel = load_config_json().get("channel_type", "")
     if isinstance(channel, str):
         names = [c.strip() for c in channel.split(",") if c.strip()]
