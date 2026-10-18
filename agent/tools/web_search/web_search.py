@@ -1,4 +1,5 @@
 """Web Search tool. Supports ten backends with a unified response format:
+  - deepseek (https://api-docs.deepseek.com/guides/search, official Search API)
   - bocha   (https://open.bochaai.com)
   - zhipu   (https://docs.bigmodel.cn/cn/guide/tools/web-search)
   - qianfan (https://cloud.baidu.com/doc/qianfan/s/2mh4su4uy)
@@ -7,13 +8,12 @@
   - serply  (https://serply.io, Google/Bing SERP API)
   - tavily  (https://tavily.com, AI-optimized search API)
   - searxng (https://docs.searxng.org, self-hosted meta search engine)
-  - deepseek (https://api-docs.deepseek.com/guides/search, official Search API)
   - keenable (https://keenable.ai, keyless tier behind an explicit opt-in)
 
 Provider selection
   - strategy 'auto' (default): pick the first configured provider in the
-    canonical order [bocha, qianfan, zhipu, linkai, anysearch, serply,
-    tavily, searxng, deepseek, keenable]. Keenable counts as configured with a
+    canonical order [deepseek, bocha, qianfan, zhipu, linkai, anysearch,
+    serply, tavily, searxng, keenable]. Keenable counts as configured with a
     key or with the explicit `keenable_anonymous` opt-in (same contract as
     `anysearch_anonymous`). When the caller passes an explicit `provider`
     it overrides the pick; an invalid/unconfigured one silently falls back
@@ -26,8 +26,7 @@ Credentials
   - zhipu   : conf.zhipu_ai_api_key            ->  env ZHIPUAI_API_KEY
   - qianfan : conf.qianfan_api_key             ->  env QIANFAN_API_KEY
   - linkai  : conf.linkai_api_key              ->  env LINKAI_API_KEY
-  - deepseek: tools.web_search.deepseek_api_key -> conf.deepseek_api_key ->
-              env DEEPSEEK_API_KEY (the same key as the DeepSeek model API)
+  - deepseek: conf.deepseek_api_key           ->  env DEEPSEEK_API_KEY
   - anysearch : tools.web_search.anysearch_api_key  -> env ANYSEARCH_API_KEY
   - serply  : tools.web_search.serply_api_key  ->  env SERPLY_API_KEY
   - tavily  : tools.web_search.tavily_api_key  ->  env TAVILY_API_KEY
@@ -52,15 +51,15 @@ from config import conf
 
 DEFAULT_TIMEOUT = 30
 
-# Canonical fallback order. Empirically ordered by Chinese real-time
+# Canonical fallback order. deepseek (official search, reuses the model key)
+# comes first; the rest are empirically ordered by Chinese real-time
 # quality + relevance: bocha (best overall), qianfan (best for hot news),
 # zhipu (strong on long-form articles), linkai (cloud aggregator),
 # anysearch, serply (global Google/Bing SERP, last since it isn't
 # benchmarked against the Chinese-market providers above), tavily, searxng,
-# deepseek (appended so users with other providers keep their routing),
 # keenable (global index, keyless tier behind an explicit opt-in; placed last
 # so any provider the user paid for wins).
-PROVIDER_ORDER = ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "tavily", "searxng", "deepseek", "keenable")
+PROVIDER_ORDER = ("deepseek", "bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "tavily", "searxng", "keenable")
 
 PROVIDER_LABELS = {
     "bocha":   "Bocha",
@@ -114,11 +113,6 @@ def _get_api_key(provider: str) -> str:
         key = _conf_str(conf().get("linkai_api_key"), "")
         return key or os.environ.get("LINKAI_API_KEY", "").strip()
     if provider == "deepseek":
-        # Dedicated search key first, then the shared DeepSeek credential: the
-        # Search API uses the same bearer <redacted> as the model API.
-        key = _conf_str(_tools_web_search_conf().get("deepseek_api_key"), "")
-        if key:
-            return key
         key = _conf_str(conf().get("deepseek_api_key"), "")
         return key or os.environ.get("DEEPSEEK_API_KEY", "").strip()
     if provider == "anysearch":

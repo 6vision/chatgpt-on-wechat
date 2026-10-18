@@ -45,8 +45,7 @@ backend cannot render (e.g. JavaScript-heavy sites).
 ```
 
 The backend uses the `deepseek_api_key` model credential (or the
-`DEEPSEEK_API_KEY` environment variable); a dedicated
-`tools.web_fetch.deepseek_api_key` overrides it. Calls are billed per
+`DEEPSEEK_API_KEY` environment variable). Calls are billed per
 successful request ($0.75 per 1,000), so the backend stays opt-in; `"direct"`
 (the default) is free. The SSRF guard still applies: private, loopback, and
 cloud-metadata URLs are rejected before any request is issued. Document

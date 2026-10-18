@@ -756,6 +756,8 @@ export interface SearchProviderMeta {
   // URL (not a secret, so returned verbatim) for prefill/edit.
   needs_url?: boolean
   url_masked?: string
+  // DeepSeek only: the model vendor's base URL, edited together with its key.
+  api_base?: string
 }
 
 export interface CapabilityState {

@@ -81,12 +81,7 @@ def _fetch_provider() -> str:
 
 
 def _deepseek_api_key() -> str:
-    """Resolve the DeepSeek key for the Fetch backend. A dedicated
-    tools.web_fetch.deepseek_api_key wins, then the shared DeepSeek
-    credential (the Fetch API uses the same bearer <redacted> as the model API)."""
-    key = _conf_str(_tools_web_fetch_conf().get("deepseek_api_key"), "")
-    if key:
-        return key
+    """The DeepSeek model key, which the Fetch API also accepts."""
     key = _conf_str(conf().get("deepseek_api_key"), "")
     return key or os.environ.get("DEEPSEEK_API_KEY", "").strip()
 
@@ -233,7 +228,7 @@ class WebFetch(BaseTool):
         if not api_key:
             return ToolResult.fail(
                 "Error: tools.web_fetch.provider is 'deepseek' but no DeepSeek API key is configured. "
-                "Set tools.web_fetch.deepseek_api_key, deepseek_api_key, or the DEEPSEEK_API_KEY environment variable."
+                "Set deepseek_api_key or the DEEPSEEK_API_KEY environment variable."
             )
 
         from agent.tools.web_search.web_search import deepseek_tools_url

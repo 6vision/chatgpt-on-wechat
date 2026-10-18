@@ -82,14 +82,14 @@ class TestAnySearchKeyResolution(unittest.TestCase):
 
 
 class TestProviderOrder(unittest.TestCase):
-    """New providers are appended so existing routing stays untouched, and
-    keenable stays last — its keyless tier must come after every provider
-    the user may have paid for."""
+    """DeepSeek leads (it reuses the model key), and keenable stays last —
+    its keyless tier must come after every provider the user may have paid
+    for."""
 
-    def test_provider_order_appends_new_providers_last(self):
+    def test_provider_order(self):
         self.assertEqual(
             web_search_module.PROVIDER_ORDER,
-            ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "tavily", "searxng", "deepseek", "keenable"),
+            ("deepseek", "bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "tavily", "searxng", "keenable"),
         )
 
     def test_web_console_provider_list_stays_in_sync(self):
@@ -1113,18 +1113,7 @@ def _deepseek_result(**overrides):
 
 
 class TestDeepSeekKeyResolution(unittest.TestCase):
-    """The deepseek key prefers the dedicated tools.web_search key, then the
-    shared DeepSeek model credential (config or env) — the Search API uses
-    the same bearer <redacted>"""
-
-    def test_dedicated_search_key_wins(self):
-        cfg = {
-            "tools": {"web_search": {"deepseek_api_key": "search-key"}},
-            "deepseek_api_key": "model-key",
-        }
-        with patch.object(web_search_module, "conf", lambda: cfg), \
-                patch.dict(os.environ, {"DEEPSEEK_API_KEY": "env-key"}):
-            self.assertEqual(web_search_module._get_api_key("deepseek"), "search-key")
+    """The deepseek key is the shared DeepSeek model credential (config or env)."""
 
     def test_model_key_fallback(self):
         cfg = {"deepseek_api_key": "model-key"}
@@ -1263,8 +1252,6 @@ class TestDeepSeekBackend(unittest.TestCase):
         self.assertEqual(ModelsHandler._SEARCH_PROVIDERS, web_search_module.PROVIDER_ORDER)
         self.assertIn("deepseek", ModelsHandler._SEARCH_PROVIDER_LABELS)
 
-        cfg = {"tools": {"web_search": {"deepseek_api_key": "console-key"}}}
-        self.assertEqual(ModelsHandler._search_provider_key("deepseek", cfg), "console-key")
         cfg = {"deepseek_api_key": "model-key"}
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
             self.assertEqual(ModelsHandler._search_provider_key("deepseek", cfg), "model-key")
@@ -1276,6 +1263,9 @@ class TestDeepSeekBackend(unittest.TestCase):
             self.assertNotIn("deepseek", fresh["configured_providers"])
             keyed = ModelsHandler._search_capability({"deepseek_api_key": "sk-test"})
             self.assertIn("deepseek", keyed["configured_providers"])
+            self.assertEqual(keyed["current_provider"], "deepseek")
+            meta = next(p for p in keyed["providers"] if p["id"] == "deepseek")
+            self.assertEqual(meta["api_base"], "https://api.deepseek.com/v1")
 
 
 if __name__ == "__main__":

@@ -848,6 +848,8 @@ function _launchSearchProviderConfig(providerId, providerMeta) {
     // reuse a model-vendor key and go through the vendor modal instead.
     if (['bocha', 'anysearch', 'serply', 'tavily', 'searxng', 'keenable'].includes(providerId)) {
         openSearchKeyModal(providerId, providerMeta);
+    } else if (providerId === 'deepseek') {
+        openDeepseekSearchModal();
     } else {
         openVendorModal(providerId, () => loadModelsView({ preserveScroll: true }));
     }
@@ -1056,6 +1058,103 @@ function _saveSearchKey(providerId) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'set_search_credential', provider: providerId, api_key: apiKey }),
+    }).then(r => r.json()).then(data => {
+        if (data.status === 'success') {
+            const modal = document.getElementById('search-key-modal');
+            if (modal) modal.remove();
+            loadModelsView({ preserveScroll: true });
+        }
+    });
+}
+
+// DeepSeek search shares the model vendor's key and base, so it saves through
+// set_provider. No clear button: clearing would also disable the chat model.
+function openDeepseekSearchModal() {
+    const existing = document.getElementById('search-key-modal');
+    if (existing) existing.remove();
+
+    const searchCap = (modelsState && modelsState.capabilities && modelsState.capabilities.search) || {};
+    const prov = (searchCap.providers || []).find(p => p.id === 'deepseek') || {};
+    const masked = prov.api_key_masked || '';
+    const inputCls = `w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                      bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
+                      focus:outline-none focus:border-primary-500 font-mono`;
+    const labelCls = 'block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5';
+
+    const modal = document.createElement('div');
+    modal.id = 'search-key-modal';
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm';
+    modal.innerHTML = `
+        <div class="bg-white dark:bg-[#1A1A1A] rounded-xl border border-slate-200 dark:border-white/10
+                    w-full max-w-md mx-4 p-6 shadow-xl">
+            <h3 class="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-1">${t('models_search_deepseek_title')}</h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">${t('models_search_deepseek_desc')}</p>
+            <label class="${labelCls}">Base URL</label>
+            <input id="search-ds-base" type="text" autocomplete="off" class="${inputCls}"
+                   value="${escapeHtml(prov.api_base || '')}" placeholder="https://api.deepseek.com/v1" />
+            <label class="${labelCls} mt-4">API Key</label>
+            <input id="search-key-input" type="text" autocomplete="off" data-1p-ignore data-lpignore="true"
+                   class="${inputCls} ${masked ? 'cfg-key-masked' : ''}"
+                   value="${escapeHtml(masked)}" data-masked="${masked ? '1' : ''}" placeholder="sk-..." />
+            <div class="flex items-center justify-end gap-3 mt-5">
+                <button type="button" onclick="document.getElementById('search-key-modal').remove()"
+                        class="px-3 py-1.5 rounded-md text-sm text-slate-600 dark:text-slate-300
+                               hover:bg-slate-100 dark:hover:bg-white/5 transition-colors">
+                    ${t('cancel')}
+                </button>
+                <button type="button" onclick="_saveDeepseekSearch()"
+                        class="px-4 py-1.5 rounded-md bg-primary-500 hover:bg-primary-600 text-white text-sm font-medium
+                               cursor-pointer transition-colors">
+                    ${t('save')}
+                </button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const input = document.getElementById('search-key-input');
+    const unmask = () => {
+        if (input.dataset.masked === '1') {
+            input.value = '';
+            input.dataset.masked = '';
+            input.classList.remove('cfg-key-masked');
+        }
+    };
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab' || e.key === 'Escape') return;
+        unmask();
+    });
+    input.addEventListener('paste', unmask);
+    if (!masked) setTimeout(() => input.focus(), 50);
+
+    modal.addEventListener('mousedown', (e) => {
+        if (e.target === modal) modal.remove();
+    });
+    const onKey = (e) => {
+        if (e.key === 'Escape') {
+            modal.remove();
+            document.removeEventListener('keydown', onKey);
+        }
+    };
+    document.addEventListener('keydown', onKey);
+}
+
+function _saveDeepseekSearch() {
+    const input = document.getElementById('search-key-input');
+    const baseInput = document.getElementById('search-ds-base');
+    if (!input || !baseInput) return;
+    const keptKey = input.dataset.masked === '1';
+    const apiKey = keptKey ? '' : input.value.trim();
+    if (!keptKey && !apiKey) {
+        input.focus();
+        return;
+    }
+    const payload = { action: 'set_provider', provider_id: 'deepseek', api_base: baseInput.value.trim() };
+    if (apiKey) payload.api_key = apiKey;
+    fetch('/api/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
     }).then(r => r.json()).then(data => {
         if (data.status === 'success') {
             const modal = document.getElementById('search-key-modal');

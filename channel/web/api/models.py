@@ -1428,7 +1428,7 @@ class ModelsHandler:
 
     # Canonical search provider order. Mirrors PROVIDER_ORDER in
     # agent/tools/web_search/web_search.py — keep them in sync.
-    _SEARCH_PROVIDERS = ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "tavily", "searxng", "deepseek", "keenable")
+    _SEARCH_PROVIDERS = ("deepseek", "bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "tavily", "searxng", "keenable")
 
     _SEARCH_PROVIDER_LABELS = {
         "bocha":   {"zh": "博查", "en": "Bocha"},
@@ -1457,12 +1457,7 @@ class ModelsHandler:
         if provider == "linkai":
             return local_config.get("linkai_api_key") or os.environ.get("LINKAI_API_KEY", "")
         if provider == "deepseek":
-            # Dedicated search key first, then the shared DeepSeek model
-            # credential (the Search API accepts the same API key).
-            tools_cfg = local_config.get("tools") or {}
-            block = tools_cfg.get("web_search") or {} if isinstance(tools_cfg, dict) else {}
-            dedicated = block.get("deepseek_api_key") if isinstance(block, dict) else ""
-            return dedicated or local_config.get("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
+            return local_config.get("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
         if provider == "anysearch":
             tools_cfg = local_config.get("tools") or {}
             block = tools_cfg.get("web_search") or {} if isinstance(tools_cfg, dict) else {}
@@ -1532,6 +1527,11 @@ class ModelsHandler:
                 # SearXNG stores an instance URL (not a secret), so echo it back
                 # verbatim to prefill/edit; other providers mask their key.
                 "url_masked": searxng_url if pid == "searxng" else "",
+                # DeepSeek is edited as base + key in the search card; the
+                # base is a plain URL, echoed back to prefill the field.
+                "api_base": (
+                    local_config.get("deepseek_api_base") or PROVIDER_MODELS["deepseek"].get("api_base_default", "")
+                ) if pid == "deepseek" else "",
                 "api_key_masked": mask_key(raw_key) if raw_key else "",
             })
             if ok:
