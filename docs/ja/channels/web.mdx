@@ -40,6 +40,57 @@ Web コンソールは CowAgent のデフォルトチャネルです。起動後
   サーバーのファイアウォールとセキュリティグループで該当ポートが許可されていることを確認してください。
 </Note>
 
+## HTTPS とドメインでのアクセス
+
+ドメインと HTTPS でコンソールを公開するには、次のいずれかの方法を使います。
+
+**方法 1：nginx リバースプロキシ（推奨）**。TLS は nginx で終端し、HTTP でコンソールに転送します。あわせて `"web_host": "127.0.0.1"` を設定し、コンソールに nginx 経由でのみアクセスできるようにします：
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name cow.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/cow.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/cow.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:9899;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Replies stream over SSE: keep connections open and unbuffered
+        proxy_read_timeout 3600s;
+        proxy_buffering off;
+        # File uploads up to 512 MB
+        client_max_body_size 512m;
+    }
+}
+```
+
+**方法 2：HTTPS を直接有効化**。コンソール自身が TLS を提供します：
+
+```json
+{
+  "web_https_enabled": true,
+  "web_ssl_certfile": "/etc/letsencrypt/live/cow.example.com/fullchain.pem",
+  "web_ssl_keyfile": "/etc/letsencrypt/live/cow.example.com/privkey.pem"
+}
+```
+
+| パラメータ | 説明 | デフォルト |
+| --- | --- | --- |
+| `web_https_enabled` | コンソールを HTTPS で直接提供する | `false` |
+| `web_ssl_certfile` | PEM 証明書ファイル（フルチェーン推奨） | `""` |
+| `web_ssl_keyfile` | PEM 秘密鍵ファイル | `""` |
+
+証明書ファイルが存在しない、または読み取れない場合は起動時にエラーで停止し、HTTP にはフォールバックしません。
+
+<Note>
+  コンソールはルートパスで公開する必要があります。`/cow/` のようなサブパスではなく専用のサブドメインを使ってください。OAuth が必要な MCP サーバーを使う場合は、`"mcp_oauth_redirect_base": "https://cow.example.com"` も設定してください。
+</Note>
+
 ## チャット API
 
 Web コンソールのポートでは OpenAI 互換のチャット API `/v1/chat/completions` も提供しています。初期状態では無効で、設定ページの「チャット API」カードから有効にして API キーを取得できます。詳しくは [チャット API](/ja/extensions/chat-api) を参照してください。

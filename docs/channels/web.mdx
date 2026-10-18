@@ -44,6 +44,57 @@ After starting the project, visit:
   Ensure the server firewall and security group allow the corresponding port.
 </Note>
 
+## HTTPS and Domain Access
+
+To serve the console on a domain with HTTPS, use one of the two setups below.
+
+**Option 1: nginx reverse proxy (recommended).** Let nginx terminate TLS and forward plain HTTP to the console, and set `"web_host": "127.0.0.1"` so the console is only reachable through nginx:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name cow.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/cow.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/cow.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:9899;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Replies stream over SSE: keep connections open and unbuffered
+        proxy_read_timeout 3600s;
+        proxy_buffering off;
+        # File uploads up to 512 MB
+        client_max_body_size 512m;
+    }
+}
+```
+
+**Option 2: direct HTTPS.** The console serves TLS itself:
+
+```json
+{
+  "web_https_enabled": true,
+  "web_ssl_certfile": "/etc/letsencrypt/live/cow.example.com/fullchain.pem",
+  "web_ssl_keyfile": "/etc/letsencrypt/live/cow.example.com/privkey.pem"
+}
+```
+
+| Parameter | Description | Default |
+| --- | --- | --- |
+| `web_https_enabled` | Serve the console over HTTPS directly | `false` |
+| `web_ssl_certfile` | PEM certificate file (full chain recommended) | `""` |
+| `web_ssl_keyfile` | PEM private key file | `""` |
+
+A missing or unreadable certificate stops startup with an error instead of falling back to HTTP.
+
+<Note>
+  The console must be served at the root path; use a dedicated subdomain rather than a sub-path such as `/cow/`. If you use MCP servers with OAuth, also set `"mcp_oauth_redirect_base": "https://cow.example.com"`.
+</Note>
+
 ## Chat API
 
 The Web Console's port also serves an OpenAI-compatible chat API, `/v1/chat/completions`. It is off by default; turn it on and get an API key from the Chat API card on the settings page. See [Chat API](/extensions/chat-api).

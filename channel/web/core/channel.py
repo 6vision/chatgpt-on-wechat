@@ -1579,10 +1579,7 @@ class WebChannel(ChatChannel):
                 logger.info(f"[WebChannel]  {idx:>2}. {name:<{name_width}} - {label}")
             logger.info("[WebChannel] ✅ Web console is running")
             logger.info(f"[WebChannel] 🌐 Local access: {scheme}://localhost:{port}")
-            external_url = (conf().get("web_external_url") or "").strip().rstrip("/")
-            if external_url:
-                logger.info(f"[WebChannel] 🌍 Public URL: {external_url}")
-            elif is_public_bind:
+            if is_public_bind:
                 logger.info(f"[WebChannel] 🌍 Server access: {scheme}://YOUR_IP:{port} (replace YOUR_IP with your server IP)")
                 if not _is_password_enabled():
                     logger.info("[WebChannel] ⚠️  Listening on 0.0.0.0 without web_password set; set an access password in config.json for public deployment")
@@ -1625,30 +1622,17 @@ class WebChannel(ChatChannel):
         logging.getLogger("web").setLevel(logging.ERROR)
         logging.getLogger("web.httpserver").setLevel(logging.ERROR)
 
-        from channel.web.core.proxy import (
-            TrustProxyMiddleware, build_ssl_adapter, resolve_tls_config,
-        )
+        from channel.web.core.tls import resolve_tls_config
 
         # Build WSGI app with middleware (same as runsimple but without print)
-        wsgi_app = app.wsgifunc()
-        if conf().get("web_trust_proxy", False):
-            # Behind nginx/Caddy/Traefik: let the app see the public scheme,
-            # host, and client IP from the proxy's X-Forwarded-* headers. Only
-            # enable this when the console is reachable exclusively through
-            # the proxy -- the headers are spoofable by direct clients.
-            wsgi_app = TrustProxyMiddleware(wsgi_app)
-            logger.info("[WebChannel] Trusting X-Forwarded-* headers from reverse proxy")
-        func = web.httpserver.StaticMiddleware(wsgi_app)
+        func = web.httpserver.StaticMiddleware(app.wsgifunc())
         func = web.httpserver.LogMiddleware(func)
 
-        # Direct HTTPS: terminate TLS in the console itself via cheroot's
-        # BuiltinSSLAdapter. Fails fast on a misconfigured cert/key so a typo
-        # never silently serves plain HTTP instead.
-        scheme = "http"
-        certfile = keyfile = None
+        # The desktop shell probes and loads the console over plain http.
+        https_enabled = bool(conf().get("web_https_enabled", False)) and os.environ.get("COW_DESKTOP") != "1"
         try:
             certfile, keyfile = resolve_tls_config(
-                bool(conf().get("web_https_enabled", False)),
+                https_enabled,
                 conf().get("web_ssl_certfile", ""),
                 conf().get("web_ssl_keyfile", ""),
             )
@@ -1656,8 +1640,10 @@ class WebChannel(ChatChannel):
             logger.error(f"[WebChannel] HTTPS misconfigured: {e}")
             raise
         server = web.httpserver.WSGIServer((host, port), func)
+        scheme = "http"
         if certfile:
-            server.ssl_adapter = build_ssl_adapter(certfile, keyfile)
+            from cheroot.ssl.builtin import BuiltinSSLAdapter
+            server.ssl_adapter = BuiltinSSLAdapter(certfile, keyfile)
             scheme = "https"
             logger.info("[WebChannel] 🔒 Serving the web console over HTTPS")
         server.daemon_threads = True
