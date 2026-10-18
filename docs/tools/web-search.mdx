@@ -24,7 +24,7 @@ Search the internet for real-time information, news, research, and more. Support
 | SearXNG | `tools.web_search.searxng_url` (self-hosted instance URL, no API key needed) | [SearXNG](https://docs.searxng.org/) |
 | Keenable | Optional `tools.web_search.keenable_api_key`, or `keenable_anonymous: true` for keyless use | [Keenable](https://keenable.ai) |
 
-Bocha, Serply, and Tavily require dedicated keys; Zhipu, ERNIE, LinkAI, and DeepSeek reuse the corresponding model's API key — configuring the model automatically grants search capability. DeepSeek additionally accepts an optional dedicated key via `tools.web_search.deepseek_api_key` (falling back to the `DEEPSEEK_API_KEY` environment variable when unset). SearXNG is self-hosted and only requires an instance URL. AnySearch is opt-in for keyless use: set `tools.web_search.anysearch_anonymous` to `true` (or save it with an empty key in the console's Search panel) to call it anonymously; configuring `tools.web_search.anysearch_api_key` (falling back to the `ANYSEARCH_API_KEY` environment variable when unset) needs no opt-in, and quota and permissions follow the AnySearch server. Keenable is opt-in: set `tools.web_search.keenable_anonymous` to `true` (or save it with an empty key in the console's Search panel) and it calls a public endpoint with per-IP rate limits (10 requests/s, 1000/hour); an optional `keenable_api_key` (or `KEENABLE_API_KEY`) lifts them and needs no opt-in.
+Bocha, Serply, and Tavily require dedicated keys; Zhipu, ERNIE, LinkAI, and DeepSeek reuse the corresponding model's API key — configuring the model automatically grants search capability. DeepSeek additionally accepts an optional dedicated key via `tools.web_search.deepseek_api_key` (falling back to `deepseek_api_key`, then the `DEEPSEEK_API_KEY` environment variable). SearXNG is self-hosted and only requires an instance URL. AnySearch is opt-in for keyless use: set `tools.web_search.anysearch_anonymous` to `true` (or save it with an empty key in the console's Search panel) to call it anonymously; configuring `tools.web_search.anysearch_api_key` (falling back to the `ANYSEARCH_API_KEY` environment variable when unset) needs no opt-in, and quota and permissions follow the AnySearch server. Keenable is opt-in: set `tools.web_search.keenable_anonymous` to `true` (or save it with an empty key in the console's Search panel) and it calls a public endpoint with per-IP rate limits (10 requests/s, 1000/hour); an optional `keenable_api_key` (or `KEENABLE_API_KEY`) lifts them and needs no opt-in.
 
 ## Routing Strategy
 
@@ -39,7 +39,7 @@ Bocha, Serply, and Tavily require dedicated keys; Zhipu, ERNIE, LinkAI, and Deep
 }
 ```
 
-- `auto` (default): the Agent intelligently picks among configured providers and may call multiple providers in a single task to gather more comprehensive results; when none is specified, falls back through `bocha → qianfan → zhipu → linkai → deepseek → anysearch → serply → tavily → searxng → keenable`.
+- `auto` (default): the Agent intelligently picks among configured providers and may call multiple providers in a single task to gather more comprehensive results; when none is specified, falls back through `bocha → qianfan → zhipu → linkai → anysearch → serply → tavily → searxng → deepseek → keenable`.
 
 - `fixed`: always use the provider specified in `provider`; falls back to the auto order if that provider's credentials are missing.
 

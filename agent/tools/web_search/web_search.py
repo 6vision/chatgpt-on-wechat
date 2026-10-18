@@ -3,17 +3,17 @@
   - zhipu   (https://docs.bigmodel.cn/cn/guide/tools/web-search)
   - qianfan (https://cloud.baidu.com/doc/qianfan/s/2mh4su4uy)
   - linkai  (https://link-ai.tech, fallback)
-  - deepseek (https://api-docs.deepseek.com/guides/search, official Search API)
   - anysearch (https://anysearch.com)
   - serply  (https://serply.io, Google/Bing SERP API)
   - tavily  (https://tavily.com, AI-optimized search API)
   - searxng (https://docs.searxng.org, self-hosted meta search engine)
+  - deepseek (https://api-docs.deepseek.com/guides/search, official Search API)
   - keenable (https://keenable.ai, keyless tier behind an explicit opt-in)
 
 Provider selection
   - strategy 'auto' (default): pick the first configured provider in the
-    canonical order [bocha, qianfan, zhipu, linkai, deepseek, anysearch,
-    serply, tavily, searxng, keenable]. Keenable counts as configured with a
+    canonical order [bocha, qianfan, zhipu, linkai, anysearch, serply,
+    tavily, searxng, deepseek, keenable]. Keenable counts as configured with a
     key or with the explicit `keenable_anonymous` opt-in (same contract as
     `anysearch_anonymous`). When the caller passes an explicit `provider`
     it overrides the pick; an invalid/unconfigured one silently falls back
@@ -26,10 +26,8 @@ Credentials
   - zhipu   : conf.zhipu_ai_api_key            ->  env ZHIPUAI_API_KEY
   - qianfan : conf.qianfan_api_key             ->  env QIANFAN_API_KEY
   - linkai  : conf.linkai_api_key              ->  env LINKAI_API_KEY
-  - deepseek: tools.web_search.deepseek_api_key -> env DEEPSEEK_API_KEY ->
-              conf.deepseek_api_key (the Search API uses the same bearer
-              <redacted> as the DeepSeek model API, so configuring the model
-              automatically grants search capability)
+  - deepseek: tools.web_search.deepseek_api_key -> conf.deepseek_api_key ->
+              env DEEPSEEK_API_KEY (the same key as the DeepSeek model API)
   - anysearch : tools.web_search.anysearch_api_key  -> env ANYSEARCH_API_KEY
   - serply  : tools.web_search.serply_api_key  ->  env SERPLY_API_KEY
   - tavily  : tools.web_search.tavily_api_key  ->  env TAVILY_API_KEY
@@ -57,12 +55,12 @@ DEFAULT_TIMEOUT = 30
 # Canonical fallback order. Empirically ordered by Chinese real-time
 # quality + relevance: bocha (best overall), qianfan (best for hot news),
 # zhipu (strong on long-form articles), linkai (cloud aggregator),
-# deepseek (official in-house engine, newest of the group),
 # anysearch, serply (global Google/Bing SERP, last since it isn't
 # benchmarked against the Chinese-market providers above), tavily, searxng,
+# deepseek (appended so users with other providers keep their routing),
 # keenable (global index, keyless tier behind an explicit opt-in; placed last
 # so any provider the user paid for wins).
-PROVIDER_ORDER = ("bocha", "qianfan", "zhipu", "linkai", "deepseek", "anysearch", "serply", "tavily", "searxng", "keenable")
+PROVIDER_ORDER = ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "tavily", "searxng", "deepseek", "keenable")
 
 PROVIDER_LABELS = {
     "bocha":   "Bocha",
@@ -86,6 +84,14 @@ def _tools_web_search_conf() -> dict:
         return {}
     block = tools_cfg.get("web_search") or {}
     return block if isinstance(block, dict) else {}
+
+
+def deepseek_tools_url(api_base, name: str) -> str:
+    """DeepSeek tool endpoint under the configured deepseek_api_base."""
+    base = _conf_str(api_base, "https://api.deepseek.com/v1").rstrip("/")
+    if base.endswith("/v1"):
+        base = base[:-3]
+    return f"{base}/v1/tools/{name}"
 
 
 def _conf_str(value, default: str = "") -> str:
@@ -633,7 +639,7 @@ class WebSearch(BaseTool):
 
     def _search_deepseek(self, query: str, count: int, freshness: str, summary: bool) -> ToolResult:
         api_key = _get_api_key("deepseek")
-        url = "https://api.deepseek.com/v1/tools/search"
+        url = deepseek_tools_url(conf().get("deepseek_api_base"), "search")
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",

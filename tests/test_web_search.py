@@ -82,15 +82,14 @@ class TestAnySearchKeyResolution(unittest.TestCase):
 
 
 class TestProviderOrder(unittest.TestCase):
-    """Provider order keeps existing routing untouched: deepseek joins the
-    Chinese-vendor group after linkai (its in-house engine is the newest of
-    the group), and keenable stays last — its keyless tier must come after
-    every provider the user may have paid for."""
+    """New providers are appended so existing routing stays untouched, and
+    keenable stays last — its keyless tier must come after every provider
+    the user may have paid for."""
 
     def test_provider_order_appends_new_providers_last(self):
         self.assertEqual(
             web_search_module.PROVIDER_ORDER,
-            ("bocha", "qianfan", "zhipu", "linkai", "deepseek", "anysearch", "serply", "tavily", "searxng", "keenable"),
+            ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "tavily", "searxng", "deepseek", "keenable"),
         )
 
     def test_web_console_provider_list_stays_in_sync(self):

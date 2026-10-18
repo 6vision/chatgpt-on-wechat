@@ -213,11 +213,11 @@ class WebFetch(BaseTool):
         except ValueError as e:
             return ToolResult.fail(f"Error: {e}")
 
-        if provider == "deepseek":
-            return self._fetch_deepseek(url)
-
         if _is_document_url(url):
             return self._fetch_document(url)
+
+        if provider == "deepseek":
+            return self._fetch_deepseek(url)
 
         return self._fetch_webpage(url)
 
@@ -227,7 +227,7 @@ class WebFetch(BaseTool):
         """Fetch a page as Markdown through DeepSeek's official Fetch API.
 
         Useful for pages the direct backend cannot render (JS-heavy sites);
-        billed per successful request ($0.75 / 1K), so it stays opt-in.
+        billed per successful request, so it stays opt-in.
         """
         api_key = _deepseek_api_key()
         if not api_key:
@@ -236,7 +236,8 @@ class WebFetch(BaseTool):
                 "Set tools.web_fetch.deepseek_api_key, deepseek_api_key, or the DEEPSEEK_API_KEY environment variable."
             )
 
-        endpoint = "https://api.deepseek.com/v1/tools/fetch"
+        from agent.tools.web_search.web_search import deepseek_tools_url
+        endpoint = deepseek_tools_url(conf().get("deepseek_api_base"), "fetch")
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",

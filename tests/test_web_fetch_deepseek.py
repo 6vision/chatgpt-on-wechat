@@ -80,11 +80,12 @@ class TestDeepSeekKeyResolution:
             assert web_fetch_module._deepseek_api_key() == ""
 
 
-def _deepseek_execute(url="https://example.com/article", cfg=None, payload=None, status=200):
+def _deepseek_execute(url="https://example.com/article", cfg=None, payload=None, status=200, extra=None):
     """Run WebFetch.execute against the deepseek backend with stubs."""
     full_cfg = {
         "tools": {"web_fetch": {"provider": "deepseek", **(cfg or {})}},
         "deepseek_api_key": "test-key-123",
+        **(extra or {}),
     }
     tool = WebFetch()
     with patch.object(web_fetch_module, "conf", lambda: full_cfg), \
@@ -155,3 +156,21 @@ class TestDeepSeekFetchBackend:
         result, _ = _deepseek_execute(payload={"title": "T", "content": "   "})
         assert result.status == "error"
         assert "no content" in result.result
+
+    def test_document_urls_stay_local(self):
+        tool = WebFetch()
+        cfg = {"tools": {"web_fetch": {"provider": "deepseek"}}, "deepseek_api_key": "k"}
+        with patch.object(web_fetch_module, "conf", lambda: cfg), \
+                patch.object(web_fetch_module, "validate_url_safe", return_value=None), \
+                patch.object(WebFetch, "_fetch_document", return_value="local") as mock_doc, \
+                patch.object(web_fetch_module.requests, "post") as mock_post:
+            assert tool.execute({"url": "https://example.com/report.pdf"}) == "local"
+        mock_doc.assert_called_once()
+        mock_post.assert_not_called()
+
+    def test_endpoint_follows_configured_api_base(self):
+        _, mock_post = _deepseek_execute(
+            cfg=None, payload={"title": "T", "content": "x"},
+            extra={"deepseek_api_base": "https://relay.example.com/v1/"},
+        )
+        assert mock_post.call_args[0][0] == "https://relay.example.com/v1/tools/fetch"

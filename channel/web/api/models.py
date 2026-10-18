@@ -1428,14 +1428,14 @@ class ModelsHandler:
 
     # Canonical search provider order. Mirrors PROVIDER_ORDER in
     # agent/tools/web_search/web_search.py — keep them in sync.
-    _SEARCH_PROVIDERS = ("bocha", "qianfan", "zhipu", "linkai", "deepseek", "anysearch", "serply", "tavily", "searxng", "keenable")
+    _SEARCH_PROVIDERS = ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "tavily", "searxng", "deepseek", "keenable")
 
     _SEARCH_PROVIDER_LABELS = {
         "bocha":   {"zh": "博查", "en": "Bocha"},
         "zhipu":   {"zh": "智谱", "en": "GLM"},
         "qianfan": {"zh": "百度", "en": "ERNIE"},
         "linkai":  {"zh": "LinkAI", "en": "LinkAI"},
-        "deepseek": {"zh": "深度求索", "en": "DeepSeek"},
+        "deepseek": {"zh": "DeepSeek", "en": "DeepSeek"},
         "anysearch": {"zh": "AnySearch", "en": "AnySearch"},
         "serply":  {"zh": "Serply", "en": "Serply"},
         "tavily":  {"zh": "Tavily", "en": "Tavily"},
@@ -1461,9 +1461,8 @@ class ModelsHandler:
             # credential (the Search API accepts the same API key).
             tools_cfg = local_config.get("tools") or {}
             block = tools_cfg.get("web_search") or {} if isinstance(tools_cfg, dict) else {}
-            dedicated = (block.get("deepseek_api_key") if isinstance(block, dict) else "") or os.environ.get(
-                "DEEPSEEK_API_KEY", "")
-            return dedicated or local_config.get("deepseek_api_key") or ""
+            dedicated = block.get("deepseek_api_key") if isinstance(block, dict) else ""
+            return dedicated or local_config.get("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
         if provider == "anysearch":
             tools_cfg = local_config.get("tools") or {}
             block = tools_cfg.get("web_search") or {} if isinstance(tools_cfg, dict) else {}
