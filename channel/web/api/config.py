@@ -33,7 +33,7 @@ from config import conf, get_data_root
 from models.reasoning_capabilities import provider_reasoning_metadata
 
 
-_settings_save_lock = threading.RLock()
+_settings_save_lock = threading.Lock()
 
 
 class ConfigHandler:
@@ -175,8 +175,7 @@ class ConfigHandler:
             return json.dumps({"status": "error", "message": str(e)})
 
     def POST(self):
-        # Keep settings saves ordered through persistence and live publication.
-        # Other config-writing endpoints retain their existing behavior.
+        # Serialized so the file and the live config are updated in the same order.
         with _settings_save_lock:
             return self._save_settings()
 
@@ -242,8 +241,7 @@ class ConfigHandler:
                 applied[section] = merged
             _write_config_file_for_write(config_path, file_cfg)
 
-            # A failed read or write must leave running settings (including
-            # authentication) unchanged, just as it leaves the old file intact.
+            # Publish only after the file is saved, so a failed save changes nothing.
             for key, value in applied.items():
                 local_config[key] = value
 
