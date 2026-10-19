@@ -340,7 +340,7 @@ available_setting = {
         # the teammates in the current conversation.
         "allowed_targets": None,
         "max_depth": 3,               # delegation hops in one chain (range 1-8)
-        "timeout_seconds": 600,       # budget for one delegated run (range 0.01-600)
+        "timeout_seconds": 600,       # budget for one delegated run (range 0.01-3600)
         "max_message_chars": 8000,    # size limit for one delegated task
     },
     "enable_thinking": False,  # Enable deep-thinking mode for thinking-capable models
