@@ -1,9 +1,9 @@
 """DeepSeek Fetch backend for the web_fetch tool.
 
 Covers provider selection (tools.web_fetch.provider: "direct" default,
-"deepseek" opt-in), key resolution (dedicated key -> shared DeepSeek model
-credential -> env), the Markdown response mapping, and the documented HTTP
-and business-level error mapping. No real network is used: requests.post
+"deepseek" opt-in), key resolution (DeepSeek model credential -> env),
+the Markdown response mapping, and the documented HTTP and business-level
+error mapping. No real network is used: requests.post
 and the SSRF guard are stubbed throughout.
 """
 
@@ -54,15 +54,6 @@ class TestFetchProviderSelection:
 
 
 class TestDeepSeekKeyResolution:
-    def test_dedicated_key_wins(self):
-        cfg = {
-            "tools": {"web_fetch": {"deepseek_api_key": "fetch-key"}},
-            "deepseek_api_key": "model-key",
-        }
-        with patch.object(web_fetch_module, "conf", lambda: cfg), \
-                patch.dict(os.environ, {"DEEPSEEK_API_KEY": "env-key"}):
-            assert web_fetch_module._deepseek_api_key() == "fetch-key"
-
     def test_model_key_fallback(self):
         cfg = {"deepseek_api_key": "model-key"}
         with patch.object(web_fetch_module, "conf", lambda: cfg), \

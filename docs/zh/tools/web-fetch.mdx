@@ -44,8 +44,7 @@ JavaScript 的站点）。
 }
 ```
 
-该后端复用 `deepseek_api_key` 模型凭证（或 `DEEPSEEK_API_KEY` 环境变量）；
-专用密钥 `tools.web_fetch.deepseek_api_key` 可覆盖。调用按成功请求计费
+该后端复用 `deepseek_api_key` 模型凭证（或 `DEEPSEEK_API_KEY` 环境变量）。调用按成功请求计费
 （每 1000 次 $0.75），因此保持为手动开启；`"direct"`（默认）免费。
 SSRF 防护仍然生效：内网、回环及云元数据地址在请求发出前即被拒绝。
 文档链接（PDF、Word 等）始终在本地下载解析。
