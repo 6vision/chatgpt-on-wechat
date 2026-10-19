@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Eye, FolderTree, ExternalLink, Download, Link2, Check, X,
-  Pencil, Save, RotateCcw, Loader2, AlertTriangle, Layers,
+  Pencil, Save, RotateCcw, Loader2, AlertTriangle, Layers, FolderOpen,
 } from 'lucide-react'
 import { t } from '../i18n'
 import apiClient from '../api/client'
@@ -13,6 +13,7 @@ import Tooltip from './Tooltip'
 import { isEditable } from '../lib/fileKind'
 import { useWorkspaceStore, WS_MIN_WIDTH } from '../store/workspaceStore'
 import { focusProduced } from '../store/artifactStore'
+import { usePlatform } from '../hooks/usePlatform'
 
 const TabButton: React.FC<{
   active: boolean
@@ -49,6 +50,7 @@ const IconButton: React.FC<{ onClick: () => void; title: string; children: React
 
 const WorkspacePanel: React.FC = () => {
   const navigate = useNavigate()
+  const { isMac } = usePlatform()
   const { open, tab, width, current, previewError, edit, editNotice } = useWorkspaceStore()
   const dismissEditNotice = useWorkspaceStore((s) => s.dismissEditNotice)
   const setTab = useWorkspaceStore((s) => s.setTab)
@@ -99,6 +101,7 @@ const WorkspacePanel: React.FC = () => {
   // on what is in the text area, which reads as a bug. Hide them instead.
   const showFileActions = onFile && !editing
   const showEditButton = showFileActions && !current.is_dir && isEditable(current.kind)
+  const canReveal = showFileActions && !!current.abs_path && !!window.electronAPI?.revealPath
 
   const openExternally = () => {
     if (!current) return
@@ -201,6 +204,14 @@ const WorkspacePanel: React.FC = () => {
                 <IconButton onClick={openExternally} title={t('ws_open_external')}>
                   <ExternalLink size={13} />
                 </IconButton>
+                {canReveal && (
+                  <IconButton
+                    onClick={() => void window.electronAPI?.revealPath?.(current.abs_path!)}
+                    title={t(isMac ? 'ws_reveal_mac' : 'ws_reveal')}
+                  >
+                    <FolderOpen size={13} />
+                  </IconButton>
+                )}
                 <IconButton onClick={download} title={t('ws_download')}>
                   <Download size={13} />
                 </IconButton>
