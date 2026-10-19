@@ -14,6 +14,7 @@ function setup() {
     let onScroll;
     let onResize;
     const listeners = {};
+    const historyLoads = [];
     const classes = new Set(['hidden']);
     const button = { classList: { toggle(name, hidden) { if (hidden) classes.add(name); else classes.delete(name); }, contains(name) { return classes.has(name); } } };
     const box = {
@@ -29,13 +30,15 @@ function setup() {
         requestAnimationFrame(callback) { frames.set(++nextId, callback); return nextId; },
         cancelAnimationFrame(id) { frames.delete(id); },
         ResizeObserver: class { constructor(callback) { onResize = callback; } observe() {} },
+        historyHasMore: false, historyLoading: false, historyPage: 0,
+        loadHistory(page) { historyLoads.push(page); context.historyLoading = true; },
     });
     const utils = fs.readFileSync(path.join(ROOT, 'channel/web/static/js/core/utils.js'), 'utf8');
     const state = fs.readFileSync(path.join(ROOT, 'channel/web/static/js/chat/state.js'), 'utf8');
     vm.runInContext(utils.slice(utils.indexOf('let _scrollRafId'), utils.indexOf('function applyHighlighting')), context);
     vm.runInContext(state.slice(state.indexOf('let _autoScrollEnabled'), state.indexOf('// Intercept internal navigation')), context);
     return {
-        box, frames, button, classes, listeners, run: code => vm.runInContext(code, context),
+        box, frames, button, classes, listeners, historyLoads, run: code => vm.runInContext(code, context),
         flush() { const batch = [...frames.values()]; frames.clear(); batch.forEach(callback => callback()); },
         scroll(value, intent = null) {
             top = value;
@@ -140,6 +143,31 @@ test('programmatic scroll events preserve follow intent and button reflects deta
     assert.equal(s.run('_autoScrollEnabled'), true);
     s.run('_updateScrollToBottomBtn()');
     assert.equal(s.classes.has('hidden'), true);
+});
+
+test('scrolling up near the top loads the next history page once', () => {
+    const s = setup();
+    s.run('historyHasMore = true; historyPage = 1');
+    s.scroll(500, 'up');
+    assert.deepEqual(s.historyLoads, []);
+    s.scroll(150, 'up');
+    assert.deepEqual(s.historyLoads, [2]);
+    s.scroll(50, 'up');
+    assert.deepEqual(s.historyLoads, [2]);
+    s.run('historyLoading = false; historyPage = 2');
+    s.scroll(100, 'up');
+    assert.deepEqual(s.historyLoads, [2, 3]);
+});
+
+test('programmatic scrolls near the top and exhausted history never load pages', () => {
+    const s = setup();
+    s.run('historyHasMore = true; historyPage = 1');
+    s.scroll(0);
+    assert.deepEqual(s.historyLoads, []);
+    s.run('historyHasMore = false');
+    s.scroll(0, 'up');
+    s.touch(300, 340);
+    assert.deepEqual(s.historyLoads, []);
 });
 
 test('composer viewport resize follows only while enabled and keeps the return button clickable', () => {

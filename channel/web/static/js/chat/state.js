@@ -454,10 +454,22 @@ let _programmaticScrollTop = null;
 let _lastScrollTop = 0;
 let _userScrollIntent = null;
 let _touchScrollStartY = null;
+const _HISTORY_PREFETCH_PX = 200;
+
+// Only user gestures trigger it, so the first-load bottom pins and message
+// navigator jumps never pull in pages on their own. Wheel and touch also call
+// it directly because a first page shorter than the viewport cannot scroll.
+function _maybeLoadEarlierHistory() {
+    if (!historyHasMore || historyLoading || !historyPage) return;
+    if (messagesDiv.scrollTop > _HISTORY_PREFETCH_PX) return;
+    if (typeof loadHistory === 'function') loadHistory(historyPage + 1);
+}
 
 messagesDiv.addEventListener('wheel', event => {
-    if (event.deltaY < 0) _userScrollIntent = 'up';
-    else if (event.deltaY > 0) _userScrollIntent = 'down';
+    if (event.deltaY < 0) {
+        _userScrollIntent = 'up';
+        _maybeLoadEarlierHistory();
+    } else if (event.deltaY > 0) _userScrollIntent = 'down';
 }, { passive: true });
 messagesDiv.addEventListener('touchstart', event => {
     _touchScrollStartY = event.touches[0]?.clientY ?? null;
@@ -472,6 +484,7 @@ messagesDiv.addEventListener('touchmove', event => {
         _autoScrollEnabled = false;
         if (typeof cancelHistoryBottomPins === 'function') cancelHistoryBottomPins();
         if (typeof cancelQueuedChatScroll === 'function') cancelQueuedChatScroll();
+        _maybeLoadEarlierHistory();
     } else if (delta < -2) {
         _userScrollIntent = 'down';
     }
@@ -499,6 +512,7 @@ messagesDiv.addEventListener('scroll', () => {
         if (intent === 'up') {
             _autoScrollEnabled = false;
             if (typeof cancelHistoryBottomPins === 'function') cancelHistoryBottomPins();
+            _maybeLoadEarlierHistory();
         } else if (intent === 'down' && distFromBottom <= _SCROLL_THRESHOLD) {
             _autoScrollEnabled = true;
         }

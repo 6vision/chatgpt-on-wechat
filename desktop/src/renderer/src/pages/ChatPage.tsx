@@ -572,15 +572,21 @@ const ChatPage: React.FC<ChatPageProps> = ({ baseUrl }) => {
           </div>
         )}
         {showScrollToBottom && (
-          <button
-            type="button"
-            title={t('chat_scroll_to_bottom')}
-            aria-label={t('chat_scroll_to_bottom')}
-            onClick={() => bottomScrollRef.current()}
-            className="sticky bottom-3 z-20 mx-auto -mt-9 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-default bg-surface text-content-secondary shadow-md transition-colors hover:bg-surface-2 hover:text-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-          >
-            <ChevronDown size={16} aria-hidden="true" />
-          </button>
+          // Same px-4 gutter and max-w-3xl column as the composer card, so the
+          // button's right edge lines up with it.
+          <div className="pointer-events-none sticky bottom-3 z-20 -mt-8 h-8 px-4">
+            <div className="mx-auto flex h-full max-w-3xl justify-end">
+              <button
+                type="button"
+                title={t('chat_scroll_to_bottom')}
+                aria-label={t('chat_scroll_to_bottom')}
+                onClick={() => bottomScrollRef.current()}
+                className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-default bg-surface text-content-secondary shadow-md transition-colors hover:bg-surface-2 hover:text-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                <ChevronDown size={14} aria-hidden="true" />
+              </button>
+            </div>
+          </div>
         )}
       </div>
 

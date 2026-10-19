@@ -1148,22 +1148,23 @@
     overflow-anchor: auto;
 }
 
+/* Right edge lines up with the composer card (px-4 gutter, max-w-3xl column). */
 .chat-scroll-to-bottom {
     position: absolute;
     z-index: 20;
-    left: 50%;
+    right: max(16px, calc((100% - 768px) / 2));
     bottom: calc(var(--chat-composer-height, 96px) + 12px);
     display: flex;
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
     align-items: center;
     justify-content: center;
-    transform: translateX(-50%);
     border: 1px solid #e2e8f0;
     border-radius: 9999px;
     background: #fff;
     color: #64748b;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
+    font-size: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
     cursor: pointer;
     transition: color 0.15s ease, background 0.15s ease, transform 0.15s ease;
 }
@@ -1172,7 +1173,7 @@
 }
 .chat-scroll-to-bottom:hover {
     color: #16a34a;
-    transform: translateX(-50%) scale(1.05);
+    transform: scale(1.05);
 }
 .chat-scroll-to-bottom:focus-visible {
     outline: 2px solid #35a85b;

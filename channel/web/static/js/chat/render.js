@@ -919,14 +919,15 @@ function loadHistory(page, untilSeq) {
                 );
             }
 
-            // Manage the "load more" sentinel at the very top
+            // Older pages load as the reader nears the top (chat/state.js);
+            // the sentinel only marks that more history exists.
             if (data.has_more) {
                 if (!document.getElementById('history-load-more')) {
-                    const btn = document.createElement('div');
-                    btn.id = 'history-load-more';
-                    btn.className = 'flex justify-center py-3';
-                    btn.innerHTML = `<button class="text-xs text-slate-400 dark:text-slate-500 hover:text-primary-400 transition-colors" onclick="loadHistory(historyPage + 1)">Load earlier messages</button>`;
-                    messagesDiv.insertBefore(btn, messagesDiv.firstChild);
+                    const sentinel = document.createElement('div');
+                    sentinel.id = 'history-load-more';
+                    sentinel.className = 'flex justify-center py-3 text-xs text-slate-400 dark:text-slate-500';
+                    sentinel.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>';
+                    messagesDiv.insertBefore(sentinel, messagesDiv.firstChild);
                 }
             } else {
                 const sentinel = document.getElementById('history-load-more');
