@@ -820,18 +820,26 @@ class FeiShuChanel(ChatChannel):
             except Exception as e:
                 logger.warning(f"[FeiShu] prepare file failed: {e}")
                 # 文件下载失败时主动通知用户，避免静默丢失
-                try:
-                    err_reply = Reply(ReplyType.TEXT, f"⚠️ 文件下载失败，请重新发送：{e}")
-                    self._send(err_reply, self._compose_context(
-                        ContextType.TEXT, "",
-                        isgroup=is_group, msg=feishu_msg,
-                        receive_id_type=receive_id_type, no_need_at=True,
-                    ))
-                except Exception:
-                    pass
+                self._notify_file_download_failed(feishu_msg, is_group, receive_id_type, e)
                 return
             file_cache.add(session_id, feishu_msg.content, file_type='file')
             logger.info(f"[FeiShu] File cached for session {session_id}: {feishu_msg.content}")
+            return
+
+        # A post carrying files but no text (e.g. several files sent at once)
+        # behaves like a standalone file message: cache and wait for the query.
+        if (feishu_msg.ctype == ContextType.TEXT
+                and getattr(feishu_msg, "has_file_attachments", False)
+                and not feishu_msg.post_text):
+            for file_path, file_type in feishu_msg.attachments:
+                file_cache.add(session_id, file_path, file_type=file_type)
+            logger.info(
+                f"[FeiShu] {len(feishu_msg.attachments)} post attachment(s) cached for session {session_id}"
+            )
+            if feishu_msg.failed_files:
+                self._notify_file_download_failed(
+                    feishu_msg, is_group, receive_id_type, ", ".join(feishu_msg.failed_files)
+                )
             return
 
         # 如果是文本消息，检查是否有缓存的文件
@@ -884,6 +892,17 @@ class FeiShuChanel(ChatChannel):
             self.produce(context)
             self._message_sessions[msg_id] = (context["session_id"], context.get("agent_id"))
         logger.debug(f"[FeiShu] query={feishu_msg.content}, type={feishu_msg.ctype}")
+
+    def _notify_file_download_failed(self, feishu_msg, is_group, receive_id_type, detail):
+        try:
+            err_reply = Reply(ReplyType.TEXT, f"⚠️ 文件下载失败，请重新发送：{detail}")
+            self._send(err_reply, self._compose_context(
+                ContextType.TEXT, "",
+                isgroup=is_group, msg=feishu_msg,
+                receive_id_type=receive_id_type, no_need_at=True,
+            ))
+        except Exception:
+            pass
 
     def send(self, reply: Reply, context: Context):
         # 如果文本回复已通过流式传输发送，则跳过重复发送

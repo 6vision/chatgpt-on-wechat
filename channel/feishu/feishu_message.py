@@ -60,79 +60,127 @@ class FeishuMessage(ChatMessage):
                 self.content = f"[图片下载失败: {image_key}]"
                 self.image_path = None
         elif msg_type == "post":
-            # 富文本消息，可能包含图片、文本等多种元素
-            content = json.loads(msg.get("content"))
-            
-            # 飞书富文本消息结构：content 直接包含 title 和 content 数组
-            # 不是嵌套在 post 字段下
+            # 富文本消息，可能包含图片、文本、视频、文件等多种元素
+            raw_content = json.loads(msg.get("content"))
+            content = raw_content
+            # Some payloads wrap the post body in a locale key, e.g. {"zh_cn": {...}}.
+            if "content" not in content:
+                localized = next((v for v in content.values() if isinstance(v, dict)), None)
+                if localized:
+                    content = localized
+
             title = content.get("title", "")
-            content_list = content.get("content", [])
-            
+            content_list = content.get("content") or []
+
             logger.info(f"[FeiShu] Post message - title: '{title}', content_list length: {len(content_list)}")
-            
-            # 收集所有图片和文本
+
             image_keys = []
             text_parts = []
-            
+            # (file_key, file_name, file_type) for videos and file attachments
+            file_items = []
+            folder_names = []
+
             if title:
                 text_parts.append(title)
-            
+
             for block in content_list:
                 logger.debug(f"[FeiShu] Processing block: {block}")
                 # block 本身就是元素列表
                 if not isinstance(block, list):
                     continue
-                    
+
                 for element in block:
+                    if not isinstance(element, dict):
+                        continue
                     element_tag = element.get("tag")
                     logger.debug(f"[FeiShu] Element tag: {element_tag}, element: {element}")
                     if element_tag == "img":
-                        # 找到图片元素
                         image_key = element.get("image_key")
                         if image_key:
                             image_keys.append(image_key)
-                    elif element_tag == "text":
-                        # 文本元素
+                    elif element_tag in ("text", "code_block"):
                         text_content = element.get("text", "")
                         if text_content:
                             text_parts.append(text_content)
-            
-            logger.info(f"[FeiShu] Parsed - images: {len(image_keys)}, text_parts: {text_parts}")
-            
+                    elif element_tag == "a":
+                        link_text = element.get("text", "")
+                        href = element.get("href", "")
+                        if link_text or href:
+                            text_parts.append(f"{link_text} ({href})" if link_text and href else (link_text or href))
+                    elif element_tag == "media":
+                        file_key = element.get("file_key")
+                        if file_key:
+                            file_items.append((file_key, element.get("file_name") or "video.mp4", "video"))
+
+            # A file sent together with a caption arrives as a post whose
+            # attachments sit in a top-level "files" array next to "content".
+            files = list(content.get("files") or [])
+            if raw_content is not content:
+                files += raw_content.get("files") or []
+            for f in files:
+                if not isinstance(f, dict) or not f.get("file_key"):
+                    continue
+                file_name = f.get("file_name") or "file"
+                if f.get("is_folder"):
+                    # Folders can only be opened in the client, not downloaded via API.
+                    folder_names.append(file_name)
+                else:
+                    file_items.append((f["file_key"], file_name, "file"))
+
+            logger.info(
+                f"[FeiShu] Parsed - images: {len(image_keys)}, files: {len(file_items)}, "
+                f"folders: {len(folder_names)}, text_parts: {text_parts}"
+            )
+
             # 富文本消息统一作为文本消息处理
             self.ctype = ContextType.TEXT
-            
-            if image_keys:
-                # 如果包含图片，下载并在文本中引用本地路径
-                tmp_dir = str(state_dir.tmp_dir())
-                
-                # Only successful downloads are recorded as paths; failed ones
-                # keep a marker so the agent knows an image was sent.
-                self.image_paths = {}
-                failed_keys = []
-                for image_key in dict.fromkeys(image_keys):
-                    image_path = os.path.join(tmp_dir, f"{safe_filename(image_key) or 'image'}.png")
-                    if _download_resource(self.msg_id, image_key, "image", access_token, image_path, MAX_IMAGE_BYTES):
-                        self.image_paths[image_key] = image_path
-                        logger.info(f"[FeiShu] Image downloaded from post message, key={image_key}, path={image_path}")
-                    else:
-                        failed_keys.append(image_key)
-                
-                # 构建消息内容：文本 + 图片路径
-                content_parts = []
-                if text_parts:
-                    content_parts.append("\n".join(text_parts).strip())
-                for image_key, image_path in self.image_paths.items():
-                    content_parts.append(f"[图片: {image_path}]")
-                for image_key in failed_keys:
-                    content_parts.append(f"[图片下载失败: {image_key}]")
-                
-                self.content = "\n".join(content_parts)
-                logger.info(f"[FeiShu] Received post message with {len(image_keys)} image(s) and text: {self.content}")
-            else:
-                # 纯文本富文本消息
-                self.content = "\n".join(text_parts).strip() if text_parts else "[富文本消息]"
-                logger.info(f"[FeiShu] Received post message (text only): {self.content}")
+            self.post_text = "\n".join(text_parts).strip()
+            # (local_path, file_type) of every successfully downloaded attachment
+            self.attachments = []
+            tmp_dir = str(state_dir.tmp_dir())
+            content_parts = [self.post_text] if self.post_text else []
+
+            # Only successful downloads are recorded as paths; failed ones
+            # keep a marker so the agent knows something was sent.
+            self.image_paths = {}
+            failed_images = []
+            for image_key in dict.fromkeys(image_keys):
+                image_path = os.path.join(tmp_dir, f"{safe_filename(image_key) or 'image'}.png")
+                if _download_resource(self.msg_id, image_key, "image", access_token, image_path, MAX_IMAGE_BYTES):
+                    self.image_paths[image_key] = image_path
+                    self.attachments.append((image_path, "image"))
+                    logger.info(f"[FeiShu] Image downloaded from post message, key={image_key}, path={image_path}")
+                else:
+                    failed_images.append(image_key)
+            for image_path in self.image_paths.values():
+                content_parts.append(f"[图片: {image_path}]")
+            for image_key in failed_images:
+                content_parts.append(f"[图片下载失败: {image_key}]")
+
+            self.failed_files = []
+            seen_file_keys = set()
+            for file_key, file_name, file_type in file_items:
+                if file_key in seen_file_keys:
+                    continue
+                seen_file_keys.add(file_key)
+                suffix = utils.get_path_suffix(file_name)
+                file_path = os.path.join(
+                    tmp_dir, f"{safe_filename(file_key) or file_type}" + (f".{suffix}" if suffix else "")
+                )
+                label = "视频" if file_type == "video" else "文件"
+                if _download_resource(self.msg_id, file_key, "file", access_token, file_path, MAX_FILE_BYTES):
+                    self.attachments.append((file_path, file_type))
+                    content_parts.append(f"[{label}: {file_path}]")
+                    logger.info(f"[FeiShu] {file_type} downloaded from post message, key={file_key}, path={file_path}")
+                else:
+                    self.failed_files.append(file_name)
+                    content_parts.append(f"[{label}下载失败: {file_name}]")
+            for folder_name in folder_names:
+                content_parts.append(f"[文件夹: {folder_name}]")
+
+            self.has_file_attachments = bool(file_items)
+            self.content = "\n".join(content_parts) if content_parts else "[富文本消息]"
+            logger.info(f"[FeiShu] Received post message: {self.content}")
         elif msg_type == "file":
             self.ctype = ContextType.FILE
             content = json.loads(msg.get("content"))
