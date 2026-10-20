@@ -383,9 +383,34 @@ function startSSE(requestId, loadingEl, timestamp, titleInfo, replayItems, resum
     // can close it. During replay there is no live connection (null).
     let currentEs = null;
 
+    // Deltas may arrive in a burst (an upstream that buffers the reply and
+    // flushes it at once). Re-rendering the whole answer per delta would then
+    // block the main thread, so renders are coalesced to at most one per frame.
+    let deltaRenderRaf = null;
+    function renderAccumulatedText() {
+        if (contentEl) contentEl.innerHTML = renderMarkdown(accumulatedText);
+    }
+    function scheduleDeltaRender() {
+        if (deltaRenderRaf !== null) return;
+        deltaRenderRaf = requestAnimationFrame(() => {
+            deltaRenderRaf = null;
+            renderAccumulatedText();
+            scrollChatToBottom();
+        });
+    }
+    // Any non-delta event may read or replace contentEl, so the pending text
+    // must be on screen before it runs.
+    function flushDeltaRender() {
+        if (deltaRenderRaf === null) return;
+        cancelAnimationFrame(deltaRenderRaf);
+        deltaRenderRaf = null;
+        renderAccumulatedText();
+    }
+
     // Render one SSE event into the bubble. Used by the live handler and by
     // re-attach replay alike, so both paths produce identical UI.
     function processSSEItem(item) {
+            if (item.type !== 'delta') flushDeltaRender();
             if (item.type === 'reasoning') {
                 ensureBotEl();
                 reasoningText += item.content;
@@ -456,8 +481,7 @@ function startSSE(requestId, loadingEl, timestamp, titleInfo, replayItems, resum
                     reasoningText = '';
                 }
                 accumulatedText += item.content;
-                contentEl.innerHTML = renderMarkdown(accumulatedText);
-                scrollChatToBottom();
+                scheduleDeltaRender();
 
             } else if (item.type === 'message_end') {
                 if (item.has_tool_calls && accumulatedText.trim()) {
