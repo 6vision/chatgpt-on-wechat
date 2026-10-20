@@ -221,16 +221,18 @@ SAFETY:
             temp_script_path = None
 
             # On Windows, convert $VAR references to %VAR% for cmd.exe
+            user_command = command
             if self._IS_WIN:
                 env["PYTHONIOENCODING"] = "utf-8"
                 command = self._convert_env_vars_for_windows(command, dotenv_vars)
+                user_command = command
                 # cmd.exe has an ~8191 char command line limit. Long
                 # `python -c "..."` commands silently fail, so spill the inline
                 # code into a temp .py file and run that instead.
                 if len(command) > self._WIN_CMD_SAFE_LEN:
                     command, temp_script_path = self._rewrite_long_python_c(command)
                 if command and not command.strip().lower().startswith("chcp"):
-                    command = f"chcp 65001 >nul 2>&1 && {command}"
+                    command = f"chcp 65001 >nul 2>&1 & {command}"
 
             if run_in_background:
                 # Ownership of temp_script_path passes to the registry - the
@@ -245,7 +247,7 @@ SAFETY:
                     "bash_id": job_id,
                 })
 
-            files_before = self._snapshot_files(command)
+            files_before = self._snapshot_files(user_command)
             try:
                 result = self._run_streaming(
                     command,
@@ -356,10 +358,10 @@ SAFETY:
                     output_text += f"\n\n[Showing lines {start_line}-{end_line} of {truncation.total_lines} ({format_size(DEFAULT_MAX_BYTES)} limit). Full output: {temp_file_path}]"
 
             # Check exit code
-            is_error, note = exit_codes.interpret(command, result.returncode)
+            is_error, note = exit_codes.interpret(user_command, result.returncode)
             if is_error:
                 output_text += f"\n\nCommand exited with code {result.returncode}"
-                hint = self._windows_failure_hint(command)
+                hint = self._windows_failure_hint(user_command)
                 if hint:
                     output_text += f"\n\n{hint}"
                 return ToolResult.fail({
@@ -371,7 +373,7 @@ SAFETY:
                 output_text += f"\n\n[Exit code {result.returncode}: {note}]"
 
             payload = {}
-            files = self._files_written(command, files_before)
+            files = self._files_written(user_command, files_before)
             if files:
                 payload["files_written"] = files
             payload.update({

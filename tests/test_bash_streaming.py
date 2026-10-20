@@ -2,6 +2,7 @@ import subprocess
 import sys
 import threading
 import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -133,6 +134,45 @@ def test_windows_kill_falls_back_when_taskkill_fails():
         tool._kill_process(process)
 
     kill.assert_called_once()
+
+
+def test_windows_chcp_prefix_uses_unconditional_separator_so_chcp_failure_does_not_abort_command(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(Bash, "_IS_WIN", True)
+    tool = Bash({"cwd": str(tmp_path)})
+    captured = {}
+
+    def fake_run_streaming(command, timeout, env, dotenv_vars):
+        captured["command"] = command
+        return SimpleNamespace(returncode=0, stdout="hello\n", stderr="")
+
+    monkeypatch.setattr(tool, "_run_streaming", fake_run_streaming)
+
+    result = tool.execute({"command": "echo hello"})
+
+    assert result.status == "success"
+    assert captured["command"] == "chcp 65001 >nul 2>&1 & echo hello"
+
+
+def test_windows_chcp_prefix_does_not_break_soft_exit_code_1_interpretation(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(Bash, "_IS_WIN", True)
+    tool = Bash({"cwd": str(tmp_path)})
+
+    monkeypatch.setattr(
+        tool,
+        "_run_streaming",
+        lambda command, timeout, env, dotenv_vars: SimpleNamespace(
+            returncode=1, stdout="", stderr=""
+        ),
+    )
+
+    result = tool.execute({"command": "diff a.txt b.txt"})
+
+    assert result.status == "success"
+    assert "[Exit code 1: Files differ]" in result.result["output"]
 
 
 @windows_only
