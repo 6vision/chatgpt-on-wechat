@@ -433,6 +433,23 @@ export const useChatStore = create<ChatState>((set, get) => {
       closeStream()
     }
 
+    // Deltas may arrive in a burst (an upstream that buffers the reply and
+    // flushes it at once). Committing each one re-renders the whole answer, so
+    // they are buffered and committed at most once per frame.
+    let pendingText = ''
+    let pendingTarget = ''
+    let flushFrame: number | null = null
+    const flushDeltas = () => {
+      if (flushFrame !== null) {
+        cancelAnimationFrame(flushFrame)
+        flushFrame = null
+      }
+      if (!pendingText) return
+      const text = pendingText
+      pendingText = ''
+      updateMsg(sid, pendingTarget, (m) => ({ ...m, content: m.content + text }))
+    }
+
     es.onmessage = (event) => {
       let data: StreamEvent
       try {
@@ -440,6 +457,8 @@ export const useChatStore = create<ChatState>((set, get) => {
       } catch {
         return // keepalive
       }
+      // Every other event may read or replace the bubble's content.
+      if (data.type !== 'delta') flushDeltas()
       // Stopped: nothing more is said, but a step already running still ends.
       if (detached() && (data.type === 'delta' || data.type === 'reasoning')) return
 
@@ -448,9 +467,19 @@ export const useChatStore = create<ChatState>((set, get) => {
           updateMsg(sid, speaking(), (m) => ({ ...m, reasoning: (m.reasoning || '') + (data.content || '') }))
           break
 
-        case 'delta':
-          updateMsg(sid, speaking(), (m) => ({ ...m, content: m.content + (data.content || '') }))
+        case 'delta': {
+          const target = speaking()
+          if (target !== pendingTarget) flushDeltas()
+          pendingTarget = target
+          pendingText += data.content || ''
+          if (flushFrame === null) {
+            flushFrame = requestAnimationFrame(() => {
+              flushFrame = null
+              flushDeltas()
+            })
+          }
           break
+        }
 
         // A teammate given work answers as itself: its reply, reasoning and
         // tool calls arrive as the same events as anyone's, bracketed by this
@@ -718,6 +747,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
 
     es.onerror = () => {
+      flushDeltas()
       // Stream closed (often the normal end after `done`/tail). Finalize.
       if (ended) finishStream()
       else dropStream()
