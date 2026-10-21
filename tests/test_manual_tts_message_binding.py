@@ -30,7 +30,7 @@ class QuietRequestHandler(WSGIRequestHandler):
     ["older", "latest", "missing", "new_arrival", "zero", "gone", "edited", "reused"],
 )
 def test_manual_tts_targets_requested_persisted_message(
-    tmp_path, monkeypatch, owner, target
+    tmp_path, monkeypatch, request, owner, target
 ):
     root = tmp_path / "default"
     helper = tmp_path / "helper"
@@ -47,6 +47,8 @@ def test_manual_tts_targets_requested_persisted_message(
         ],
         "default",
     )
+    # Return to config-following mode before later suites choose a workspace.
+    request.addfinalizer(lambda: set_agent_registry(None))
     set_agent_registry(registry)
     stores = {
         key: get_conversation_store(str(path))
