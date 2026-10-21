@@ -65,12 +65,13 @@ function useSuggestionCards() {
         icon: s.icon ?? base.icon,
         iconClass: base.iconClass,
         bgClass: base.bgClass,
+        onSelect: s.onSelect,
       }
     })
   }
   return SUGGESTIONS.map(({ key, send, icon, iconClass, bgClass }) => {
     const text = t(`${key}_text` as Parameters<typeof t>[0])
-    return { key, title: t(`${key}_title` as Parameters<typeof t>[0]), text, prompt: send ?? text, icon, iconClass, bgClass }
+    return { key, title: t(`${key}_title` as Parameters<typeof t>[0]), text, prompt: send ?? text, icon, iconClass, bgClass, onSelect: undefined }
   })
 }
 
@@ -310,7 +311,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ baseUrl }) => {
   }, [messages, activeId, isStreaming, cancelQueuedScroll, scrollToBottom, updateScrollButton])
 
   const handleSend = useCallback(
-    async (text: string, attachments: Attachment[]) => {
+    async (text: string, attachments: Attachment[], display?: string) => {
       const sid = activeId
       const isFirst = (useChatStore.getState().sessions[sid]?.messages.length ?? 0) === 0
       titlePendingRef.current = isFirst
@@ -320,11 +321,11 @@ const ChatPage: React.FC<ChatPageProps> = ({ baseUrl }) => {
       followBottomRef.current = true
       cancelQueuedScroll()
       useTimelineStore.getState().setJumping(false)
-      await send(sid, text, attachments)
+      await send(sid, text, attachments, display)
       // After the first message, refresh the list and ask backend to title it.
       if (isFirst) {
         try {
-          const res = await apiClient.generateSessionTitle(sid, text, undefined, owner)
+          const res = await apiClient.generateSessionTitle(sid, display || text, undefined, owner)
           if (res.status === 'success' && res.title) {
             useSessionStore.setState((s) => ({
               sessions: s.sessions.map((x) => (x.session_id === sid ? { ...x, title: res.title } : x)),
@@ -510,10 +511,14 @@ const ChatPage: React.FC<ChatPageProps> = ({ baseUrl }) => {
 
             {suggestions.length > 0 && (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 w-full max-w-2xl">
-                {suggestions.map(({ key, title, text, prompt, icon: Icon, iconClass, bgClass }) => (
+                {suggestions.map(({ key, title, text, prompt, icon: Icon, iconClass, bgClass, onSelect }) => (
                   <button
                     key={key}
                     onClick={() => {
+                      if (onSelect) {
+                        onSelect({ send: (value, display) => void handleSend(value, [], display) })
+                        return
+                      }
                       // Fill the input (don't auto-send) so the user can tweak it first.
                       inputResetRef.current?.(prompt, [])
                     }}

@@ -2104,6 +2104,9 @@ class AgentBridge:
                 "role": "user",
                 "content": [{"type": "text", "text": query}],
             }
+            display = context.get("display") if context else None
+            if display:
+                user_msg["extras"] = {"display": display}
             store.append_messages(session_id, [user_msg], channel_type=channel_type)
             return True
         except Exception as e:

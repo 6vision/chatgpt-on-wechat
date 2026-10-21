@@ -499,13 +499,16 @@ def _group_into_display_turns(
     for user_row, rest in groups:
         # User turn
         if user_row:
-            content, created_at, _u_extras, user_seq, _u_run = user_row
+            content, created_at, u_extras, user_seq, _u_run = user_row
             text = _extract_display_text(content)
             # Hide internal injection markers (scheduler / self-evolution) so the
             # user never sees a synthetic "[SCHEDULED] self-evolution" bubble;
             # the assistant reply that follows is still rendered.
             if text and not _is_internal_user_marker(text):
                 turn = {"role": "user", "content": text, "created_at": created_at}
+                display = u_extras.get("display")
+                if isinstance(display, str) and display:
+                    turn["display"] = display
                 if user_seq is not None:
                     turn["_seq"] = user_seq
                 turns.append(turn)
@@ -900,7 +903,7 @@ class ConversationStore:
                         for msg in messages:
                             if msg.get("role") == "user":
                                 content = msg.get("content", "")
-                                text = _extract_display_text(content)
+                                text = (msg.get("extras") or {}).get("display") or _extract_display_text(content)
                                 if text:
                                     title = text[:50].split("\n")[0]
                                     conn.execute(
@@ -1871,7 +1874,7 @@ class ConversationStore:
                 aid = self._agent_id
                 rows = conn.execute(
                     """
-                    SELECT seq, content, created_at
+                    SELECT seq, content, created_at, extras
                     FROM messages
                     WHERE agent_id = ? AND session_id = ? AND role = 'user'
                     ORDER BY seq ASC
@@ -1882,7 +1885,7 @@ class ConversationStore:
                 conn.close()
 
         items: List[Dict[str, Any]] = []
-        for seq, raw_content, created_at in rows:
+        for seq, raw_content, created_at, raw_extras in rows:
             try:
                 content = json.loads(raw_content)
             except Exception:
@@ -1894,7 +1897,12 @@ class ConversationStore:
             text = _extract_display_text(content)
             if not text or _is_internal_user_marker(text):
                 continue
-            preview = _first_line_preview(text, preview_chars)
+            try:
+                extras = json.loads(raw_extras) if raw_extras else {}
+            except Exception:
+                extras = {}
+            display = extras.get("display") if isinstance(extras, dict) else None
+            preview = _first_line_preview(display if isinstance(display, str) and display else text, preview_chars)
             if not preview:
                 continue
             items.append({

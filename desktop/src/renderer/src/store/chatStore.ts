@@ -41,7 +41,8 @@ interface ChatState {
   getSession: (sid: string) => SessionRuntime
   ensureSession: (sid: string) => void
 
-  send: (sid: string, text: string, attachments: Attachment[]) => Promise<void>
+  /** `display` is shown for the turn instead of `text`, which the agent still gets. */
+  send: (sid: string, text: string, attachments: Attachment[], display?: string) => Promise<void>
   cancel: (sid: string) => Promise<void>
   regenerate: (sid: string, botMessageId: string) => Promise<void>
   editUserMessage: (sid: string, messageId: string) => { text: string; attachments: Attachment[] } | null
@@ -261,6 +262,7 @@ function historyToMessage(m: HistoryMessage): ChatMessage {
       id: uid('user'),
       role: 'user',
       content: text,
+      display: m.display || undefined,
       timestamp: m.created_at,
       userSeq: m._seq,
       attachments,
@@ -770,11 +772,12 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (!get().sessions[sid]) patchSession(sid, { ...EMPTY })
     },
 
-    send: async (sid, text, attachments) => {
+    send: async (sid, text, attachments, display) => {
       const userMsg: ChatMessage = {
         id: uid('user'),
         role: 'user',
         content: text,
+        display: display || undefined,
         timestamp: Date.now() / 1000,
         attachments: attachments.length ? attachments : undefined,
       }
@@ -806,6 +809,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           attachments: attachments.length ? attachments : undefined,
           agentId: owner || undefined,
           speakerAgentId: addressed && addressed !== owner ? addressed : undefined,
+          display: display || undefined,
         })
         // The server is the authority on who took the turn; repaint the live
         // bubble if it resolved the mention differently than we guessed.
@@ -887,7 +891,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       // drop the user+bot messages locally from idx-? : remove from the user msg onward
       const userIdx = s.messages.indexOf(userMsg)
       patchMessages(sid, (msgs) => msgs.slice(0, userIdx))
-      await get().send(sid, userMsg.content, userMsg.attachments || [])
+      await get().send(sid, userMsg.content, userMsg.attachments || [], userMsg.display)
     },
 
     editUserMessage: (sid, messageId) => {

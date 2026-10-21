@@ -271,6 +271,8 @@ class ApiClient {
       /** A teammate addressed for this turn (group chat); the owner still owns
        *  the conversation, this only changes who answers. */
       speakerAgentId?: string
+      /** Shown for this turn instead of `message`, which the agent still gets in full. */
+      display?: string
     }
   ): Promise<{ status: string; request_id: string; stream: boolean; inline_reply?: string; speaker?: string }> {
     // Route to a specific Agent when asked, else the active one. Empty (legacy
@@ -286,6 +288,7 @@ class ApiClient {
     }
     if (agentId) body.agent_id = agentId
     if (opts?.speakerAgentId) body.speaker_agent_id = opts.speakerAgentId
+    if (opts?.display) body.display = opts.display
     return this.request('/message', {
       method: 'POST',
       body: JSON.stringify(body),

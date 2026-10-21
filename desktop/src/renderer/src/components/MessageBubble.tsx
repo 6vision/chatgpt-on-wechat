@@ -161,7 +161,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
         )}
         <div className="max-w-[75%] rounded-2xl rounded-br-md px-4 py-2.5 bg-bubble-user text-bubble-user-text">
           <div className="text-sm whitespace-pre-wrap break-words">
-            <MentionText text={message.content} onAccent />
+            <MentionText text={message.display || message.content} onAccent />
           </div>
         </div>
         <div className="flex items-center gap-0.5 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">

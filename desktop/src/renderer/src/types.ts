@@ -179,6 +179,8 @@ export interface ChatMessage {
   id: string
   role: Role
   content: string
+  /** Shown in place of `content` on a user turn; the agent still gets `content`. */
+  display?: string
   /** Unix seconds. Backend history uses `created_at`; we normalize to `timestamp`. */
   timestamp: number
   attachments?: Attachment[]
@@ -562,6 +564,8 @@ export interface SessionTeam {
 export interface HistoryMessage {
   role: Role
   content: string
+  /** User turns sent with a display text. */
+  display?: string
   created_at: number
   steps?: MessageStep[]
   tool_calls?: Array<{ id?: string; name: string; arguments?: Record<string, unknown>; result?: string }>

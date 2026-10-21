@@ -1177,6 +1177,11 @@ class WebChannel(ChatChannel):
                 # _maybe_dispatch_auto_tts; don't set desire_rtype here or
                 # chat_channel would synthesize a duplicate VOICE reply.
                 context["is_voice_input"] = True
+            # What the client shows for this turn in place of the message, which
+            # the agent still receives in full (e.g. a prompt filled in from a form).
+            display = json_data.get("display")
+            if isinstance(display, str) and display.strip():
+                context["display"] = display.strip()
 
             if use_sse:
                 context["on_event"] = self._make_sse_callback(request_id)
