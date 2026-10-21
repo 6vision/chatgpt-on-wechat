@@ -27,7 +27,12 @@ def test_multiline_spill_preserves_program_and_script_arguments(interpreter):
         assert rewritten.startswith(interpreter + " ")
         assert rewritten.endswith(' "value with spaces"')
         result = subprocess.run(
-            [sys.executable, path, "value with spaces"],
+            [
+                sys.executable,
+                "-c",
+                rewritten.split(' -c "', 1)[1].split('"', 1)[0],
+                "value with spaces",
+            ],
             capture_output=True,
             text=True,
             check=True,
@@ -53,10 +58,25 @@ def test_multiline_spill_does_not_reinterpret_other_shell_commands(command):
 
 
 WINDOWS_PROGRAMS = [
-    ("lf", "value=40\nprint(value+2)", "", "", ["42"]),
-    ("crlf", "value=40\r\nprint(value+2)", "", "", ["42"]),
+    ("lf", "value = 40\nprint(value+2)", "", "", ["42"]),
+    ("crlf", "value = 40\r\nprint(value+2)", "", "", ["42"]),
     ("block", "for value in [40]:\n    print(value+2)", "", "", ["42"]),
     ("quoted", 'print("first")\nprint("second")', "", "", ["first", "second"]),
+    (
+        "nested-quotes",
+        'print("say \\"hello\\"")\nprint(42)',
+        "",
+        "",
+        ['say "hello"', "42"],
+    ),
+    (
+        "inline-namespace",
+        "import sys\nprint(sys.argv[0])\nprint('__file__' in globals())",
+        "",
+        "",
+        ["-c", "False"],
+    ),
+    ("local-import", "import local_module\nprint(local_module.answer)", "", "", ["42"]),
     (
         "arguments",
         "import sys\nprint(sys.argv[1])",
@@ -77,8 +97,15 @@ def test_windows_multiline_python_executes_every_line(
     tmp_path, monkeypatch, _label, code, flags, suffix, expected
 ):
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
-    escaped = code.replace('"', '\\"')
-    command = f'"{sys.executable}"{flags} -c "{escaped}"{suffix}'
+    (tmp_path / "local_module.py").write_text("answer = 42\n", encoding="utf-8")
+    # Independent stdlib Windows argv encoder, including nested escaped quotes.
+    command = (
+        subprocess.list2cmdline([sys.executable])
+        + flags
+        + " -c "
+        + subprocess.list2cmdline([code])
+        + suffix
+    )
     assert len(command) < Bash._WIN_CMD_SAFE_LEN
     result = Bash({"cwd": str(tmp_path)}).execute({"command": command, "timeout": 10})
     assert result.status == "success", result.result
@@ -116,3 +143,57 @@ def test_windows_background_multiline_python_retains_all_output(tmp_path, monkey
         assert list(tmp_path.glob("bash-pyc-*.py")) == []
     finally:
         background.kill(job_id)
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        'print("say \\"hello\\"")\nprint(42)',
+        "import local_module, sys\nprint(local_module.answer)\nprint(sys.argv[0])\nprint('__file__' in globals())",
+    ],
+)
+def test_spilled_loader_preserves_inline_semantics(tmp_path, code):
+    (tmp_path / "local_module.py").write_text("answer = 42\n", encoding="utf-8")
+    command = "python -c " + subprocess.list2cmdline([code])
+    rewritten, path = Bash._rewrite_long_python_c(command, standalone=True)
+    try:
+        assert path is not None
+        loader = rewritten.split(' -c "', 1)[1].split('"', 1)[0]
+        original = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        spilled = subprocess.run(
+            [sys.executable, "-c", loader],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert spilled.stdout == original.stdout
+        assert spilled.stderr == original.stderr
+    finally:
+        if path:
+            os.unlink(path)
+
+
+def test_failed_background_launch_removes_owned_spill(tmp_path, monkeypatch):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(Bash, "_IS_WIN", True)
+
+    def fail_start(*args):
+        raise OSError("local process launch failed")
+
+    monkeypatch.setattr(background, "start", fail_start)
+    result = Bash({"cwd": str(tmp_path)}).execute(
+        {
+            "command": 'python -c "value=40\nprint(value+2)"',
+            "run_in_background": True,
+        }
+    )
+    assert result.status == "error"
+    assert "local process launch failed" in result.result
+    assert list(tmp_path.glob("bash-pyc-*.py")) == []

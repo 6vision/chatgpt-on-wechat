@@ -237,7 +237,16 @@ SAFETY:
             if run_in_background:
                 # Ownership of temp_script_path passes to the registry - the
                 # process is still reading it, so it can only go once the job does.
-                job_id = background.start(command, self.cwd, env, temp_script_path)
+                try:
+                    job_id = background.start(command, self.cwd, env, temp_script_path)
+                except Exception:
+                    # The registry owns the spill only after a successful start.
+                    if temp_script_path:
+                        try:
+                            os.remove(temp_script_path)
+                        except OSError:
+                            pass
+                    raise
                 return ToolResult.success({
                     "output": (
                         f"Started in background (bash_id: {job_id}). "
@@ -658,7 +667,8 @@ SAFETY:
         """
         Rewrite `python -c "<code>"` into `python <tempfile>` to bypass the
         cmd.exe command line length limit on Windows. Short multiline commands
-        use the same spill path, but only for a standalone Python invocation:
+        spill through a short -c loader, preserving Python's inline namespace
+        and import path, but only for a standalone Python invocation:
         cmd.exe otherwise cuts the inline program at its first newline.
 
         Returns (new_command, temp_file_path). On any parse failure the original
@@ -695,8 +705,17 @@ SAFETY:
 
         quote = m.group("quote")
         code = m.group("code")
-        # Reverse common shell-level escaping of the quote char inside the code.
-        code = code.replace("\\" + quote, quote)
+        if standalone:
+            # Windows CRT: a run of backslashes before a quoted character or
+            # the closing delimiter contributes half as many literal slashes.
+            code = re.sub(
+                r'(\\+)(?="|$)',
+                lambda match: "\\" * (len(match.group(0)) // 2),
+                code,
+            )
+        else:
+            # Preserve the existing long-command compatibility path.
+            code = code.replace("\\" + quote, quote)
 
         try:
             fd, path = tempfile.mkstemp(suffix=".py", prefix="bash-pyc-")
@@ -709,7 +728,18 @@ SAFETY:
         # Drop the trailing "-c " from the prefix, keep the interpreter + flags.
         interp = re.sub(r'\s-c\s+$', ' ', prefix).rstrip()
         suffix = m.group("suffix").strip()
-        new_command = f'{interp} "{path}"'
+        if standalone:
+            # Hex avoids embedding shell-sensitive path characters. Keep -c so
+            # local imports, argv[0] and the absence of __file__ remain intact.
+            path_hex = path.encode("utf-8").hex()
+            loader = (
+                "exec(compile((lambda f:(f.read(),f.close())[0])"
+                f"(open(bytes.fromhex('{path_hex}').decode('utf-8'),"
+                "encoding='utf-8')),'<string>','exec'))"
+            )
+            new_command = f'{interp} -c "{loader}"'
+        else:
+            new_command = f'{interp} "{path}"'
         if suffix:
             new_command += f' {suffix}'
         return new_command, path
