@@ -138,6 +138,10 @@ export interface ProductSuggestion {
   prompt?: string
   // Defaults to the built-in icon at the same position.
   icon?: React.ComponentType<{ size?: number | string; className?: string }>
+  // Takes over the click instead of filling the input, e.g. to collect a few
+  // values first. `display`, if given, is shown for the turn while the agent
+  // still gets the full `text`.
+  onSelect?: (actions: { send: (text: string, display?: string) => void }) => void
 }
 
 export interface ProductChat {
