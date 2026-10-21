@@ -9,20 +9,29 @@ import pytest
 from agent.workspace.service import WorkspaceConflictError, WorkspaceService
 
 
-@pytest.mark.parametrize("alias", [False, True])
+@pytest.mark.parametrize("alias", ["same", "symlink", "case", "unicode"])
 def test_concurrent_services_reject_second_save_of_same_version(tmp_path, monkeypatch, alias):
-    target = tmp_path / "note.md"
+    filename = "café.md" if alias == "unicode" else "note.md"
+    target = tmp_path / filename
     target.write_text("original", encoding="utf-8")
     os.utime(target, (1000000000, 1000000000))
-    second_path = "note.md"
-    if alias:
+    second_path = filename
+    if alias == "unicode":
+        second_path = "cafe\u0301.md"
+        if not (tmp_path / second_path).exists() or not target.samefile(tmp_path / second_path):
+            pytest.skip("filesystem distinguishes Unicode canonical forms")
+    if alias == "case":
+        second_path = "NOTE.md"
+        if not (tmp_path / second_path).exists():
+            pytest.skip("filesystem distinguishes filename case")
+    elif alias == "symlink":
         if os.name == "nt":
             pytest.skip("symlink creation may require Windows privileges")
         (tmp_path / "alias.md").symlink_to(target)
         second_path = "alias.md"
     first = WorkspaceService(str(tmp_path))
     second = WorkspaceService(str(tmp_path))
-    version = first.read_text("note.md")["mtime"]
+    version = first.read_text(filename)["mtime"]
     publishing = threading.Event()
     release = threading.Event()
     second_resolved = threading.Event()
@@ -53,7 +62,7 @@ def test_concurrent_services_reject_second_save_of_same_version(tmp_path, monkey
             second_finished.set()
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        first_result = pool.submit(first.write_text, "note.md", "first editor", version)
+        first_result = pool.submit(first.write_text, filename, "first editor", version)
         try:
             assert publishing.wait(5)
             second_result = pool.submit(second_save)

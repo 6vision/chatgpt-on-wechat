@@ -18,6 +18,7 @@ import os
 import tempfile
 import threading
 import time
+import unicodedata
 from typing import Dict, List, Optional
 
 from common.log import logger
@@ -410,7 +411,9 @@ class WorkspaceService:
             instead of dropping those changes on the floor.
         """
         full = self._resolve_file(rel_path)
-        key = os.path.normcase(full)
+        # POSIX normcase does not fold case or canonical Unicode aliases on APFS.
+        # Extra collisions on case-sensitive filesystems only serialize saves.
+        key = unicodedata.normalize("NFC", os.path.normcase(full)).casefold()
         with _WRITE_LOCKS[hash(key) % len(_WRITE_LOCKS)]:
             return self._write_text_locked(full, content, expected_mtime)
 
