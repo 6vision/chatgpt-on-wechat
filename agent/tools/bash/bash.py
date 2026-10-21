@@ -221,16 +221,18 @@ SAFETY:
             temp_script_path = None
 
             # On Windows, convert $VAR references to %VAR% for cmd.exe
+            user_command = command
             if self._IS_WIN:
                 env["PYTHONIOENCODING"] = "utf-8"
                 command = self._convert_env_vars_for_windows(command, dotenv_vars)
-                # cmd.exe has an ~8191 char command line limit. Long
-                # `python -c "..."` commands silently fail, so spill the inline
-                # code into a temp .py file and run that instead.
-                if len(command) > self._WIN_CMD_SAFE_LEN:
-                    command, temp_script_path = self._rewrite_long_python_c(command)
+                user_command = command
+                # cmd.exe stops at the first line feed and at ~8191 chars, so
+                # multi-line or long `python -c "..."` code is silently cut off.
+                # Spill the inline code into a temp .py file instead.
+                if len(command) > self._WIN_CMD_SAFE_LEN or "\n" in command:
+                    command, temp_script_path = self._rewrite_python_c(command)
                 if command and not command.strip().lower().startswith("chcp"):
-                    command = f"chcp 65001 >nul 2>&1 && {command}"
+                    command = f"chcp 65001 >nul 2>&1 & {command}"
 
             if run_in_background:
                 # Ownership of temp_script_path passes to the registry - the
@@ -245,7 +247,7 @@ SAFETY:
                     "bash_id": job_id,
                 })
 
-            files_before = self._snapshot_files(command)
+            files_before = self._snapshot_files(user_command)
             try:
                 result = self._run_streaming(
                     command,
@@ -356,10 +358,10 @@ SAFETY:
                     output_text += f"\n\n[Showing lines {start_line}-{end_line} of {truncation.total_lines} ({format_size(DEFAULT_MAX_BYTES)} limit). Full output: {temp_file_path}]"
 
             # Check exit code
-            is_error, note = exit_codes.interpret(command, result.returncode)
+            is_error, note = exit_codes.interpret(user_command, result.returncode)
             if is_error:
                 output_text += f"\n\nCommand exited with code {result.returncode}"
-                hint = self._windows_failure_hint(command)
+                hint = self._windows_failure_hint(user_command)
                 if hint:
                     output_text += f"\n\n{hint}"
                 return ToolResult.fail({
@@ -371,7 +373,7 @@ SAFETY:
                 output_text += f"\n\n[Exit code {result.returncode}: {note}]"
 
             payload = {}
-            files = self._files_written(command, files_before)
+            files = self._files_written(user_command, files_before)
             if files:
                 payload["files_written"] = files
             payload.update({
@@ -651,29 +653,38 @@ SAFETY:
 
         return re.sub(r'\$\{(\w+)\}|\$(\w+)', replace_match, command)
 
-    @staticmethod
-    def _rewrite_long_python_c(command: str):
+    # <python|python3|py>[.exe] [interpreter flags] -c, followed by a quote.
+    # The lookbehind keeps `tool.py -c "..."` from being taken as `py -c`.
+    _PY_C_RE = re.compile(
+        r'(?<![\w.-])(?:python3?|py)(?:\.exe)?["\']?'
+        r'(?:\s+(?:-[XW]\s*\S+|-(?!c\b)\S+))*\s+-c\s+(?=["\'])',
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _rewrite_python_c(cls, command: str):
         """
-        Rewrite `python -c "<code>"` into `python <tempfile>` to bypass the
-        cmd.exe command line length limit on Windows.
+        Move the code of `python -c "<code>"` into a temp .py file.
+
+        The file is loaded back through exec() under -c rather than run as a
+        script, so sys.path[0] stays the working directory and imports of local
+        modules keep working exactly as with the original -c.
 
         Returns (new_command, temp_file_path). On any parse failure the original
         command and None are returned, so behavior is unchanged when unmatched.
         """
-        # Match: <python|python3|py> [flags] -c "<code>" (single or double quoted)
-        m = re.search(
-            r'^(?P<prefix>.*?\b(?:python3?|py)\b[^\n]*?\s-c\s+)'
-            r'(?P<quote>["\'])(?P<code>.*)(?P=quote)\s*(?P<suffix>.*)$',
-            command,
-            re.DOTALL,
-        )
+        m = cls._PY_C_RE.search(command)
         if not m:
             return command, None
 
-        quote = m.group("quote")
-        code = m.group("code")
+        quote = command[m.end()]
+        body_start = m.end() + 1
+        end = cls._closing_quote(command, body_start, quote)
+        if end < 0:
+            return command, None
         # Reverse common shell-level escaping of the quote char inside the code.
-        code = code.replace("\\" + quote, quote)
+        code = command[body_start:end].replace("\\" + quote, quote)
+        suffix = command[end + 1:].strip()
 
         try:
             fd, path = tempfile.mkstemp(suffix=".py", prefix="bash-pyc-")
@@ -682,11 +693,35 @@ SAFETY:
         except OSError:
             return command, None
 
-        prefix = m.group("prefix")
-        # Drop the trailing "-c " from the prefix, keep the interpreter + flags.
-        interp = re.sub(r'\s-c\s+$', ' ', prefix).rstrip()
-        suffix = m.group("suffix").strip()
-        new_command = f'{interp} "{path}"'
+        head = command[:m.end()]
+        if "'" in path:
+            # The path cannot sit inside the loader's string literal, so run
+            # the file as a script instead.
+            interp = re.sub(r'\s+-c\s+$', '', head)
+            new_command = f'{interp} "{path}"'
+        else:
+            loader = f"exec(compile(open(r'{path}', encoding='utf-8').read(), r'{path}', 'exec'))"
+            new_command = f'{head}"{loader}"'
         if suffix:
             new_command += f' {suffix}'
         return new_command, path
+
+    @staticmethod
+    def _closing_quote(command: str, start: int, quote: str) -> int:
+        """Index of the quote that closes the -c code, or -1.
+
+        Take the first unescaped quote followed by the end of the command or a
+        shell operator, so a trailing `&& echo "done"` stays outside the code.
+        """
+        last = -1
+        index = command.find(quote, start)
+        while index >= 0:
+            backslashes = 0
+            while index - backslashes - 1 >= start and command[index - backslashes - 1] == "\\":
+                backslashes += 1
+            if backslashes % 2 == 0:
+                if re.match(r'\s*(?:$|[&|<>]|\d>)', command[index + 1:]):
+                    return index
+                last = index
+            index = command.find(quote, index + 1)
+        return last
