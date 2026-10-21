@@ -19,7 +19,7 @@ from agent.tools.bash.bash import Bash
 def test_multiline_spill_preserves_program_and_script_arguments(interpreter):
     code = "import sys\nprint(sys.argv[1])"
     command = f'{interpreter} -c "{code}" "value with spaces"'
-    rewritten, path = Bash._rewrite_long_python_c(command, standalone=True)
+    rewritten, path = Bash._rewrite_python_c(command)
     try:
         assert path is not None
         with open(path, encoding="utf-8") as source:
@@ -48,13 +48,32 @@ def test_multiline_spill_preserves_program_and_script_arguments(interpreter):
     [
         'echo python -c "value=40\nprint(value+2)"',
         'node -c "value=40\nprint(value+2)"',
-        'python -c "value=40\nprint(value+2)" && echo "another command"',
-        'python -c "value=40\nprint(value+2)" > result.txt',
-        'python -c "value=40\nprint(value+2)""concatenated quote"',
+        'python tool.py -c "value=40\nprint(value+2)"',
     ],
 )
 def test_multiline_spill_does_not_reinterpret_other_shell_commands(command):
-    assert Bash._rewrite_long_python_c(command, standalone=True) == (command, None)
+    assert Bash._rewrite_python_c(command) == (command, None)
+
+
+@pytest.mark.parametrize(
+    "command,head,tail",
+    [
+        ('python -c "value=40\nprint(value+2)" && echo "another command"', 'python -c ', ' && echo "another command"'),
+        ('python -c "value=40\nprint(value+2)" > result.txt', 'python -c ', ' > result.txt'),
+        ('cd /d "C:\\work dir" && py -3 -c "value=40\nprint(value+2)"', 'cd /d "C:\\work dir" && py -3 -c ', ''),
+    ],
+)
+def test_multiline_spill_keeps_surrounding_shell_commands(command, head, tail):
+    rewritten, path = Bash._rewrite_python_c(command)
+    try:
+        assert path is not None
+        with open(path, encoding="utf-8") as source:
+            assert source.read() == "value=40\nprint(value+2)"
+        assert rewritten.startswith(head + '"exec(')
+        assert rewritten.endswith("'exec'))\"" + tail)
+    finally:
+        if path:
+            os.unlink(path)
 
 
 WINDOWS_PROGRAMS = [
@@ -157,7 +176,7 @@ def test_windows_background_multiline_python_retains_all_output(tmp_path, monkey
 def test_spilled_loader_preserves_inline_semantics(tmp_path, code):
     (tmp_path / "local_module.py").write_text("answer = 42\n", encoding="utf-8")
     command = "python -c " + subprocess.list2cmdline([code])
-    rewritten, path = Bash._rewrite_long_python_c(command, standalone=True)
+    rewritten, path = Bash._rewrite_python_c(command)
     try:
         assert path is not None
         loader = rewritten.split(' -c "', 1)[1].split('"', 1)[0]

@@ -184,7 +184,7 @@ def test_windows_multiline_python_c_is_moved_into_a_temp_file(monkeypatch, tmp_p
 
     def fake_run_streaming(command, timeout, env, dotenv_vars):
         captured["command"] = command
-        path = re.search(r"open\(r'([^']+)'", command).group(1)
+        path = bytes.fromhex(re.search(r"fromhex\('([0-9a-f]+)'\)", command).group(1)).decode("utf-8")
         with open(path, encoding="utf-8") as f:
             captured["code"] = f.read()
         return SimpleNamespace(returncode=0, stdout="ok\n", stderr="")

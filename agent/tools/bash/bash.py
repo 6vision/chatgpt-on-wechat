@@ -229,7 +229,7 @@ SAFETY:
                 # cmd.exe stops at the first line feed and at ~8191 chars, so
                 # multi-line or long `python -c "..."` code is silently cut off.
                 # Spill the inline code into a temp .py file instead.
-                if len(command) > self._WIN_CMD_SAFE_LEN or "\n" in command:
+                if len(command) > self._WIN_CMD_SAFE_LEN or "\n" in command or "\r" in command:
                     command, temp_script_path = self._rewrite_python_c(command)
                 if command and not command.strip().lower().startswith("chcp"):
                     command = f"chcp 65001 >nul 2>&1 & {command}"
@@ -662,10 +662,12 @@ SAFETY:
 
         return re.sub(r'\$\{(\w+)\}|\$(\w+)', replace_match, command)
 
-    # <python|python3|py>[.exe] [interpreter flags] -c, followed by a quote.
-    # The lookbehind keeps `tool.py -c "..."` from being taken as `py -c`.
+    # [path\]<python|python3|py>[.exe] [interpreter flags] -c, followed by a
+    # quote, at the start of the command or right after an operator, so
+    # `tool.py -c "..."` and `echo python -c "..."` are left alone.
     _PY_C_RE = re.compile(
-        r'(?<![\w.-])(?:python3?|py)(?:\.exe)?["\']?'
+        r'(?:^|[&|(])\s*(?:"[^"\r\n]*[\\/]|"|[^\s"&|<>()]*[\\/])?'
+        r'(?:python3?|py)(?:\.exe)?"?'
         r'(?:\s+(?:-[XW]\s*\S+|-(?!c\b)\S+))*\s+-c\s+(?=["\'])',
         re.IGNORECASE,
     )
@@ -676,8 +678,8 @@ SAFETY:
         Move the code of `python -c "<code>"` into a temp .py file.
 
         The file is loaded back through exec() under -c rather than run as a
-        script, so sys.path[0] stays the working directory and imports of local
-        modules keep working exactly as with the original -c.
+        script, so sys.path[0], sys.argv[0], the missing __file__ and the
+        `<string>` traceback filename all stay as with the original -c.
 
         Returns (new_command, temp_file_path). On any parse failure the original
         command and None are returned, so behavior is unchanged when unmatched.
@@ -691,26 +693,30 @@ SAFETY:
         end = cls._closing_quote(command, body_start, quote)
         if end < 0:
             return command, None
-        # Reverse common shell-level escaping of the quote char inside the code.
-        code = command[body_start:end].replace("\\" + quote, quote)
+        code = command[body_start:end]
+        if quote == '"':
+            # Windows CRT argument parsing: a run of backslashes before a quote
+            # or the closing delimiter contributes half as many literal ones.
+            code = re.sub(r'(\\+)(?="|\Z)', lambda r: "\\" * (len(r.group(1)) // 2), code)
+        else:
+            code = code.replace("\\'", "'")
         suffix = command[end + 1:].strip()
 
         try:
             fd, path = tempfile.mkstemp(suffix=".py", prefix="bash-pyc-")
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
                 f.write(code)
         except OSError:
             return command, None
 
-        head = command[:m.end()]
-        if "'" in path:
-            # The path cannot sit inside the loader's string literal, so run
-            # the file as a script instead.
-            interp = re.sub(r'\s+-c\s+$', '', head)
-            new_command = f'{interp} "{path}"'
-        else:
-            loader = f"exec(compile(open(r'{path}', encoding='utf-8').read(), r'{path}', 'exec'))"
-            new_command = f'{head}"{loader}"'
+        # Hex keeps quote- and shell-sensitive path characters out of the loader.
+        path_hex = path.encode("utf-8").hex()
+        loader = (
+            "exec(compile((lambda f:(f.read(),f.close())[0])"
+            f"(open(bytes.fromhex('{path_hex}').decode('utf-8'),"
+            "encoding='utf-8')),'<string>','exec'))"
+        )
+        new_command = f'{command[:m.end()]}"{loader}"'
         if suffix:
             new_command += f' {suffix}'
         return new_command, path
@@ -719,8 +725,10 @@ SAFETY:
     def _closing_quote(command: str, start: int, quote: str) -> int:
         """Index of the quote that closes the -c code, or -1.
 
-        Take the first unescaped quote followed by the end of the command or a
-        shell operator, so a trailing `&& echo "done"` stays outside the code.
+        Take the first unescaped quote followed by whitespace, an operator or
+        the end of the command, so script arguments and a trailing
+        `&& echo "done"` stay outside the code. Fall back to the last unescaped
+        quote, which tolerates unescaped quotes inside the code.
         """
         last = -1
         index = command.find(quote, start)
@@ -729,7 +737,7 @@ SAFETY:
             while index - backslashes - 1 >= start and command[index - backslashes - 1] == "\\":
                 backslashes += 1
             if backslashes % 2 == 0:
-                if re.match(r'\s*(?:$|[&|<>]|\d>)', command[index + 1:]):
+                if re.match(r'(?:\s|$|[&|<>])', command[index + 1:]):
                     return index
                 last = index
             index = command.find(quote, index + 1)
