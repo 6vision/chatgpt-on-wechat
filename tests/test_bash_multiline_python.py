@@ -103,7 +103,9 @@ def test_windows_multiline_python_executes_every_line(
         subprocess.list2cmdline([sys.executable])
         + flags
         + " -c "
-        + subprocess.list2cmdline([code])
+        # A temporary leading space forces the CRT encoder's outer quotes;
+        # remove only that space, retaining its quote/backslash encoding.
+        + ('"' + subprocess.list2cmdline([" " + code])[2:])
         + suffix
     )
     assert len(command) < Bash._WIN_CMD_SAFE_LEN
