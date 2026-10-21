@@ -319,7 +319,7 @@ class ModelsHandler:
     """
 
     # Capability -> provider ids drawn from PROVIDER_MODELS.
-    _ASR_PROVIDERS = ["openai", "dashscope", "zhipu", "linkai"]
+    _ASR_PROVIDERS = ["openai", "dashscope", "zhipu", "mimo", "linkai"]
     # Web-console white-list. Other vendors stay usable via direct config.
     _TTS_PROVIDERS = ["openai", "minimax", "dashscope", "mimo", "linkai"]
 
@@ -364,6 +364,9 @@ class ModelsHandler:
         ],
         "zhipu": [
             {"value": "glm-asr-2512", "hint": "智谱语音识别"},
+        ],
+        "mimo": [
+            {"value": "mimo-v2.5-asr", "hint": "中英文 · 支持方言"},
         ],
         # LinkAI gateway routes ASR by `model` (see
         # https://docs.link-ai.tech/platform/api/voice-recognition). An empty
@@ -655,8 +658,8 @@ class ModelsHandler:
         # MiniMax-M3 natively accepts text, image, and video input. The M2.x
         # chat family remains text-only and is not offered for vision.
         "minimax":   [const.MINIMAX_M3],
-        # MiMo 原生全模态模型：v2.5-pro / v2.5 支持图像/音频/视频输入
-        "mimo":      [const.MIMO_V2_5_PRO, const.MIMO_V2_5],
+        # MiMo 原生全模态模型：v2.6-pro / v2.6-flash 支持图像/音频/视频输入
+        "mimo":      [const.MIMO_V2_6_PRO, const.MIMO_V2_6_FLASH],
         # LinkAI proxies the underlying vendor; surface a curated set of
         # multimodal models. Order: gpt-4.1-mini → gpt-5.4-mini as the
         # cross-vendor baselines, then each vendor's recommended default.
@@ -1071,7 +1074,7 @@ class ModelsHandler:
         ("qianfan",   "qianfan_api_key",   const.ERNIE_45_TURBO_VL),
         ("zhipu",     "zhipu_ai_api_key",  const.GLM_5V_TURBO),
         ("minimax",   "minimax_api_key",   const.MINIMAX_M3),
-        ("mimo",      "mimo_api_key",      const.MIMO_V2_5_PRO),
+        ("mimo",      "mimo_api_key",      const.MIMO_V2_6_PRO),
     ]
 
     @classmethod
@@ -1639,8 +1642,8 @@ class ModelsHandler:
         "MiniMax-M2.7": {"context_window": 204800, "max_output_tokens": 196608},
         "MiniMax-M2.7-highspeed": {"context_window": 204800, "max_output_tokens": 196608},
         "MiniMax-Text-01": {"context_window": 1000000},
-        "mimo-v2.5-pro": {"context_window": 1000000, "max_output_tokens": 131072},
-        "mimo-v2.5": {"context_window": 1000000, "max_output_tokens": 131072},
+        "mimo-v2.6-pro": {"context_window": 1000000, "max_output_tokens": 131072},
+        "mimo-v2.6-flash": {"context_window": 1000000, "max_output_tokens": 131072},
         "gpt-6.1-sol": {"context_window": 1000000, "max_output_tokens": 128000},
         "gpt-6-luna": {"context_window": 1000000, "max_output_tokens": 128000},
         "gpt-6-sol": {"context_window": 1000000, "max_output_tokens": 128000},
@@ -1678,7 +1681,7 @@ class ModelsHandler:
 
         Membership in the per-capability preset lists IS the type: the chat
         list -> "text", the vision list -> "vision", etc. Tags merge across
-        lists (gpt-4o -> text+vision, mimo-v2.5 -> text+vision+tts), so the
+        lists (gpt-4o -> text+vision, mimo-v2.6-pro -> text+vision), so the
         catalog editor seeds each preset with its real capabilities."""
         merged: "OrderedDict[str, dict]" = OrderedDict()
 

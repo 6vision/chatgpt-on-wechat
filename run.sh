@@ -596,7 +596,7 @@ select_model() {
         "Qwen (qwen3.8-flash, qwen3.8-max, etc.)" \
         "Kimi (kimi-k3, etc.)" \
         "Doubao (doubao-seed-2.1, etc.)" \
-        "MiMo (mimo-v2.5-pro, etc.)" \
+        "MiMo (mimo-v2.6-pro, etc.)" \
         "LinkAI ($(t "一个 Key 接入所有模型" "access all models via one API"))" \
         "$(t "⏭  跳过（稍后在 Web 控制台配置）" "⏭  Skip (configure later in the web console)")"
     model_choice="$sel"
@@ -628,7 +628,7 @@ configure_model() {
         7) read_model_config "Qwen (DashScope)" "qwen3.8-flash" "DASHSCOPE_KEY" ;;
         8) read_model_config "Kimi (Moonshot)" "kimi-k3" "MOONSHOT_KEY" ;;
         9) read_model_config "Doubao (Volcengine Ark)" "doubao-seed-2-1-pro-260628" "ARK_KEY" ;;
-        10) read_model_config "MiMo" "mimo-v2.5-pro" "MIMO_KEY" ;;
+        10) read_model_config "MiMo" "mimo-v2.6-pro" "MIMO_KEY" ;;
         11)
             # Show where to obtain a LinkAI key (zh users -> console page).
             echo -e "${CYAN}$(t "获取 LinkAI Key" "Get your LinkAI Key"): https://link-ai.tech/console/interface${NC}"

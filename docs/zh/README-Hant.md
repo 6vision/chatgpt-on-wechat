@@ -140,7 +140,7 @@ CowAgent 支援國內外主流廠商的大語言模型。**文字對話、影像
 | [Kimi](https://docs.cowagent.ai/zh/models/kimi) | kimi-k3 | ✅ | ✅ | | | | |
 | [豆包 Doubao](https://docs.cowagent.ai/zh/models/doubao) | doubao-seed-2.1 系列 | ✅ | ✅ | ✅ | | | ✅ |
 | [百度ERNIE](https://docs.cowagent.ai/zh/models/qianfan) | ernie-5.1 | ✅ | ✅ | | | | |
-| [小米 MiMo](https://docs.cowagent.ai/zh/models/mimo) | mimo-v2.5-pro / v2.5 | ✅ | ✅ | | | ✅ | |
+| [小米 MiMo](https://docs.cowagent.ai/zh/models/mimo) | mimo-v2.6-pro / v2.6-flash | ✅ | ✅ | | ✅ | ✅ | |
 | [LinkAI](https://docs.cowagent.ai/zh/models/linkai) | 一個 Key 接入 100+ 模型 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | [自定義](https://docs.cowagent.ai/zh/models/custom) | 本地模型 / 三方代理 | ✅ | | | | | |
 

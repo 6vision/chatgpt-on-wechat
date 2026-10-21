@@ -166,11 +166,15 @@ KIMI_K2_5 = "kimi-k2.5"
 KIMI_K2_6 = "kimi-k2.6"
 
 # Xiaomi MiMo
-MIMO_V2_5_PRO = "mimo-v2.5-pro"      # MiMo V2.5 Pro - flagship, long context (default recommendation)
-MIMO_V2_5 = "mimo-v2.5"              # MiMo V2.5 - multimodal (text/image/audio/video)
-MIMO_V2_PRO = "mimo-v2-pro"          # MiMo V2 Pro
-MIMO_V2_OMNI = "mimo-v2-omni"        # MiMo V2 Omni - multimodal
-MIMO_V2_FLASH = "mimo-v2-flash"      # MiMo V2 Flash - high-speed
+MIMO_V2_6_PRO = "mimo-v2.6-pro"      # MiMo V2.6 Pro - flagship, omni-modal, 1M context (default recommendation)
+MIMO_V2_6_FLASH = "mimo-v2.6-flash"  # MiMo V2.6 Flash - omni-modal, faster and cheaper
+# Retired by the vendor; requests to these ids now fail, so MimoBot maps them
+# onto the V2.6 replacements.
+MIMO_V2_5_PRO = "mimo-v2.5-pro"
+MIMO_V2_5 = "mimo-v2.5"
+MIMO_V2_PRO = "mimo-v2-pro"
+MIMO_V2_OMNI = "mimo-v2-omni"
+MIMO_V2_FLASH = "mimo-v2-flash"
 
 # Doubao (Volcengine Ark)
 DOUBAO = "doubao"
@@ -217,7 +221,7 @@ MODEL_LIST = [
               MiniMax, MINIMAX_M3, MINIMAX_M2_7, MINIMAX_M2_7_HIGHSPEED, MINIMAX_ABAB6_5,
 
               # Xiaomi MiMo
-              MIMO, MIMO_V2_5_PRO, MIMO_V2_5, MIMO_V2_PRO, MIMO_V2_OMNI, MIMO_V2_FLASH,
+              MIMO, MIMO_V2_6_PRO, MIMO_V2_6_FLASH, MIMO_V2_5_PRO, MIMO_V2_5, MIMO_V2_PRO, MIMO_V2_OMNI, MIMO_V2_FLASH,
 
               # Claude
               CLAUDE_OPUS_5_5, CLAUDE_OPUS_5, CLAUDE_SONNET_5, CLAUDE_FABLE_5_1, CLAUDE_FABLE_5, CLAUDE3, CLAUDE_4_8_OPUS, CLAUDE_4_7_OPUS, CLAUDE_4_6_SONNET, CLAUDE_4_6_OPUS, CLAUDE_4_OPUS, CLAUDE_4_5_SONNET, CLAUDE_4_SONNET, CLAUDE_3_OPUS, CLAUDE_3_OPUS_0229,

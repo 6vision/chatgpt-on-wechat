@@ -140,7 +140,7 @@ CowAgent は主要な LLM プロバイダーすべてに対応しています。
 | [Kimi](https://docs.cowagent.ai/ja/models/kimi) | kimi-k3 | ✅ | ✅ | | | | |
 | [Doubao](https://docs.cowagent.ai/ja/models/doubao) | doubao-seed-2.1 シリーズ | ✅ | ✅ | ✅ | | | ✅ |
 | [ERNIE](https://docs.cowagent.ai/ja/models/qianfan) | ernie-5.1 | ✅ | ✅ | | | | |
-| [MiMo](https://docs.cowagent.ai/ja/models/mimo) | mimo-v2.5-pro / v2.5 | ✅ | ✅ | | | ✅ | |
+| [MiMo](https://docs.cowagent.ai/ja/models/mimo) | mimo-v2.6-pro / v2.6-flash | ✅ | ✅ | | ✅ | ✅ | |
 | [LinkAI](https://docs.cowagent.ai/ja/models/linkai) | 1 つの Key で 100+ モデルに接続 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | [カスタム](https://docs.cowagent.ai/ja/models/custom) | ローカルモデル / サードパーティプロキシ | ✅ | | | | | |
 

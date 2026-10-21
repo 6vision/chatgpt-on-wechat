@@ -29,7 +29,7 @@ _RECOMMENDED_MODELS = [
     const.DOUBAO_SEED_2_1_PRO, const.DOUBAO_SEED_2_1_TURBO, const.DOUBAO_SEED_2_CODE,
     const.KIMI_K3, const.KIMI_K2_7_CODE, const.KIMI_K2_7_CODE_HIGHSPEED, const.KIMI_K2_6, const.KIMI_K2_5, const.KIMI_K2,
     const.ERNIE_5_1, const.ERNIE_5, const.ERNIE_X1_1, const.ERNIE_45_TURBO_128K, const.ERNIE_45_TURBO_32K,
-    const.MIMO_V2_5_PRO, const.MIMO_V2_5,
+    const.MIMO_V2_6_PRO, const.MIMO_V2_6_FLASH,
 ]
 
 # Generic placeholder hints surfaced in the web console. We deliberately
@@ -130,7 +130,7 @@ PROVIDER_MODELS = OrderedDict([
         "api_base_key": "mimo_api_base",
         "api_base_default": "https://api.xiaomimimo.com/v1",
         "api_base_placeholder": _PLACEHOLDER_V1,
-        "models": [const.MIMO_V2_5_PRO, const.MIMO_V2_5],
+        "models": [const.MIMO_V2_6_PRO, const.MIMO_V2_6_FLASH],
     }),
     ("linkai", {
         "label": "LinkAI",
