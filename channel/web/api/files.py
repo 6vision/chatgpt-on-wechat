@@ -130,6 +130,7 @@ class VoiceTtsHandler:
             data = json.loads(web.data() or b"{}")
             text = (data.get("text") or "").strip()
             session_id = (data.get("session_id") or "").strip()
+            message_seq = data.get("message_seq")
             agent_id = data.get("agent_id")
             if not text:
                 return json.dumps({"status": "error", "message": "empty text"})
@@ -137,6 +138,21 @@ class VoiceTtsHandler:
             channel = WebChannel()
             if not channel._tts_provider_ready():
                 return json.dumps({"status": "error", "message": "tts not configured"})
+
+            target_store = None
+            target_snapshot = None
+            # Capture identity before synthesis: seq can be reused after a
+            # deletion, and a message can change while audio is generated.
+            if (session_id and isinstance(message_seq, int)
+                    and not isinstance(message_seq, bool) and message_seq >= 0):
+                try:
+                    from agent.memory import get_conversation_store
+                    from agent.registry import get_agent_registry
+                    profile = get_agent_registry().get(agent_id)
+                    target_store = get_conversation_store(profile.workspace)
+                    target_snapshot = target_store.get_assistant_message_snapshot(session_id, message_seq)
+                except Exception as e:
+                    logger.debug(f"[VoiceTtsHandler] snapshot skipped: {e}")
 
             from bridge.bridge import Bridge
             reply = Bridge().fetch_text_to_voice(text)
@@ -148,13 +164,12 @@ class VoiceTtsHandler:
             if not url:
                 return json.dumps({"status": "error", "message": "publish failed"})
 
-            if session_id:
+            # Ambiguous old clients and changed/deleted targets still receive
+            # playback, without putting old audio onto another message.
+            if target_store is not None and target_snapshot is not None:
                 try:
-                    from agent.memory import get_conversation_store
-                    from agent.registry import get_agent_registry
-                    profile = get_agent_registry().get(agent_id)
-                    get_conversation_store(profile.workspace).attach_extras_to_last_assistant(
-                        session_id, {"audio": {"url": url, "kind": "tts"}},
+                    target_store.attach_extras_to_assistant(
+                        session_id, message_seq, {"audio": {"url": url, "kind": "tts"}}, target_snapshot,
                     )
                 except Exception as e:
                     logger.debug(f"[VoiceTtsHandler] persist skipped: {e}")

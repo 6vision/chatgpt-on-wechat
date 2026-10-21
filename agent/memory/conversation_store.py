@@ -1281,19 +1281,54 @@ class ConversationStore:
         Returns the message seq that was updated, or ``None`` if no assistant
         message exists or the update could not be applied.
         """
+        return self._attach_assistant_extras(session_id, extras)
+
+    def get_assistant_message_snapshot(
+        self, session_id: str, message_seq: int
+    ) -> Optional[tuple]:
+        """Capture an assistant row's immutable id and raw content before work."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                return conn.execute(
+                    "SELECT id, content FROM messages WHERE agent_id = ? "
+                    "AND session_id = ? AND seq = ? AND role = 'assistant'",
+                    (self._agent_id, session_id, message_seq),
+                ).fetchone()
+            finally:
+                conn.close()
+
+    def attach_extras_to_assistant(
+        self, session_id: str, message_seq: int, extras: Dict[str, Any], snapshot: tuple
+    ) -> Optional[int]:
+        """Merge extras only if the captured assistant row still has its content."""
+        if (isinstance(message_seq, bool) or not isinstance(message_seq, int)
+                or message_seq < 0 or snapshot is None):
+            return None
+        return self._attach_assistant_extras(session_id, extras, message_seq, snapshot)
+
+    def _attach_assistant_extras(
+        self, session_id: str, extras: Dict[str, Any], message_seq: Optional[int] = None,
+        snapshot: Optional[tuple] = None
+    ) -> Optional[int]:
         if not extras:
             return None
         with self._lock:
             conn = self._connect()
             try:
                 aid = self._agent_id
+                identity_filter = " AND id = ? AND content = ?" if snapshot is not None else ""
+                identity_values = snapshot if snapshot is not None else ()
+                seq_filter = (" AND seq = ?" if message_seq is not None else "") + identity_filter
+                params = (aid, session_id, message_seq) if message_seq is not None else (aid, session_id)
+                params += identity_values
                 row = conn.execute(
-                    """
+                    f"""
                     SELECT seq, extras FROM messages
-                    WHERE agent_id = ? AND session_id = ? AND role = 'assistant'
+                    WHERE agent_id = ? AND session_id = ? AND role = 'assistant'{seq_filter}
                     ORDER BY seq DESC LIMIT 1
                     """,
-                    (aid, session_id),
+                    params,
                 ).fetchone()
                 if not row:
                     return None
@@ -1305,12 +1340,13 @@ class ConversationStore:
                 except Exception:
                     cur = {}
                 cur.update(extras)
-                conn.execute(
-                    "UPDATE messages SET extras = ? WHERE agent_id = ? AND session_id = ? AND seq = ?",
-                    (json.dumps(cur, ensure_ascii=False), aid, session_id, seq),
+                updated = conn.execute(
+                    "UPDATE messages SET extras = ? WHERE agent_id = ? AND session_id = ? AND seq = ?"
+                    + identity_filter,
+                    (json.dumps(cur, ensure_ascii=False), aid, session_id, seq, *identity_values),
                 )
                 conn.commit()
-                return seq
+                return seq if updated.rowcount else None
             except Exception as e:
                 logger.warning(f"[ConversationStore] attach_extras failed: {e}")
                 return None
