@@ -1,3 +1,5 @@
+import os
+import re
 import subprocess
 import sys
 import threading
@@ -173,6 +175,50 @@ def test_windows_chcp_prefix_does_not_break_soft_exit_code_1_interpretation(
 
     assert result.status == "success"
     assert "[Exit code 1: Files differ]" in result.result["output"]
+
+
+def test_windows_multiline_python_c_is_moved_into_a_temp_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(Bash, "_IS_WIN", True)
+    tool = Bash({"cwd": str(tmp_path)})
+    captured = {}
+
+    def fake_run_streaming(command, timeout, env, dotenv_vars):
+        captured["command"] = command
+        path = re.search(r"open\(r'([^']+)'", command).group(1)
+        with open(path, encoding="utf-8") as f:
+            captured["code"] = f.read()
+        return SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(tool, "_run_streaming", fake_run_streaming)
+
+    result = tool.execute({"command": 'python -c "import os\nprint(\'ok\')" && echo "done"'})
+
+    assert result.status == "success"
+    assert "\n" not in captured["command"]
+    assert captured["command"].startswith('chcp 65001 >nul 2>&1 & python -c "exec(compile(')
+    assert captured["command"].endswith('&& echo "done"')
+    assert captured["code"] == "import os\nprint('ok')"
+
+
+def test_rewritten_python_c_keeps_cwd_on_sys_path(tmp_path):
+    (tmp_path / "local_mod.py").write_text("VALUE = 'from-cwd'\n", encoding="utf-8")
+    command = f'"{sys.executable}" -c "import local_mod\nprint(local_mod.VALUE)"'
+
+    rewritten, path = Bash._rewrite_python_c(command)
+    try:
+        assert path and "\n" not in rewritten
+        result = subprocess.run(rewritten, shell=True, cwd=tmp_path, capture_output=True, text=True)
+    finally:
+        os.remove(path)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "from-cwd"
+
+
+def test_python_c_rewrite_ignores_script_arguments_named_c():
+    command = 'python tool.py -c "a\nb"'
+
+    assert Bash._rewrite_python_c(command) == (command, None)
 
 
 @windows_only
