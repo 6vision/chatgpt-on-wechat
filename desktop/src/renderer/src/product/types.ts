@@ -150,6 +150,12 @@ export interface ProductChat {
   useSuggestions?: () => ProductSuggestion[] | null
 }
 
+export interface ProductAgents {
+  // Name shown for the built-in default agent while it still has its stock
+  // name; one the user gave it is kept. Return null to keep the stock name.
+  defaultAgentName?: () => string | null
+}
+
 export interface ProductExtension {
   auth?: ProductAuth
   slots?: ProductSlots
@@ -160,4 +166,5 @@ export interface ProductExtension {
   links?: ProductLinks
   skills?: ProductSkills
   chat?: ProductChat
+  agents?: ProductAgents
 }
