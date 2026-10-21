@@ -92,9 +92,16 @@ def _can_write_in_place(error: OSError, target: str) -> bool:
 def _write_in_place(target: str, text: str, encoding: str, cause: OSError, newline=None) -> None:
     from common.log import logger
 
+    # Encode and translate newlines before opening the existing file with
+    # truncation. StringIO alone cannot catch an invalid character/encoding.
+    buffer = io.BytesIO()
+    with io.TextIOWrapper(buffer, encoding=encoding, newline=newline) as staged:
+        staged.write(text)
+        staged.flush()
+        encoded = buffer.getvalue()
     logger.warning(f"[AtomicWrite] Cannot replace {target} ({cause}), writing in place")
-    with open(target, "w", encoding=encoding, newline=newline) as f:
-        f.write(text)
+    with open(target, "wb") as f:
+        f.write(encoded)
         f.flush()
         os.fsync(f.fileno())
 
