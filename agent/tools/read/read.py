@@ -324,7 +324,7 @@ class Read(BaseTool):
                 "content": (
                     f"[Line {start_display} is {size}, exceeds "
                     f"{format_size(DEFAULT_MAX_BYTES)} limit. Use bash tool to read: "
-                    f"tail -n +{start_display} -- {shlex.quote(display_path)} | head -c {DEFAULT_MAX_BYTES}]"
+                    f"tail -n +{start_display} -- {shlex.quote(expand_path(display_path))} | head -c {DEFAULT_MAX_BYTES}]"
                 ),
                 "total_lines": total_lines,
                 "start_line": start_display,
