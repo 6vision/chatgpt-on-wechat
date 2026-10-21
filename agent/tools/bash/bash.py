@@ -229,6 +229,8 @@ SAFETY:
                 # code into a temp .py file and run that instead.
                 if len(command) > self._WIN_CMD_SAFE_LEN:
                     command, temp_script_path = self._rewrite_long_python_c(command)
+                elif "\n" in command or "\r" in command:
+                    command, temp_script_path = self._rewrite_long_python_c(command, standalone=True)
                 if command and not command.strip().lower().startswith("chcp"):
                     command = f"chcp 65001 >nul 2>&1 && {command}"
 
@@ -652,21 +654,42 @@ SAFETY:
         return re.sub(r'\$\{(\w+)\}|\$(\w+)', replace_match, command)
 
     @staticmethod
-    def _rewrite_long_python_c(command: str):
+    def _rewrite_long_python_c(command: str, *, standalone: bool = False):
         """
         Rewrite `python -c "<code>"` into `python <tempfile>` to bypass the
-        cmd.exe command line length limit on Windows.
+        cmd.exe command line length limit on Windows. Short multiline commands
+        use the same spill path, but only for a standalone Python invocation:
+        cmd.exe otherwise cuts the inline program at its first newline.
 
         Returns (new_command, temp_file_path). On any parse failure the original
         command and None are returned, so behavior is unchanged when unmatched.
         """
         # Match: <python|python3|py> [flags] -c "<code>" (single or double quoted)
-        m = re.search(
-            r'^(?P<prefix>.*?\b(?:python3?|py)\b[^\n]*?\s-c\s+)'
-            r'(?P<quote>["\'])(?P<code>.*)(?P=quote)\s*(?P<suffix>.*)$',
-            command,
-            re.DOTALL,
-        )
+        if standalone:
+            m = re.fullmatch(
+                r'(?P<prefix>(?P<exe>"[^"\r\n]+"|[^\s"\r\n]+)'
+                r'(?:[ \t]+-[A-Za-z0-9.]+)*[ \t]+-c[ \t]+)'
+                r'(?P<quote>")(?P<code>(?:\\.|[^"\\])*)(?P=quote)'
+                r'(?P<suffix>(?:[ \t]+[^\r\n]*)?)',
+                command,
+                re.DOTALL,
+            )
+            if m:
+                import ntpath
+                executable = ntpath.basename(m.group("exe").strip('"'))
+                if not re.fullmatch(r'(?:python3?|py)(?:\.exe)?', executable, re.IGNORECASE):
+                    return command, None
+                # Preserve compound shell commands rather than moving a
+                # pipeline, redirection or command chain into a Python file.
+                if re.search(r'[&|<>^()]', m.group("suffix")):
+                    return command, None
+        else:
+            m = re.search(
+                r'^(?P<prefix>.*?\b(?:python3?|py)\b[^\n]*?\s-c\s+)'
+                r'(?P<quote>["\'])(?P<code>.*)(?P=quote)\s*(?P<suffix>.*)$',
+                command,
+                re.DOTALL,
+            )
         if not m:
             return command, None
 
