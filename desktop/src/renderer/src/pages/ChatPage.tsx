@@ -516,7 +516,9 @@ const ChatPage: React.FC<ChatPageProps> = ({ baseUrl }) => {
                     key={key}
                     onClick={() => {
                       if (onSelect) {
-                        onSelect({ send: (value, display) => void handleSend(value, [], display) })
+                        onSelect({
+                          send: (value, display, attachments) => void handleSend(value, attachments ?? [], display),
+                        })
                         return
                       }
                       // Fill the input (don't auto-send) so the user can tweak it first.

@@ -9,7 +9,7 @@
 // must degrade gracefully when a field is missing.
 // ============================================================
 import type React from 'react'
-import type { SkillInfo } from '../types'
+import type { Attachment, SkillInfo } from '../types'
 
 // Optional gate rendered before the main UI. When present, the core shows
 // <Gate/> until the extension reports the session no longer needs it.
@@ -141,7 +141,7 @@ export interface ProductSuggestion {
   // Takes over the click instead of filling the input, e.g. to collect a few
   // values first. `display`, if given, is shown for the turn while the agent
   // still gets the full `text`.
-  onSelect?: (actions: { send: (text: string, display?: string) => void }) => void
+  onSelect?: (actions: { send: (text: string, display?: string, attachments?: Attachment[]) => void }) => void
 }
 
 export interface ProductChat {
