@@ -867,6 +867,16 @@ class ConversationStore:
                         (aid, session_id),
                     ).fetchone()
                     next_seq = row[0] + 1
+                    # Deleting old turns can lower MAX(seq) below a cleared
+                    # context boundary. New messages must remain visible even
+                    # when those deleted sequence numbers would be reusable.
+                    boundary = conn.execute(
+                        "SELECT context_start_seq FROM sessions "
+                        "WHERE agent_id = ? AND session_id = ?",
+                        (aid, session_id),
+                    ).fetchone()
+                    if boundary:
+                        next_seq = max(next_seq, boundary[0])
 
                     inserted = 0
                     for msg in messages:
