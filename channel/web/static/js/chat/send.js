@@ -77,7 +77,7 @@ async function regenerateResponse(botMsgEl) {
                     addBotMessage(data.inline_reply, new Date());
                 } else if (data.stream) {
                     setSendBtnCancelMode(data.request_id);
-                    startSSE(data.request_id, loadingEl, timestamp, null);
+                    startSSE(data.request_id, loadingEl, timestamp);
                 } else {
                     loadingContainers[data.request_id] = loadingEl;
                 }
@@ -171,6 +171,11 @@ function sendMessage() {
             if (data.status === 'success') {
                 rememberLiveSpeaker(data);
                 setLoadingSpeaker(loadingEl, data.request_id);
+                // Title on acceptance, not on the reply's "done": a session the
+                // user leaves mid-reply stops rendering, and would never be titled.
+                if (titleInfo && !data.inline_reply) {
+                    generateSessionTitle(titleInfo.sid, titleInfo.userMsg, '');
+                }
                 if (data.inline_reply) {
                     // Channel handled synchronously (e.g. /cancel fast-path);
                     // render as a bot bubble and skip SSE entirely.
@@ -178,7 +183,7 @@ function sendMessage() {
                     addBotMessage(data.inline_reply, new Date());
                 } else if (data.stream) {
                     setSendBtnCancelMode(data.request_id);
-                    startSSE(data.request_id, loadingEl, timestamp, titleInfo);
+                    startSSE(data.request_id, loadingEl, timestamp);
                 } else {
                     loadingContainers[data.request_id] = loadingEl;
                 }
@@ -219,7 +224,7 @@ function reloadHistoryView() {
 
 // `resume` ({ el, afterSeq }) picks up a reply already in flight: events up to
 // afterSeq are skipped, and `el`, the bubble of its stored steps, is written on.
-function startSSE(requestId, loadingEl, timestamp, titleInfo, replayItems, resume) {
+function startSSE(requestId, loadingEl, timestamp, replayItems, resume) {
     let botEl = null;
     let stepsEl = null;    // .agent-steps  (thinking summaries + tool indicators)
     let contentEl = null;  // .answer-content (final streaming answer)
@@ -839,12 +844,7 @@ function startSSE(requestId, loadingEl, timestamp, titleInfo, replayItems, resum
 
                 if (typeof maybeAutoOpenArtifact === 'function') maybeAutoOpenArtifact();
 
-                if (titleInfo) {
-                    generateSessionTitle(titleInfo.sid, titleInfo.userMsg, '');
-                    titleInfo = null;
-                } else if (sessionPanelOpen) {
-                    loadSessionList();
-                }
+                if (sessionPanelOpen) loadSessionList();
 
             } else if (item.type === 'voice_attach') {
                 // TTS finished — attach a playable audio element to the

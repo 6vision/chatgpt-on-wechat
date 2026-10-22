@@ -914,7 +914,7 @@ function loadHistory(page, untilSeq) {
                 startSSE(
                     resume.request_id,
                     resumeEl ? null : addLoadingIndicator(),
-                    new Date(), null, null,
+                    new Date(), null,
                     { el: resumeEl, afterSeq: resume.after_seq || 0 }
                 );
             }
