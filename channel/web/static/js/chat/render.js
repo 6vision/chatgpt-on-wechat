@@ -722,10 +722,14 @@ function _triggerManualTts(btn, botEl, text) {
     const icon = btn.querySelector('i');
     const prev = icon ? icon.className : '';
     if (icon) icon.className = 'fas fa-spinner fa-spin';
+    const payload = { text, session_id: sessionId };
+    const rawSeq = botEl.dataset.seq;
+    const messageSeq = rawSeq === undefined || rawSeq === '' ? null : Number(rawSeq);
+    if (Number.isInteger(messageSeq) && messageSeq >= 0) payload.message_seq = messageSeq;
     fetch('/api/voice/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, session_id: sessionId }),
+        body: JSON.stringify(payload),
     })
         .then(r => r.json())
         .then(data => {
