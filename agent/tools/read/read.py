@@ -4,6 +4,7 @@ Supports text files, images (jpg, png, gif, webp), and PDF files
 """
 
 import os
+import shlex
 import stat
 from typing import Dict, Any, Optional
 from pathlib import Path
@@ -323,7 +324,7 @@ class Read(BaseTool):
                 "content": (
                     f"[Line {start_display} is {size}, exceeds "
                     f"{format_size(DEFAULT_MAX_BYTES)} limit. Use bash tool to read: "
-                    f"head -c {DEFAULT_MAX_BYTES} {display_path} | tail -n +{start_display}]"
+                    f"tail -n +{start_display} -- {shlex.quote(expand_path(display_path))} | head -c {DEFAULT_MAX_BYTES}]"
                 ),
                 "total_lines": total_lines,
                 "start_line": start_display,
