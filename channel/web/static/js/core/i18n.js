@@ -2345,8 +2345,12 @@ function installCfgTipPortal() {
         _cfgTipPortalEl.style.left = left + 'px';
         _cfgTipPortalEl.style.top = top + 'px';
     };
+    // Runs on every scroll and pointerdown, so skip the DOM write when already
+    // hidden: a no-op classList.remove still wakes the Tailwind runtime.
     const hideTip = () => {
-        if (_cfgTipPortalEl) _cfgTipPortalEl.classList.remove('show');
+        if (_cfgTipPortalEl && _cfgTipPortalEl.classList.contains('show')) {
+            _cfgTipPortalEl.classList.remove('show');
+        }
     };
 
     // Matches config keys and any element opting into the floating tooltip via

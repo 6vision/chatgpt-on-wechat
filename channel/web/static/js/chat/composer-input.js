@@ -174,8 +174,11 @@ function showSlashMenu(filter) {
 }
 
 function hideSlashMenu() {
-    slashMenu.classList.add('hidden');
-    slashMenu.innerHTML = '';
+    // This runs on every keystroke. Skip DOM writes when already hidden: even a
+    // no-op classList.add rewrites the class attribute, which wakes the Tailwind
+    // runtime's MutationObserver and makes typing lag on long conversations.
+    if (!slashMenu.classList.contains('hidden')) slashMenu.classList.add('hidden');
+    if (slashMenu.firstChild) slashMenu.innerHTML = '';
     slashFiltered = [];
     slashActiveIdx = -1;
     slashLastFilter = '';
