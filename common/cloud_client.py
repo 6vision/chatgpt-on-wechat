@@ -375,6 +375,9 @@ class CloudClient(LinkAIClient):
             return
         logger.info(f"[CloudClient] Loading remote config: {drag_sensitive(config)}")
 
+        if "weixin_proxy" in config:
+            conf()["weixin_proxy"] = str(config.get("weixin_proxy") or "").strip()
+
         action = config.get("action")
         if action in CHANNEL_ACTIONS:
             self._dispatch_channel_action(action, config.get("data", {}))
@@ -724,14 +727,33 @@ class CloudClient(LinkAIClient):
         except Exception:
             return False
 
-    def _apply_instance(self, instance_id: str, channel_type: str, data: dict) -> bool:
+    def _weixin_needs_login(self, instance_id: str, waiting_counts: bool) -> bool:
+        """Whether a running Weixin instance should restart to issue a new QR code.
+
+        An instance whose login attempt has ended (idle) sits there without a
+        code until restarted. One still waiting for a scan only restarts on an
+        explicit request (``waiting_counts``), since a replayed record must not
+        swap out the code a user may be scanning right now.
+        """
+        try:
+            ch = self.channel_mgr.get_channel(instance_id)
+        except Exception:
+            return False
+        login_status = getattr(ch, "login_status", None)
+        if login_status == "idle":
+            return True
+        return waiting_counts and login_status in ("waiting_scan", "scanned")
+
+    def _apply_instance(self, instance_id: str, channel_type: str, data: dict,
+                        restart_waiting_login: bool = False) -> bool:
         """Persist one instance record and start it only when that matters.
 
         Returns True when the instance was (re)started. An identical record whose
         channel is already up is left alone: the control plane replays every
         channel on each login, and a bot must not drop its connection just to be
         told what it already knows. A record that changed, or one whose channel
-        is not running, is started (restarting if needed).
+        is not running, is started (restarting if needed). So is a Weixin
+        instance that is not logged in, see ``_weixin_needs_login``.
         """
         from channel.channel_instances import get_instance, upsert_instance
 
@@ -753,10 +775,17 @@ class CloudClient(LinkAIClient):
             and self._instance_signature(before) == self._instance_signature(inst)
         )
         if unchanged and self._instance_running(instance_id):
-            logger.info(
-                f"[CloudClient] Channel instance '{instance_id}' unchanged and running, skip restart"
-            )
-            return False
+            if channel_type in ("weixin", "wx") and self._weixin_needs_login(
+                    instance_id, restart_waiting_login):
+                logger.info(
+                    f"[CloudClient] Channel instance '{instance_id}' not logged in, "
+                    f"restarting for a new QR code"
+                )
+            else:
+                logger.info(
+                    f"[CloudClient] Channel instance '{instance_id}' unchanged and running, skip restart"
+                )
+                return False
         threading.Thread(
             target=self._do_add_instance, args=(inst,), daemon=True
         ).start()
@@ -776,7 +805,9 @@ class CloudClient(LinkAIClient):
                     target=self._do_remove_channel, args=(instance_id,), daemon=True
                 ).start()
             return
-        self._apply_instance(instance_id, channel_type, data)
+        # An update is the console's "connect" action: a Weixin instance still
+        # waiting on an old code gets a fresh one.
+        self._apply_instance(instance_id, channel_type, data, restart_waiting_login=True)
 
     def _handle_channel_sync(self, data: dict):
         """Reconcile team.json against the control plane's full desired list.

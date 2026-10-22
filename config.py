@@ -235,6 +235,7 @@ available_setting = {
     "weixin_base_url": "https://ilinkai.weixin.qq.com",  # Weixin ilink API base URL
     "weixin_cdn_base_url": "https://novac2c.cdn.weixin.qq.com/c2c",  # CDN base URL
     "weixin_credentials_path": "~/.weixin_cow_credentials.json",  # credentials file path
+    "weixin_proxy": "",  # optional proxy for QR login, for networks that cannot log in directly
     # custom trigger words for chatgpt commands
     "clear_memory_commands": ["#清除记忆"],  # session-reset command; must start with #
     # channel config
