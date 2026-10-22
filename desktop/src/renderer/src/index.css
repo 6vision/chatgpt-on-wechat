@@ -499,6 +499,14 @@ body * {
   }
 }
 
+/* Skip rendering work for off-screen messages so per-frame cost (typing in the
+   composer included) stays flat as a conversation grows. `auto` remembers each
+   row's real height once rendered; the length only estimates unrendered rows. */
+.chat-message-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 400px;
+}
+
 /* ============================================================
    Message navigator
    A column of short dashes on the right edge of the conversation,

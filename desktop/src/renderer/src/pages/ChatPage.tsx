@@ -560,6 +560,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ baseUrl }) => {
                 // can locate and scroll to them on click.
                 <div
                   key={msg.id}
+                  className="chat-message-row"
                   data-user-seq={msg.role === 'user' && msg.userSeq != null ? msg.userSeq : undefined}
                 >
                   <MessageBubble
