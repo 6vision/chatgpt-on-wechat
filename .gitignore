@@ -40,7 +40,7 @@ ref/
 **/.dev.vars
 .cursor/
 local/
-node_modules/
+node_modules
 
 # cow cli
 dist/
