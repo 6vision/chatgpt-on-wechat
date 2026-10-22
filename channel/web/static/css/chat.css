@@ -1148,6 +1148,20 @@
     overflow-anchor: auto;
 }
 
+/* Skip rendering work for off-screen messages. Without this every frame (each
+   keystroke in the composer included) walks the whole conversation, so typing
+   lags in long sessions. `auto` remembers each bubble's real height once it has
+   been rendered; the length is only the estimate for never-rendered ones. */
+#chat-messages > .user-message-group,
+#chat-messages > .bot-message-group {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 400px;
+}
+/* Containment would trap the fixed-position fallback fullscreen inside the bubble. */
+#chat-messages > .bot-message-group:has(.mermaid-fullscreen) {
+    content-visibility: visible;
+}
+
 /* Right edge lines up with the composer card (px-4 gutter, max-w-3xl column). */
 .chat-scroll-to-bottom {
     position: absolute;
