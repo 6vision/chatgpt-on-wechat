@@ -11,6 +11,7 @@ import os
 import threading
 import time
 from typing import Tuple
+from urllib.parse import urlparse
 
 import requests
 
@@ -887,7 +888,8 @@ class WeixinChannel(ChatChannel):
             if getattr(reply, "file_type", "") == "video":
                 self._send_video(reply.content, receiver, context_token)
             else:
-                self._send_file(reply.content, receiver, context_token)
+                self._send_file(reply.content, receiver, context_token,
+                                file_name=getattr(reply, "file_name", ""))
         elif reply.type in (ReplyType.VIDEO, ReplyType.VIDEO_URL):
             self._send_video(reply.content, receiver, context_token)
         elif reply.type == ReplyType.VOICE:
@@ -996,7 +998,8 @@ class WeixinChannel(ChatChannel):
             if downloaded:
                 remove_download(local_path)
 
-    def _send_file(self, file_path_or_url: str, receiver: str, context_token: str):
+    def _send_file(self, file_path_or_url: str, receiver: str, context_token: str,
+                   file_name: str = ""):
         local_path, downloaded = self._resolve_media(file_path_or_url)
         if not local_path:
             self._send_text("[File send failed: file not found]", receiver, context_token)
@@ -1008,7 +1011,7 @@ class WeixinChannel(ChatChannel):
                 context_token=context_token,
                 encrypt_query_param=result["encrypt_query_param"],
                 aes_key_b64=result["aes_key_b64"],
-                file_name=os.path.basename(local_path),
+                file_name=file_name or os.path.basename(local_path),
                 file_size=result["raw_size"],
             )
             self._check_send_response(resp, receiver)
@@ -1058,8 +1061,11 @@ class WeixinChannel(ChatChannel):
                 resp = requests.get(local_path, timeout=60, stream=True)
                 resp.raise_for_status()
                 ct = resp.headers.get("Content-Type", "")
+                url_ext = os.path.splitext(urlparse(local_path).path)[1].lower()
                 ext = ".bin"
-                if "jpeg" in ct or "jpg" in ct:
+                if url_ext and len(url_ext) <= 6:
+                    ext = url_ext
+                elif "jpeg" in ct or "jpg" in ct:
                     ext = ".jpg"
                 elif "png" in ct:
                     ext = ".png"
